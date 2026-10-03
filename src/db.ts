@@ -141,15 +141,23 @@ export class IdbPersistence implements Persistence {
     const storedVersion = parseStoredDataVersion(storedVersionValue);
     const fromVersion = storedVersion ?? LEGACY_DATA_VERSION;
     const migrated = migrateRawData(raw, fromVersion);
-    const data = validateCurrentData(migrated.data);
+    const data = validateCurrentData(migrated.data, '本地数据');
 
-    if (migrated.version !== fromVersion) {
-      await this.writeAll(db, data, migrated.version);
-    } else if (storedVersion === undefined || storedSettings === undefined) {
-      const tx = db.transaction('meta', 'readwrite');
-      if (storedSettings === undefined) await tx.objectStore('meta').put({ ...data.settings }, 'settings');
-      if (storedVersion === undefined) await tx.objectStore('meta').put(DATA_VERSION, 'dataVersion');
-      await tx.done;
+    try {
+      if (migrated.version !== fromVersion) {
+        await this.writeAll(db, data, migrated.version);
+      } else if (storedVersion === undefined || storedSettings === undefined) {
+        const tx = db.transaction('meta', 'readwrite');
+        if (storedSettings === undefined) await tx.objectStore('meta').put({ ...data.settings }, 'settings');
+        if (storedVersion === undefined) await tx.objectStore('meta').put(DATA_VERSION, 'dataVersion');
+        await tx.done;
+      }
+    } catch (error) {
+      // Startup persistence failures such as quota/security errors mean the
+      // browser cannot safely persist this session. Keep migration/version/
+      // validation errors outside this block so they remain actionable.
+      if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error);
+      throw error;
     }
     return data;
   }
@@ -197,21 +205,22 @@ const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 /** 校验备份里的设置：类型、格式、取值范围都对才接受，否则整份备份拒绝 */
-export function parseSettings(v: unknown): Settings {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('备份里的设置格式不对');
+export function parseSettings(v: unknown, source = '备份'): Settings {
+  const at = `${source}里的`;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${at}设置格式不对`);
   const o = v as Record<string, unknown>;
   const s = defaultSettings();
   const str = (k: string, re: RegExp, label: string) => {
     if (o[k] === undefined) return undefined;
-    if (typeof o[k] !== 'string' || !re.test(o[k] as string)) throw new Error(`备份里的${label}格式不对`);
+    if (typeof o[k] !== 'string' || !re.test(o[k] as string)) throw new Error(`${at}${label}格式不对`);
     return o[k] as string;
   };
   s.workStart = str('workStart', HM, '工作开始时间') ?? s.workStart;
   s.workEnd = str('workEnd', HM, '工作结束时间') ?? s.workEnd;
   s.firstDay = str('firstDay', YMD, '起始日期') ?? s.firstDay;
-  if (s.workEnd <= s.workStart) throw new Error('备份里的工作时段不对：结束要晚于开始');
+  if (s.workEnd <= s.workStart) throw new Error(`${at}工作时段不对：结束要晚于开始`);
   if (o.theme !== undefined) {
-    if (o.theme !== 'auto' && o.theme !== 'light' && o.theme !== 'dark') throw new Error('备份里的外观设置不对');
+    if (o.theme !== 'auto' && o.theme !== 'light' && o.theme !== 'dark') throw new Error(`${at}外观设置不对`);
     s.theme = o.theme;
   }
   return s;
@@ -284,10 +293,10 @@ function badField(x: unknown, shape: Shape): string | null {
 }
 
 /** 记录之间的引用：任务、事件归属、规则指向的项目要存在；活跃村落的位置不能重叠 */
-function checkRelations(d: Data) {
+function checkRelations(d: Data, source: string) {
   const projects = new Set(d.projects.map((p) => p.id));
   const fail = (what: string) => {
-    throw new Error(`备份里的数据对不上：${what}`);
+    throw new Error(`${source}里的数据对不上：${what}`);
   };
   for (const c of COLL_NAMES) {
     const key = COLLECTIONS[c];
@@ -308,7 +317,7 @@ function checkRelations(d: Data) {
   }
 }
 
-function validateCurrentData(raw: RawData): Data {
+function validateCurrentData(raw: RawData, source: string): Data {
   const d = emptyData();
   for (const c of COLL_NAMES) {
     const v = raw[c];
@@ -319,8 +328,8 @@ function validateCurrentData(raw: RawData): Data {
     });
     (d as unknown as Record<Coll, unknown[]>)[c] = v;
   }
-  d.settings = parseSettings(raw.settings);
-  checkRelations(d);
+  d.settings = parseSettings(raw.settings, source);
+  checkRelations(d, source);
   return d;
 }
 
@@ -356,5 +365,5 @@ export function parseBackup(text: string): Data {
   if ((o.version as number) > DATA_VERSION) throw new Error('备份来自更新的版本，请先升级屿志');
 
   const migrated = migrateRawData(rawBackupData(o), o.version as number);
-  return validateCurrentData(migrated.data);
+  return validateCurrentData(migrated.data, '备份');
 }
