@@ -2,7 +2,7 @@ import type { Data, ISODate, LifeEntry, OperationEvent, Project, SettlementEntry
 import { addDays } from '../lib/date';
 import { POSTPONE_PENALTY_AT, STAGE_NAMES, STAGE_START, TRIM_TO_NEGLECT, type Stage } from './config';
 import { dayStatusFn, type DayStatus } from './days';
-import { taskState, taskStates, type TaskView } from './read-model';
+import { taskStates, taskStatesAtCuts } from './read-model';
 
 export interface VillageState {
   neglect: number;
@@ -92,7 +92,7 @@ export function computeVillage(
       resetToday = true;
     }
 
-    const activeRows: SettlementEntry[] = [];
+    let activeRows: SettlementEntry[] = [];
     let progressApplied = false;
     for (const fact of orderedProjectDayFacts(rows, operations)) {
       const event = fact.operation;
@@ -104,11 +104,15 @@ export function computeVillage(
           neglect = 0;
           sinceProgress = 0;
           resetToday = true;
+          progressApplied = false;
+          activeRows = [];
         } else if (event.kind === 'project-trimmed') {
           active = true;
           neglect = TRIM_TO_NEGLECT;
           sinceProgress = 0;
           resetToday = true;
+          progressApplied = false;
+          activeRows = [];
         } else if (event.kind === 'project-created') {
           active = true;
         }
@@ -396,7 +400,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
       let factBaseline = active ? stageWithPenalty(neglect, heavy) : undefined;
       let factTransition: StageTransition | undefined;
       let factTransitionSeq: number | undefined;
-      const activeRows: SettlementEntry[] = [];
+      let activeRows: SettlementEntry[] = [];
       let progressApplied = false;
       const heavyChanges = heavyTimeline.get(project.id)?.get(date) ?? [];
       let heavyIndex = 0;
@@ -452,6 +456,8 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
             neglect = 0;
             heavy = false;
             resetToday = true;
+            progressApplied = false;
+            activeRows = [];
             factBaseline = stageWithPenalty(neglect, heavy);
             visibleStage = factBaseline;
           } else if (event.kind === 'project-trimmed') {
@@ -459,6 +465,8 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
             neglect = TRIM_TO_NEGLECT;
             heavy = false;
             resetToday = true;
+            progressApplied = false;
+            activeRows = [];
             factBaseline = stageWithPenalty(neglect, heavy);
             visibleStage = factBaseline;
           } else if (event.kind === 'project-created') {

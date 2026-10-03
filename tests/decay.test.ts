@@ -318,6 +318,25 @@ describe('阶段历史重放', () => {
     expect(closeIndex).toBeGreaterThan(stageIndex);
   });
 
+  it('同日 trim 前后的推进属于不同 segment，trim 后推进仍能恢复', () => {
+    const h = makeStore('2026-09-20', '2026-09-01');
+    const p = createProject(h.store, '分段恢复');
+    const before = createTask(h.store, { title: 'trim 前推进', projectId: p.id, scheduledFor: h.today });
+    const after = createTask(h.store, { title: 'trim 后推进', projectId: p.id, scheduledFor: h.today });
+
+    markTaskDone(h.store, before.id);
+    trimProject(h.store, p.id, []);
+    expect(h.store.villages().get(p.id)!.neglect).toBe(7);
+
+    markTaskDone(h.store, after.id);
+    expect(h.store.villages().get(p.id)!.neglect).toBe(0);
+
+    const transitions = stageTransitions(h.store.data, h.today).filter(
+      (row) => row.projectId === p.id && row.date === h.today && row.source === 'facts',
+    );
+    expect(transitions.some((row) => row.to === 0)).toBe(true);
+  });
+
   it('同日 trim 与 settlement 按 seq 决定最终衰败状态', () => {
     const beforeTrim = makeStore('2026-09-20', '2026-09-01');
     const p1 = createProject(beforeTrim.store, '先推进');
