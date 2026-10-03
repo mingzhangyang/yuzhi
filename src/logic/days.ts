@@ -33,26 +33,28 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   for (const e of data.entries) if (e.date === date) entries.set(itemKey(e.itemType, e.itemId), e);
   const out: SettleItem[] = [];
   const seen = new Set<string>();
-  const tasks = taskStates(data);
+  const tasks = taskStates(data, date);
   const taskById = new Map<string, Task>(tasks.map((t) => [t.id, t]));
 
   for (const ev of eventsOn(data.events, date)) {
     const key = itemKey('event', ev.id);
     seen.add(key);
-    out.push({ key, type: 'event', id: ev.id, title: ev.title, projectId: ev.projectId, start: ev.start, end: ev.end, entry: entries.get(key) });
+    const entry = entries.get(key);
+    out.push({ key, type: 'event', id: ev.id, title: entry?.title ?? ev.title, projectId: entry?.projectId ?? ev.projectId, start: ev.start, end: ev.end, entry });
   }
   for (const t of tasks) {
     const key = itemKey('task', t.id);
     if (t.status === 'open' && t.scheduledFor === date && t.projectId) {
       seen.add(key);
-      out.push({ key, type: 'task', id: t.id, title: t.title, projectId: t.projectId, entry: entries.get(key) });
+      const entry = entries.get(key);
+      out.push({ key, type: 'task', id: t.id, title: entry?.title ?? t.title, projectId: entry?.projectId ?? t.projectId, entry });
     }
   }
   // 已结算过、但任务已经改期或完成的条目，也保留在这一天
   for (const [key, e] of entries) {
     if (seen.has(key)) continue;
     const t = e.itemType === 'task' ? taskById.get(e.itemId) : undefined;
-    out.push({ key, type: e.itemType, id: e.itemId, title: t?.title ?? e.title, projectId: t?.projectId ?? e.projectId, entry: e });
+    out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: e.projectId ?? t?.projectId, entry: e });
   }
   return out;
 }

@@ -1,6 +1,6 @@
-import type { Data, ISODate, LifeEntry, Project, SettlementEntry } from '../types';
+import type { Data, ISODate, LifeEntry, OperationEvent, Project, SettlementEntry } from '../types';
 import { addDays, dateOfStamp } from '../lib/date';
-import { POSTPONE_PENALTY_AT, STAGE_NAMES, STAGE_START, type Stage } from './config';
+import { POSTPONE_PENALTY_AT, STAGE_NAMES, STAGE_START, TRIM_TO_NEGLECT, type Stage } from './config';
 import { dayStatusFn, type DayStatus } from './days';
 import { taskStates } from './read-model';
 
@@ -43,6 +43,15 @@ function stageWithPenalty(neglect: number, heavy: boolean): Stage {
   return Math.min(3, stageOfNeglect(neglect) + (heavy ? 1 : 0)) as Stage;
 }
 
+type ProjectDayFact = { seq: number; operation?: OperationEvent; entry?: SettlementEntry };
+
+function orderedProjectDayFacts(entries: SettlementEntry[], operations: OperationEvent[]): ProjectDayFact[] {
+  return [
+    ...entries.map((entry) => ({ seq: entry.seq, entry })),
+    ...operations.map((operation) => ({ seq: operation.seq, operation })),
+  ].sort((a, b) => a.seq - b.seq);
+}
+
 /**
  * Replay one project to a date. Pending/unrecorded days are inert unless an
  * explicit progress fact exists. Today is included so markTaskDone() can
@@ -55,6 +64,7 @@ export function computeVillage(
   statusOf: (d: ISODate) => DayStatus,
   hasHeavyPostpone: boolean,
   today: ISODate,
+  operationsByDate: Map<ISODate, OperationEvent[]> = new Map(),
 ): VillageState {
   const resets = (project.resets ?? []).filter((reset) => reset.date <= today).slice().sort((a, b) => a.date.localeCompare(b.date));
   let neglect = 0;
@@ -64,17 +74,63 @@ export function computeVillage(
     start = last.date;
     neglect = last.neglect;
   }
+
+  let active = true;
   let sinceProgress = 0;
   for (let d = start; d <= today; d = addDays(d, 1)) {
     const st = statusOf(d);
-    const rows = entriesByDate.get(d) ?? [];
-    const eff = rows.length ? dayEffect(rows) : 'idle';
-    if (d === today && st === 'empty' && rows.length === 0) continue;
-    if ((st === 'pending' || st === 'unrecorded') && eff !== 'progress') continue;
-    if (eff === 'progress') {
-      neglect = recoverOne(neglect);
+    const rows = (entriesByDate.get(d) ?? []).slice().sort((a, b) => a.seq - b.seq);
+    const operations = operationsByDate.get(d) ?? [];
+    const hasResetOperation = operations.some((event) => event.kind === 'project-restarted' || event.kind === 'project-trimmed');
+    const legacyResets = hasResetOperation ? [] : resets.filter((reset) => reset.date === d);
+    let resetToday = false;
+    for (const reset of legacyResets) {
+      neglect = reset.neglect;
       sinceProgress = 0;
-    } else if (eff === 'idle' && d !== start) {
+      resetToday = true;
+    }
+
+    const activeRows: SettlementEntry[] = [];
+    let progressApplied = false;
+    for (const fact of orderedProjectDayFacts(rows, operations)) {
+      const event = fact.operation;
+      if (event) {
+        if (event.kind === 'project-closed' || event.kind === 'project-completed') {
+          active = false;
+        } else if (event.kind === 'project-restarted') {
+          active = true;
+          neglect = 0;
+          sinceProgress = 0;
+          resetToday = true;
+        } else if (event.kind === 'project-trimmed') {
+          active = true;
+          neglect = TRIM_TO_NEGLECT;
+          sinceProgress = 0;
+          resetToday = true;
+        } else if (event.kind === 'project-created') {
+          active = true;
+        }
+        continue;
+      }
+
+      const entry = fact.entry!;
+      if (!active) continue;
+      activeRows.push(entry);
+      if (!progressApplied && (entry.outcome === 'done' || entry.outcome === 'partial')) {
+        neglect = recoverOne(neglect);
+        sinceProgress = 0;
+        progressApplied = true;
+      }
+    }
+
+    if (!operations.length && (project.doneAt === d || project.closedAt === d)) active = false;
+    if (!active) continue;
+
+    const eff = activeRows.length ? dayEffect(activeRows) : 'idle';
+    if (progressApplied) continue;
+    if (d === today && st === 'empty' && activeRows.length === 0) continue;
+    if ((st === 'pending' || st === 'unrecorded') && eff !== 'progress') continue;
+    if (eff === 'idle' && d !== project.createdAt && !resetToday) {
       neglect += 1;
       sinceProgress += 1;
     }
@@ -96,13 +152,14 @@ export function computeAllVillages(data: Data, today: ISODate): Map<string, Vill
     else days.set(entry.date, [entry]);
   }
   const tasks = taskStates(data, today);
+  const operations = projectOperations(data);
   const out = new Map<string, VillageState>();
   for (const project of data.projects) {
     if (project.status !== 'active') continue;
     const heavy = tasks.some(
       (task) => task.projectId === project.id && task.status === 'open' && task.postponeCount >= POSTPONE_PENALTY_AT,
     );
-    out.set(project.id, computeVillage(project, byProject.get(project.id) ?? new Map(), statusOf, heavy, today));
+    out.set(project.id, computeVillage(project, byProject.get(project.id) ?? new Map(), statusOf, heavy, today, operations.get(project.id) ?? new Map()));
   }
   return out;
 }
@@ -131,7 +188,7 @@ function projectOperations(data: Data): Map<string, Map<ISODate, typeof data.ope
   const out = new Map<string, Map<ISODate, typeof data.operations>>();
   for (const event of data.operations) {
     if (!event.projectId) continue;
-    if (!['project-created', 'project-restarted', 'project-closed', 'project-completed'].includes(event.kind)) continue;
+    if (!['project-created', 'project-restarted', 'project-trimmed', 'project-closed', 'project-completed'].includes(event.kind)) continue;
     let days = out.get(event.projectId);
     if (!days) out.set(event.projectId, (days = new Map()));
     const rows = days.get(event.date);
@@ -236,94 +293,143 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
     let visibleStage: Stage | undefined = 0;
 
     for (let date = project.createdAt; date <= today; date = addDays(date, 1)) {
-      const activeStart = active;
-      const startStage = stageWithPenalty(neglect, heavy);
-      if (activeStart) {
-        if (visibleStage === undefined) visibleStage = startStage;
-        else if (startStage !== visibleStage) {
+      const dayStartStage = stageWithPenalty(neglect, heavy);
+      if (active) {
+        if (visibleStage === undefined) visibleStage = dayStartStage;
+        else if (dayStartStage !== visibleStage) {
           out.push({
             id: `stage-time|${date}|${project.id}`,
             date,
             projectId: project.id,
             from: visibleStage,
-            to: startStage,
+            to: dayStartStage,
             source: 'time',
           });
-          visibleStage = startStage;
+          visibleStage = dayStartStage;
         }
       }
 
-      for (const event of opDays.get(date) ?? []) {
-        if (event.kind === 'project-closed' || event.kind === 'project-completed') active = false;
-        else if (event.kind === 'project-created' || event.kind === 'project-restarted') active = true;
-      }
-      if (!opDays.get(date)?.length) {
-        if (project.doneAt === date || project.closedAt === date) active = false;
+      const rows = (projectDays.get(date) ?? []).slice().sort((a, b) => a.seq - b.seq);
+      const operations = opDays.get(date) ?? [];
+      const hasResetOperation = operations.some((event) => event.kind === 'project-restarted' || event.kind === 'project-trimmed');
+      const legacyResets = hasResetOperation ? [] : (resets.get(date) ?? []);
+      let resetToday = false;
+      for (const reset of legacyResets) {
+        if (!active) continue;
+        neglect = reset.neglect;
+        resetToday = true;
+        visibleStage = stageWithPenalty(neglect, heavy);
       }
 
-      const resetRows = resets.get(date) ?? [];
-      if (active) {
-        for (const reset of resetRows) {
-          neglect = reset.neglect;
+      let factBaseline = active ? stageWithPenalty(neglect, heavy) : undefined;
+      let factTransition: StageTransition | undefined;
+      const activeRows: SettlementEntry[] = [];
+      let progressApplied = false;
+
+      const captureBeforeDeactivate = () => {
+        if (!active || factBaseline === undefined) return;
+        const current = stageWithPenalty(neglect, heavy);
+        if (current !== factBaseline) {
+          factTransition = {
+            id: `stage|${date}|${project.id}`,
+            date,
+            projectId: project.id,
+            from: factBaseline,
+            to: current,
+            source: 'facts',
+          };
         }
+      };
+
+      for (const fact of orderedProjectDayFacts(rows, operations)) {
+        const event = fact.operation;
+        if (event) {
+          if (event.kind === 'project-closed' || event.kind === 'project-completed') {
+            captureBeforeDeactivate();
+            active = false;
+            visibleStage = undefined;
+            factBaseline = undefined;
+          } else if (event.kind === 'project-restarted') {
+            active = true;
+            neglect = 0;
+            resetToday = true;
+            factBaseline = stageWithPenalty(neglect, heavy);
+            visibleStage = factBaseline;
+          } else if (event.kind === 'project-trimmed') {
+            active = true;
+            neglect = TRIM_TO_NEGLECT;
+            resetToday = true;
+            factBaseline = stageWithPenalty(neglect, heavy);
+            visibleStage = factBaseline;
+          } else if (event.kind === 'project-created') {
+            active = true;
+            factBaseline = stageWithPenalty(neglect, heavy);
+            visibleStage = factBaseline;
+          }
+          continue;
+        }
+
+        const entry = fact.entry!;
+        if (!active) continue;
+        activeRows.push(entry);
+        if (!progressApplied && (entry.outcome === 'done' || entry.outcome === 'partial')) {
+          neglect = recoverOne(neglect);
+          progressApplied = true;
+        }
+      }
+
+      if (!operations.length && (project.doneAt === date || project.closedAt === date)) {
+        captureBeforeDeactivate();
+        active = false;
+        visibleStage = undefined;
+        factBaseline = undefined;
       }
 
       const previousHeavy = heavy;
       if (changedDates.has(date)) heavy = heavyAt(project.id, date);
 
-      if (!active) {
-        visibleStage = undefined;
-        continue;
-      }
-
-      const rows = projectDays.get(date) ?? [];
-      const status = statusOf(date);
-      const effect = rows.length ? dayEffect(rows) : 'idle';
-      const originDay = date === project.createdAt || resetRows.length > 0;
-      let appliedEffect = false;
-      if (!(date === today && status === 'empty' && rows.length === 0)) {
-        if (!((status === 'pending' || status === 'unrecorded') && effect !== 'progress')) {
-          if (effect === 'progress') {
-            neglect = recoverOne(neglect);
-            appliedEffect = true;
-          } else if (effect === 'idle' && !originDay) {
-            neglect += 1;
-            appliedEffect = true;
+      if (active) {
+        const effect = activeRows.length ? dayEffect(activeRows) : 'idle';
+        let appliedIdle = false;
+        if (!progressApplied && !(date === today && statusOf(date) === 'empty' && activeRows.length === 0)) {
+          const status = statusOf(date);
+          if (!((status === 'pending' || status === 'unrecorded') && effect !== 'progress')) {
+            if (effect === 'idle' && date !== project.createdAt && !resetToday) {
+              neglect += 1;
+              appliedIdle = true;
+            }
           }
         }
-      }
 
-      const endStage = stageWithPenalty(neglect, heavy);
-      if (!activeStart) {
-        // Reopen/recreate is already narrated by its operation fact.
-        visibleStage = endStage;
-        continue;
-      }
-
-      if (endStage !== startStage) {
-        const pureTime =
-          appliedEffect &&
-          effect === 'idle' &&
-          status === 'empty' &&
-          rows.length === 0 &&
-          resetRows.length === 0 &&
-          previousHeavy === heavy;
-        if (!pureTime) {
-          out.push({
-            id: `stage|${date}|${project.id}`,
-            date,
-            projectId: project.id,
-            from: startStage,
-            to: endStage,
-            source: 'facts',
-          });
+        const endStage = stageWithPenalty(neglect, heavy);
+        if (factBaseline === undefined) {
+          visibleStage = endStage;
+        } else if (endStage !== factBaseline) {
+          const pureTime =
+            appliedIdle &&
+            effect === 'idle' &&
+            statusOf(date) === 'empty' &&
+            activeRows.length === 0 &&
+            !resetToday &&
+            previousHeavy === heavy;
+          if (!pureTime) {
+            factTransition = {
+              id: `stage|${date}|${project.id}`,
+              date,
+              projectId: project.id,
+              from: factBaseline,
+              to: endStage,
+              source: 'facts',
+            };
+            visibleStage = endStage;
+          }
+          // Pure passage changes remain unobserved until the next day start.
+        } else {
           visibleStage = endStage;
         }
-        // Pure passage changes are intentionally left unobserved until the
-        // next day start, where they become stage-time transitions.
-      } else {
-        visibleStage = endStage;
       }
+
+      if (factTransition) out.push(factTransition);
     }
   }
   return out;

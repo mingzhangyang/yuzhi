@@ -175,7 +175,7 @@ describe('阶段历史重放', () => {
     expect(h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.date)).toEqual(['2026-09-30']);
   });
 
-  it('改判历史结算后 refreshStages 删除已失效的派生阶段行', () => {
+  it('改判历史结算后 chronicle 保留旧叙述，只追加新的缺失边界', () => {
     const h = makeStore('2026-09-01', '2026-09-01');
     const p = createProject(h.store, '会恢复的项目');
     h.setToday('2026-09-08');
@@ -185,25 +185,57 @@ describe('阶段历史重放', () => {
 
     h.setToday('2026-10-01');
     refreshStages(h.store);
-    const beforeIds = h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.id);
-    expect(beforeIds.length).toBeGreaterThan(0);
+    const before = h.store.data.chronicle
+      .filter((line) => line.id.startsWith('stage|'))
+      .map((line) => ({ ...line }));
+    expect(before.length).toBeGreaterThan(0);
 
     h.setToday('2026-09-08');
     settleDay(h.store, h.today, new Map([[key, { outcome: 'done' }]]));
     h.setToday('2026-10-01');
     refreshStages(h.store);
 
-    const expectedIds = stageTransitions(h.store.data, h.today)
+    for (const oldLine of before) {
+      expect(h.store.data.chronicle.find((line) => line.id === oldLine.id)).toEqual(oldLine);
+    }
+    const actualIds = new Set(h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.id));
+    const currentIds = stageTransitions(h.store.data, h.today)
       .filter((transition) => transition.source === 'time')
-      .map((transition) => `stage|${transition.date}|${transition.projectId}`)
-      .sort();
-    const actualIds = h.store.data.chronicle
-      .filter((line) => line.id.startsWith('stage|'))
-      .map((line) => line.id)
-      .sort();
+      .map((transition) => `stage|${transition.date}|${transition.projectId}`);
+    for (const id of currentIds) expect(actualIds.has(id)).toBe(true);
+  });
 
-    expect(actualIds).toEqual(expectedIds);
-    expect(beforeIds.some((id) => !actualIds.includes(id))).toBe(true);
+  it('同日 settlement 在 project close 之前时先应用推进，再关闭项目', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '顺序项目');
+    h.setToday('2026-09-20');
+    const t = createTask(h.store, { title: '收尾推进', projectId: p.id, scheduledFor: h.today });
+    settleDay(h.store, h.today, new Map([[itemKey('task', t.id), { outcome: 'done' }]]));
+    const settlementSeq = h.store.data.entries.find((entry) => entry.itemId === t.id)!.seq;
+    closeProject(h.store, p.id, '当天关闭');
+    const closeSeq = h.store.data.operations.find((event) => event.kind === 'project-closed' && event.projectId === p.id)!.seq;
+    expect(settlementSeq).toBeLessThan(closeSeq);
+
+    const transition = stageTransitions(h.store.data, h.today).find(
+      (row) => row.source === 'facts' && row.projectId === p.id && row.date === h.today,
+    );
+    expect(transition).toMatchObject({ from: 2, to: 1 });
+  });
+
+  it('同日 trim 与 settlement 按 seq 决定最终衰败状态', () => {
+    const beforeTrim = makeStore('2026-09-20', '2026-09-01');
+    const p1 = createProject(beforeTrim.store, '先推进');
+    const t1 = createTask(beforeTrim.store, { title: '推进', projectId: p1.id, scheduledFor: beforeTrim.today });
+    settleDay(beforeTrim.store, beforeTrim.today, new Map([[itemKey('task', t1.id), { outcome: 'done' }]]));
+    trimProject(beforeTrim.store, p1.id, []);
+    expect(beforeTrim.store.villages().get(p1.id)!.neglect).toBe(7);
+
+    const afterTrim = makeStore('2026-09-20', '2026-09-01');
+    const p2 = createProject(afterTrim.store, '先裁剪');
+    const t2 = createTask(afterTrim.store, { title: '推进', projectId: p2.id, scheduledFor: afterTrim.today });
+    trimProject(afterTrim.store, p2.id, []);
+    settleDay(afterTrim.store, afterTrim.today, new Map([[itemKey('task', t2.id), { outcome: 'done' }]]));
+    expect(afterTrim.store.villages().get(p2.id)!.neglect).toBe(0);
   });
 
   it('历史 pending 按当时任务状态重建，不把前一天误算成荒置并制造假恢复', () => {

@@ -368,35 +368,13 @@ export function refreshStages(store: Store): StageChange[] {
     .filter((transition) => transition.source === 'time')
     .filter((transition) => !legacyBoundary || transition.date > legacyBoundary)
     .sort((a, b) => a.date.localeCompare(b.date) || a.projectId.localeCompare(b.projectId));
-  const expected = new Map(
-    transitions.map((transition) => [`stage|${transition.date}|${transition.projectId}`, transition] as const),
-  );
 
-  // stage|... chronicle rows are managed projections. Rejudging an earlier
-  // settlement can move or remove a time transition, so reconcile the whole
-  // managed set instead of treating existing rows as append-only.
-  for (const line of store.data.chronicle.filter((row) => row.id.startsWith('stage|'))) {
-    const transition = expected.get(line.id);
-    if (!transition) {
-      store.del('chronicle', line.id);
-      continue;
-    }
-    const project = store.project(transition.projectId);
-    if (!project) {
-      store.del('chronicle', line.id);
-      continue;
-    }
-    const change: StageChange = { project, from: transition.from, to: transition.to };
-    const text = stageChangeText(change) + '。';
-    const kind: ChronicleKind = transition.to < transition.from ? 'recover' : 'quiet';
-    if (line.date !== transition.date || line.text !== text || line.kind !== kind) {
-      changes.push(change);
-      chronicle(store, transition.date, text, kind, line.id);
-    }
-    expected.delete(line.id);
-  }
-
-  for (const [id, transition] of expected) {
+  // Chronicle is a frozen narrative: never rewrite or delete a stage sentence
+  // that was already told. Dynamic stage history lives in stageTransitions();
+  // here we only append genuinely missed time boundaries.
+  for (const transition of transitions) {
+    const id = `stage|${transition.date}|${transition.projectId}`;
+    if (store.data.chronicle.some((line) => line.id === id)) continue;
     const project = store.project(transition.projectId);
     if (!project) continue;
     const change: StageChange = { project, from: transition.from, to: transition.to };

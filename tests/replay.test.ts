@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closeProject, createProject, createTask, rescheduleTask, restartProject, settleDay } from '../src/actions';
+import { closeProject, createProject, createTask, moveTask, rescheduleTask, restartProject, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
 import { taskStates } from '../src/logic/read-model';
 import { makeStore } from './helpers';
@@ -12,6 +12,26 @@ describe('Phase 2 fact replay', () => {
     const futureTask = createTask(h.store, { title: '后来补录', projectId: p.id, scheduledFor: '2026-09-02' });
 
     expect(taskStates(h.store.data, '2026-09-02').some((task) => task.id === futureTask.id)).toBe(false);
+  });
+
+  it('重开旧结算时保留 settlement 当时的项目归属，即使同日后来搬村', () => {
+    const h = makeStore('2026-10-01');
+    const p1 = createProject(h.store, '原项目');
+    const p2 = createProject(h.store, '新项目');
+    const t = createTask(h.store, { title: '历史任务', projectId: p1.id, scheduledFor: h.today });
+    const key = itemKey('task', t.id);
+
+    settleDay(h.store, h.today, new Map([[key, { outcome: 'skipped', reason: 'no_energy' }]]));
+    const original = h.store.data.entries.find((entry) => entry.itemId === t.id)!;
+    expect(original.projectId).toBe(p1.id);
+
+    moveTask(h.store, t.id, p2.id);
+    expect(h.store.task(t.id)?.projectId).toBe(p2.id);
+
+    settleDay(h.store, h.today, new Map([[key, { outcome: 'done' }]]));
+    const corrected = h.store.data.entries.find((entry) => entry.itemId === t.id)!;
+    expect(corrected.projectId).toBe(p1.id);
+    expect(corrected.seq).toBe(original.seq);
   });
 
   it('改判旧结算不会覆盖后来手动改期', () => {
