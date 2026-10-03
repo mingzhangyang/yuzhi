@@ -247,6 +247,28 @@ describe('阶段历史重放', () => {
     expect(transition).toMatchObject({ from: 2, to: 1 });
   });
 
+  it('同日第三次推迟后关闭项目时保留关闭前的 heavy 阶段变化', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, 'heavy 瞬态');
+    const t = createTask(h.store, { title: '拖延任务', projectId: p.id, scheduledFor: h.today });
+
+    for (let k = 0; k < 2; k++) {
+      const date = h.store.task(t.id)!.scheduledFor!;
+      h.setToday(date);
+      settleDay(h.store, date, new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+      h.setToday(h.store.task(t.id)!.scheduledFor!);
+    }
+
+    const date = h.today;
+    settleDay(h.store, date, new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+    const thirdSeq = h.store.data.entries.find((entry) => entry.itemId === t.id && entry.date === date)!.seq;
+    closeProject(h.store, p.id, '当天关闭');
+
+    expect(stageTransitions(h.store.data, date).some(
+      (row) => row.projectId === p.id && row.date === date && row.source === 'facts' && row.to === 1 && row.factSeq === thirdSeq,
+    )).toBe(true);
+  });
+
   it('同日先移除 heavy penalty 再关闭项目时保留关闭前的阶段恢复', () => {
     const h = makeStore('2026-09-01', '2026-09-01');
     const p = createProject(h.store, 'heavy 顺序');

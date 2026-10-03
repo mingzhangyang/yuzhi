@@ -280,9 +280,12 @@ export class SettleSheet {
   private commit() {
     const date = this.date;
     const d = this.draft();
-    // 拉进来、并且确实给了决定的任务，到提交时才挪到这一天
+    // Preserve the rendered pulled items before pullIntoDay writes a
+    // today-dated reschedule. Historical itemsForDay(date) intentionally
+    // cannot see that future-semantic operation.
+    const pulledItems = this.items().filter((item) => this.pulled.get(date)?.has(item.id) && d.has(item.key));
     for (const id of this.pulled.get(date) ?? []) if (d.has(`task|${id}`)) A.pullIntoDay(this.store, id, date);
-    const text = A.settleDay(this.store, date, d);
+    const text = A.settleDay(this.store, date, d, pulledItems);
     this.drafts.delete(date);
     this.pulled.delete(date);
     toast(text);

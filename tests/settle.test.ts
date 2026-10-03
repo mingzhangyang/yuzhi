@@ -89,6 +89,23 @@ describe('晚间结算', () => {
     expect(pendingDays(h.store.data, h.today)).not.toContain('2026-09-04');
   });
 
+  it('补结算旧日期时保留临时拉入任务的决定', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '补录');
+    const t = createTask(h.store, { title: '额外完成', projectId: p.id, scheduledFor: '2026-09-05' });
+    h.setToday('2026-09-10');
+
+    const item = { key: itemKey('task', t.id), type: 'task' as const, id: t.id, title: t.title, projectId: p.id };
+    const decisions = new Map([[item.key, { outcome: 'done' as const }]]);
+    const text = settleDay(h.store, '2026-09-02', decisions, [item]);
+
+    expect(h.store.data.entries.find((entry) => entry.id === `2026-09-02|task|${t.id}`)).toMatchObject({
+      outcome: 'done',
+      projectId: p.id,
+    });
+    expect(text).toContain('推进了 1 件事');
+  });
+
   it('结算之外直接记下做完', () => {
     const h = makeStore();
     const p = createProject(h.store, 'P');

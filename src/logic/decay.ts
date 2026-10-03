@@ -258,115 +258,96 @@ interface HeavyProjectChange {
   factSeq?: number;
 }
 
-function heavyProject(state: TaskView | undefined): string | undefined {
-  return state?.status === 'open' && state.projectId && state.postponeCount >= POSTPONE_PENALTY_AT
-    ? state.projectId
-    : undefined;
-}
+/**
+ * Build heavy-membership transitions at fact-sequence granularity. Semantic
+ * date controls eligibility; seq controls precedence within the eligible set.
+ * Sampling only at day end loses transient heavy states before a same-day
+ * restart/close, so each relevant fact cut is replayed independently.
+ */
+function buildHeavyTimeline(data: Data, today: ISODate): Map<string, Map<ISODate, HeavyProjectChange[]>> {
+  const taskById = new Map(data.tasks.map((task) => [task.id, task] as const));
+  const relevantFacts = new Map<string, Map<ISODate, number[]>>();
 
-function heavyCauseSeq(
-  data: Data,
-  taskId: string,
-  date: ISODate,
-  before: TaskView | undefined,
-  after: TaskView,
-): number | undefined {
-  const candidates: number[] = [];
+  const addCut = (taskId: string, date: ISODate, seq: number) => {
+    const task = taskById.get(taskId);
+    if (!task || date < task.createdAt || date > today) return;
+    let byDate = relevantFacts.get(taskId);
+    if (!byDate) relevantFacts.set(taskId, (byDate = new Map()));
+    let seqs = byDate.get(date);
+    if (!seqs) byDate.set(date, (seqs = []));
+    seqs.push(seq);
+  };
+
   for (const entry of data.entries) {
-    if (entry.itemType === 'task' && entry.itemId === taskId && entry.date === date) candidates.push(entry.seq);
+    if (entry.itemType === 'task') addCut(entry.itemId, entry.date, entry.seq);
   }
   for (const event of data.operations) {
-    if (event.date !== date) continue;
-    if (event.taskId === taskId && HEAVY_TASK_KINDS.has(event.kind)) {
-      candidates.push(event.seq);
-      continue;
+    if (event.taskId && HEAVY_TASK_KINDS.has(event.kind)) addCut(event.taskId, event.date, event.seq);
+    if (HEAVY_PROJECT_KINDS.has(event.kind) && event.projectId) {
+      for (const task of data.tasks) if (task.createdAt <= event.date) addCut(task.id, event.date, event.seq);
     }
-    if (
-      HEAVY_PROJECT_KINDS.has(event.kind) &&
-      event.projectId &&
-      (event.projectId === before?.projectId || event.projectId === after.projectId)
-    ) candidates.push(event.seq);
   }
-  return candidates.length ? Math.max(...candidates) : undefined;
-}
 
-/**
- * Build only task-heavy membership changes instead of replaying every task for
- * every timeline date. Each task is evaluated at its own fact dates plus the
- * relatively rare project-wide reset/close dates, using a task-local fact
- * slice so taskState does not repeatedly scan unrelated task history.
- */
-function buildHeavyTimeline(data: Data, today: ISODate): Map<string, Map<ISODate, HeavyProjectChange>> {
-  const projectDates = new Set<ISODate>();
-  for (const event of data.operations) if (HEAVY_PROJECT_KINDS.has(event.kind)) projectDates.add(event.date);
-
-  const changesByDate = new Map<ISODate, HeavyMembershipChange[]>();
+  const membershipChanges: Array<{ date: ISODate; seq: number; taskId: string; fromProjectId?: string; toProjectId?: string }> = [];
   for (const task of data.tasks) {
     if (task.createdAt > today) continue;
     const ownEntries = data.entries.filter((entry) => entry.itemType === 'task' && entry.itemId === task.id);
     const ownOperations = data.operations.filter(
       (event) => event.taskId === task.id || HEAVY_PROJECT_KINDS.has(event.kind),
     );
-    const taskData: Data = { ...data, tasks: [task], entries: ownEntries, operations: ownOperations };
-    const dates = new Set<ISODate>([task.createdAt]);
-    for (const entry of ownEntries) dates.add(entry.date);
-    for (const event of ownOperations) {
-      if (event.taskId === task.id && HEAVY_TASK_KINDS.has(event.kind)) dates.add(event.date);
-    }
-    for (const date of projectDates) if (date >= task.createdAt) dates.add(date);
-
-    let previous: TaskView | undefined;
     let previousProject: string | undefined;
-    for (const date of [...dates].filter((value) => value <= today).sort()) {
-      const current = taskState(taskData, task, date);
-      const currentProject = heavyProject(current);
-      if (currentProject !== previousProject) {
-        let changes = changesByDate.get(date);
-        if (!changes) changesByDate.set(date, (changes = []));
-        changes.push({
-          date,
-          taskId: task.id,
-          fromProjectId: previousProject,
-          toProjectId: currentProject,
-          factSeq: heavyCauseSeq(taskData, task.id, date, previous, current),
-        });
+
+    const cuts = relevantFacts.get(task.id) ?? new Map();
+    for (const date of [...cuts.keys()].sort()) {
+      const seqs = [...new Set(cuts.get(date)!)].sort((a, b) => a - b);
+      for (const seq of seqs) {
+        const taskData: Data = {
+          ...data,
+          tasks: [task],
+          entries: ownEntries.filter((entry) => entry.date < date || (entry.date === date && entry.seq <= seq)),
+          operations: ownOperations.filter((event) => event.date < date || (event.date === date && event.seq <= seq)),
+        };
+        const current = taskState(taskData, task, date);
+        const currentProject = current.status === 'open' && current.projectId && current.postponeCount >= POSTPONE_PENALTY_AT
+          ? current.projectId
+          : undefined;
+        if (currentProject !== previousProject) {
+          membershipChanges.push({ date, seq, taskId: task.id, fromProjectId: previousProject, toProjectId: currentProject });
+          previousProject = currentProject;
+        }
       }
-      previous = current;
-      previousProject = currentProject;
     }
   }
 
+  membershipChanges.sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq || a.taskId.localeCompare(b.taskId));
   const members = new Map<string, Set<string>>();
-  const timeline = new Map<string, Map<ISODate, HeavyProjectChange>>();
-  for (const date of [...changesByDate.keys()].sort()) {
-    const changes = changesByDate.get(date)!;
-    changes.sort((a, b) => (a.factSeq ?? Number.MAX_SAFE_INTEGER) - (b.factSeq ?? Number.MAX_SAFE_INTEGER) || a.taskId.localeCompare(b.taskId));
+  const timeline = new Map<string, Map<ISODate, HeavyProjectChange[]>>();
+  const push = (projectId: string, date: ISODate, change: HeavyProjectChange) => {
+    let byDate = timeline.get(projectId);
+    if (!byDate) timeline.set(projectId, (byDate = new Map()));
+    let rows = byDate.get(date);
+    if (!rows) byDate.set(date, (rows = []));
+    rows.push(change);
+  };
+
+  for (const change of membershipChanges) {
     const touched = new Set<string>();
-    const lastToggleSeq = new Map<string, number | undefined>();
-
-    const update = (projectId: string, taskId: string, add: boolean, seq: number | undefined) => {
-      let set = members.get(projectId);
-      if (!set) members.set(projectId, (set = new Set()));
+    if (change.fromProjectId) {
+      let set = members.get(change.fromProjectId);
+      if (!set) members.set(change.fromProjectId, (set = new Set()));
       const before = set.size > 0;
-      if (add) set.add(taskId);
-      else set.delete(taskId);
-      const after = set.size > 0;
-      touched.add(projectId);
-      if (before !== after) lastToggleSeq.set(projectId, seq);
-    };
-
-    for (const change of changes) {
-      if (change.fromProjectId) update(change.fromProjectId, change.taskId, false, change.factSeq);
-      if (change.toProjectId) update(change.toProjectId, change.taskId, true, change.factSeq);
+      set.delete(change.taskId);
+      if (before !== (set.size > 0)) touched.add(change.fromProjectId);
     }
-
+    if (change.toProjectId) {
+      let set = members.get(change.toProjectId);
+      if (!set) members.set(change.toProjectId, (set = new Set()));
+      const before = set.size > 0;
+      set.add(change.taskId);
+      if (before !== (set.size > 0)) touched.add(change.toProjectId);
+    }
     for (const projectId of touched) {
-      let byDate = timeline.get(projectId);
-      if (!byDate) timeline.set(projectId, (byDate = new Map()));
-      byDate.set(date, {
-        heavy: (members.get(projectId)?.size ?? 0) > 0,
-        factSeq: lastToggleSeq.get(projectId),
-      });
+      push(projectId, change.date, { heavy: (members.get(projectId)?.size ?? 0) > 0, factSeq: change.seq });
     }
   }
   return timeline;
@@ -431,18 +412,19 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
       let factTransitionSeq: number | undefined;
       const activeRows: SettlementEntry[] = [];
       let progressApplied = false;
-      const heavyChange = heavyTimeline.get(project.id)?.get(date);
-      let heavyApplied = false;
+      const heavyChanges = heavyTimeline.get(project.id)?.get(date) ?? [];
+      let heavyIndex = 0;
 
       const applyHeavyThrough = (seq: number) => {
-        if (heavyApplied || !heavyChange || heavyChange.factSeq === undefined || heavyChange.factSeq > seq) return;
-        const beforeHeavy = heavy;
-        heavy = heavyChange.heavy;
-        heavyApplied = true;
-        if (heavy !== beforeHeavy) {
-          factTransitionSeq = factTransitionSeq === undefined
-            ? heavyChange.factSeq
-            : Math.max(factTransitionSeq, heavyChange.factSeq);
+        while (heavyIndex < heavyChanges.length && (heavyChanges[heavyIndex].factSeq ?? Number.MAX_SAFE_INTEGER) <= seq) {
+          const change = heavyChanges[heavyIndex++];
+          const beforeHeavy = heavy;
+          heavy = change.heavy;
+          if (heavy !== beforeHeavy && change.factSeq !== undefined) {
+            factTransitionSeq = factTransitionSeq === undefined
+              ? change.factSeq
+              : Math.max(factTransitionSeq, change.factSeq);
+          }
         }
       };
 
@@ -511,16 +493,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
         factBaseline = undefined;
       }
 
-      if (!heavyApplied && heavyChange) {
-        const beforeHeavy = heavy;
-        heavy = heavyChange.heavy;
-        heavyApplied = true;
-        if (heavy !== beforeHeavy && heavyChange.factSeq !== undefined) {
-          factTransitionSeq = factTransitionSeq === undefined
-            ? heavyChange.factSeq
-            : Math.max(factTransitionSeq, heavyChange.factSeq);
-        }
-      }
+      applyHeavyThrough(Number.MAX_SAFE_INTEGER);
 
       if (active) {
         const effect = activeRows.length ? dayEffect(activeRows) : 'idle';

@@ -316,7 +316,7 @@ function removeEntry(store: Store, prev: SettlementEntry) {
  * 结算一天：逐条写下结果，小岛随之变化，编年史自动多一行。
  * 没有给出决定的条目不写记录（相当于这一条没记）。
  */
-export function settleDay(store: Store, date: ISODate, decisions: Map<string, Decision>): string {
+export function settleDay(store: Store, date: ISODate, decisions: Map<string, Decision>, extraItems: SettleItem[] = []): string {
   // Rebuild the stage immediately before this day's settlement from facts,
   // rather than remembering a fromStage snapshot.
   const beforeData: Data = {
@@ -328,6 +328,11 @@ export function settleDay(store: Store, date: ISODate, decisions: Map<string, De
   for (const [id, village] of computeAllVillages(beforeData, date)) before.set(id, village.stage);
 
   const items = itemsForDay(store.data, date);
+  const itemKeys = new Set(items.map((item) => item.key));
+  for (const item of extraItems) if (!itemKeys.has(item.key)) {
+    items.push(item);
+    itemKeys.add(item.key);
+  }
   for (const item of items) {
     const decision = decisions.get(item.key);
     if (decision) recordEntry(store, date, item, decision.outcome, decision.outcome === 'skipped' ? decision.reason : undefined);
