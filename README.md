@@ -3,6 +3,7 @@
 个人效率平台：你的工作和生活会自动长成一座等距视角的小岛。你负责定规则和做选择，小岛负责记账、提醒和讲故事。
 
 - 产品与 MVP 交接文档：[`docs/屿志MVP交接文档.md`](docs/屿志MVP交接文档.md)
+- 架构调整方案（继续开发前）：[`docs/架构调整方案.md`](docs/架构调整方案.md)
 - 参考源码（禾境）：[`reference/hejing.html`](reference/hejing.html)，原始压缩包 `reference/hejing-repo.zip`
 
 ## 运行
