@@ -1,0 +1,4 @@
+# Cloudflare Pages 配置：静态资源来自 dist，/api/ics 由 functions/api/ics.ts 提供
+name = "yuzhi"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-09-01"
