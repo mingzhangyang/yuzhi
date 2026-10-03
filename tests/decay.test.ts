@@ -293,6 +293,26 @@ describe('阶段历史重放', () => {
     expect(transition).toMatchObject({ from: 1, to: 0, factSeq: doneSeq });
   });
 
+  it('结算导致的阶段恶化继承 settlement seq，并排在结算之后', () => {
+    const h = makeStore('2026-09-08', '2026-09-01');
+    const p = createProject(h.store, '结算恶化');
+    const t = createTask(h.store, { title: '未推进', projectId: p.id, scheduledFor: h.today });
+
+    // 9/8 尚未结算时是 pending，不累计荒置；结算为 postponed 后这一天
+    // 成为可计入的 idle，并恰好跨入 stage 1。
+    settleDay(h.store, h.today, new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+    const settlement = h.store.data.entries.find((entry) => entry.itemId === t.id && entry.date === h.today)!;
+    const derived = stageLifeEntries(h.store.data, h.today);
+    const stage = derived.find((entry) => entry.id === `stage|${h.today}|${p.id}`)!;
+
+    expect(stage.factSeq).toBe(settlement.seq);
+    const ordered = lifeEntries(h.store.data, derived).filter(
+      (entry) => entry.date === h.today && entry.projectId === p.id,
+    );
+    expect(ordered.findIndex((entry) => entry.id === `l|${settlement.id}`))
+      .toBeLessThan(ordered.findIndex((entry) => entry.id === stage.id));
+  });
+
   it('事实触发的阶段行继承 settlement seq，并保持同日因果顺序', () => {
     const h = makeStore('2026-09-20', '2026-09-01');
     const p = createProject(h.store, '顺序村落');

@@ -506,6 +506,15 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
             if (effect === 'idle' && date !== project.createdAt && !resetToday) {
               neglect += 1;
               appliedIdle = true;
+              // When a settled row makes this day count as idle, the resulting
+              // stage decline is causally after that settlement. Preserve that
+              // seq so derived life rows cannot sort before their cause.
+              if (activeRows.length) {
+                const settlementSeq = Math.max(...activeRows.map((entry) => entry.seq));
+                factTransitionSeq = factTransitionSeq === undefined
+                  ? settlementSeq
+                  : Math.max(factTransitionSeq, settlementSeq);
+              }
             }
           }
         }
