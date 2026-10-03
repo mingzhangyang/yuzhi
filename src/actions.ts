@@ -362,3 +362,9 @@ export function removeSource(store: Store, sourceId: string) {
   for (const e of store.data.events.filter((x) => x.sourceId === sourceId)) if (!settled.has(e.id)) store.del('events', e.id);
   store.del('sources', sourceId);
 }
+
+/** 结算时把一件别的任务拉进这一天（「今天还做了…」），不算改期 */
+export function pullIntoDay(store: Store, taskId: string, date: ISODate) {
+  const t = store.task(taskId);
+  if (t && t.status === 'open' && t.projectId) store.put('tasks', { ...t, scheduledFor: date });
+}
