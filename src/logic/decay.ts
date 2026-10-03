@@ -19,6 +19,8 @@ export interface StageTransition {
   from: Stage;
   to: Stage;
   source: 'time' | 'facts';
+  /** Sequence of the fact that caused a fact-derived transition. */
+  factSeq?: number;
 }
 
 export function stageOfNeglect(n: number): Stage {
@@ -223,6 +225,27 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
   const entriesByProject = projectEntries(data);
   const opsByProject = projectOperations(data);
   const changedDates = taskChangeDates(data);
+
+  // Fact-derived stage rows participate in the same-day life-book ordering as
+  // settlements and operations. Pre-index the latest relevant fact per project
+  // and date so heavy-postpone transitions also have a causal ordering anchor.
+  const latestStageFactSeq = new Map<string, Map<ISODate, number>>();
+  const noteFact = (projectId: string | undefined, date: ISODate, seq: number) => {
+    if (!projectId) return;
+    let byDate = latestStageFactSeq.get(projectId);
+    if (!byDate) latestStageFactSeq.set(projectId, (byDate = new Map()));
+    const previous = byDate.get(date);
+    if (previous === undefined || seq > previous) byDate.set(date, seq);
+  };
+  for (const entry of data.entries) noteFact(entry.projectId, entry.date, entry.seq);
+  for (const event of data.operations) {
+    const ids = new Set<string>();
+    const payload = event.payload ?? {};
+    for (const value of [event.projectId, payload.projectId, payload.fromProjectId, payload.toProjectId]) {
+      if (typeof value === 'string') ids.add(value);
+    }
+    for (const projectId of ids) noteFact(projectId, event.date, event.seq);
+  }
   const taskStatesAt = new Map<ISODate, ReturnType<typeof taskStates>>();
   const statesAt = (date: ISODate) => {
     let states = taskStatesAt.get(date);
@@ -311,6 +334,8 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
 
       const rows = (projectDays.get(date) ?? []).slice().sort((a, b) => a.seq - b.seq);
       const operations = opDays.get(date) ?? [];
+      const dayFacts = orderedProjectDayFacts(rows, operations);
+      const fallbackFactSeq = latestStageFactSeq.get(project.id)?.get(date);
       const hasResetOperation = operations.some((event) => event.kind === 'project-restarted' || event.kind === 'project-trimmed');
       const legacyResets = hasResetOperation ? [] : (resets.get(date) ?? []);
       let resetToday = false;
@@ -323,6 +348,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
 
       let factBaseline = active ? stageWithPenalty(neglect, heavy) : undefined;
       let factTransition: StageTransition | undefined;
+      let factTransitionSeq: number | undefined;
       const activeRows: SettlementEntry[] = [];
       let progressApplied = false;
 
@@ -337,11 +363,12 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
             from: factBaseline,
             to: current,
             source: 'facts',
+            factSeq: factTransitionSeq ?? fallbackFactSeq,
           };
         }
       };
 
-      for (const fact of orderedProjectDayFacts(rows, operations)) {
+      for (const fact of dayFacts) {
         const event = fact.operation;
         if (event) {
           if (event.kind === 'project-closed' || event.kind === 'project-completed') {
@@ -373,7 +400,9 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
         if (!active) continue;
         activeRows.push(entry);
         if (!progressApplied && (entry.outcome === 'done' || entry.outcome === 'partial')) {
+          const beforeProgressStage = stageWithPenalty(neglect, heavy);
           neglect = recoverOne(neglect);
+          if (stageWithPenalty(neglect, heavy) !== beforeProgressStage) factTransitionSeq = entry.seq;
           progressApplied = true;
         }
       }
@@ -420,6 +449,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
               from: factBaseline,
               to: endStage,
               source: 'facts',
+              factSeq: factTransitionSeq ?? fallbackFactSeq,
             };
             visibleStage = endStage;
           }
@@ -449,6 +479,7 @@ export function stageLifeEntries(data: Data, today: ISODate): LifeEntry[] {
     id: transition.id,
     date: transition.date,
     projectId: transition.projectId,
+    factSeq: transition.source === 'facts' ? transition.factSeq : undefined,
     kind: 'stage',
     text: `村落进入「${STAGE_NAMES[transition.to]}」阶段`,
   }));
