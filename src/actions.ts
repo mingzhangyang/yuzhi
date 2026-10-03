@@ -1,18 +1,19 @@
 /**
  * 所有改动数据的操作。界面只调用这里，不直接改 store.data。
  */
-import type { CalendarEvent, ChronicleKind, ISODate, LifeEntry, LifeKind, OperationEvent, OperationKind, OperationLifeSnapshot, Outcome, Project, SettlementEntry, SkipReason, Task } from './types';
+import type { CalendarEvent, ChronicleKind, Data, ISODate, OperationEvent, OperationKind, OperationLifeSnapshot, Outcome, Project, SettlementEntry, SkipReason, Task } from './types';
 import { CHORES } from './types';
 import type { Store } from './store';
 import { uid } from './lib/id';
 import { addDays, fmtDay } from './lib/date';
-import { MAX_VILLAGES, PROMPT_SNOOZE_DAYS, STAGE_NAMES, TRIM_TO_NEGLECT, type Stage } from './logic/config';
+import { MAX_VILLAGES, PROMPT_SNOOZE_DAYS, TRIM_TO_NEGLECT, type Stage } from './logic/config';
 import { daysToArchive, entryId, itemsForDay, type SettleItem } from './logic/days';
 import { dayLine, stageChangeText, type StageChange } from './logic/chronicle';
 import { applyRules, matchRule } from './logic/classify';
 import { backlog } from './logic/metrics';
 import { nextFactSeq } from './logic/operations';
 import { ringOfLandmark, totalLandmarkCapacity } from './island/map';
+import { computeAllVillages, stageTransitions } from './logic/decay';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
   interrupted: '被打断',
@@ -24,11 +25,6 @@ export const REASON_TEXT: Record<SkipReason, string> = {
 export class ActionError extends Error {}
 
 const q = (s: string) => `「${s}」`;
-
-function life(store: Store, o: { date: ISODate; kind: LifeKind; text: string; projectId?: string; taskId?: string; reason?: SkipReason; fromStage?: number }, id = uid('l')) {
-  const e: LifeEntry = { id, ...o };
-  store.put('life', e);
-}
 
 function chronicle(store: Store, date: ISODate, text: string, kind: ChronicleKind, id = uid('c')) {
   store.put('chronicle', { id, date, text, kind });
@@ -68,7 +64,7 @@ export function createProject(store: Store, name: string): Project {
   for (let k = 0; k < MAX_VILLAGES; k++) if (!used.has(k)) { slot = k; break; }
   if (slot < 0) throw new ActionError(`岛上暂时住不下更多村落了（最多 ${MAX_VILLAGES} 个）。先关闭一个吧。`);
   const today = store.today();
-  const p: Project = { id: uid('p'), name: n, createdAt: today, status: 'active', islandSlot: slot, lastStage: 0 };
+  const p: Project = { id: uid('p'), name: n, createdAt: today, status: 'active', islandSlot: slot };
   store.put('projects', p);
   operation(store, {
     date: today,
@@ -94,17 +90,12 @@ export function renameProject(store: Store, id: string, name: string) {
   store.put('projects', { ...p, name: n });
 }
 
-function resetPostpones(store: Store, projectId: string) {
-  for (const t of store.data.tasks) if (t.projectId === projectId && t.status === 'open' && t.postponeCount) store.put('tasks', { ...t, postponeCount: 0 });
-}
-
 /** 搬离阶段的三个选择之一：重新启动 */
 export function restartProject(store: Store, id: string) {
   const p = store.project(id);
   if (!p) return;
   const today = store.today();
-  resetPostpones(store, id);
-  store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }], promptSnoozeUntil: undefined, lastStage: 0 });
+  store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }], promptSnoozeUntil: undefined });
   operation(store, {
     date: today,
     kind: 'project-restarted',
@@ -121,8 +112,7 @@ export function trimProject(store: Store, id: string, dropTaskIds: string[]) {
   if (!p) return;
   const today = store.today();
   for (const tid of dropTaskIds) dropTask(store, tid, '缩小规模时放下');
-  resetPostpones(store, id);
-  store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: TRIM_TO_NEGLECT, kind: 'trim' }], promptSnoozeUntil: undefined, lastStage: 1 });
+  store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: TRIM_TO_NEGLECT, kind: 'trim' }], promptSnoozeUntil: undefined });
   operation(store, {
     date: today,
     kind: 'project-trimmed',
@@ -138,8 +128,7 @@ export function closeProject(store: Store, id: string, reason: string) {
   const p = store.project(id);
   if (!p || p.status !== 'active') return;
   const today = store.today();
-  const droppedTaskIds = store.data.tasks.filter((t) => t.projectId === id && t.status === 'open').map((t) => t.id);
-  for (const t of store.data.tasks) if (t.projectId === id && t.status === 'open') store.put('tasks', { ...t, status: 'dropped', closedAt: today });
+  const droppedTaskIds = store.tasks().filter((t) => t.projectId === id && t.status === 'open').map((t) => t.id);
   const r = reason.trim();
   store.put('projects', { ...p, status: 'closed', closedAt: today, closeReason: r || undefined });
   operation(store, {
@@ -161,7 +150,7 @@ export function reopenProject(store: Store, id: string) {
   for (let k = 0; k < MAX_VILLAGES; k++) if (!used.has(k)) { slot = k; break; }
   if (slot < 0) throw new ActionError('岛上暂时没有空地了');
   const today = store.today();
-  store.put('projects', { ...p, status: 'active', islandSlot: slot, closedAt: undefined, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }], lastStage: 0 });
+  store.put('projects', { ...p, status: 'active', islandSlot: slot, closedAt: undefined, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }] });
   operation(store, {
     date: today,
     kind: 'project-restarted',
@@ -191,7 +180,7 @@ export function createTask(store: Store, o: { title: string; projectId?: string;
   if (!title) throw new ActionError('写一句要做的事吧');
   const today = store.today();
   const projectId = o.projectId && store.project(o.projectId)?.status === 'active' ? o.projectId : undefined;
-  const t: Task = { id: uid('t'), title, projectId, scheduledFor: projectId ? o.scheduledFor : undefined, postponeCount: 0, status: 'open', createdAt: today };
+  const t: Task = { id: uid('t'), title, projectId, scheduledFor: projectId ? o.scheduledFor : undefined, status: 'open', createdAt: today };
   // 停在码头的任务也可以先带着日期，安排时沿用
   if (!projectId && o.scheduledFor) t.scheduledFor = o.scheduledFor;
   store.put('tasks', t);
@@ -212,7 +201,6 @@ export function arrangeTask(store: Store, taskId: string, projectId: string, dat
   const p = store.project(projectId);
   if (!t || !p || p.status !== 'active') return;
   const today = store.today();
-  store.put('tasks', { ...t, projectId, scheduledFor: date });
   operation(store, {
     date: today,
     kind: 'task-arranged',
@@ -228,7 +216,6 @@ export function declineTask(store: Store, taskId: string) {
   const t = store.task(taskId);
   if (!t) return;
   const today = store.today();
-  store.put('tasks', { ...t, status: 'dropped', closedAt: today });
   operation(store, { date: today, kind: 'task-dropped', projectId: t.projectId, taskId, payload: { source: 'decline' } });
 }
 
@@ -236,7 +223,6 @@ export function rescheduleTask(store: Store, taskId: string, date: ISODate | und
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
   const today = store.today();
-  store.put('tasks', { ...t, scheduledFor: date });
   operation(store, {
     date: today,
     kind: 'task-rescheduled',
@@ -252,7 +238,6 @@ export function moveTask(store: Store, taskId: string, projectId: string | undef
   if (!t || t.projectId === projectId) return;
   const today = store.today();
   const fromProjectId = t.projectId;
-  store.put('tasks', { ...t, projectId, scheduledFor: projectId ? t.scheduledFor : undefined });
   operation(store, {
     date: today,
     kind: 'task-moved',
@@ -267,7 +252,7 @@ export function moveTask(store: Store, taskId: string, projectId: string | undef
 }
 
 export function renameTask(store: Store, taskId: string, title: string) {
-  const t = store.task(taskId);
+  const t = store.taskRecord(taskId);
   const n = title.trim();
   if (t && n) store.put('tasks', { ...t, title: n });
 }
@@ -277,7 +262,6 @@ export function dropTask(store: Store, taskId: string, note = '不重要了，�
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
   const today = store.today();
-  store.put('tasks', { ...t, status: 'dropped', closedAt: today });
   operation(store, {
     date: today,
     kind: 'task-dropped',
@@ -303,50 +287,11 @@ export interface Decision {
   reason?: SkipReason;
 }
 
-/** 结算记录派生出的一生之书条目、打断记录用固定 id，改判时能找到并撤销 */
-const lifeIdOf = (entryId: string) => `l|${entryId}`;
-const interruptionIdOf = (entryId: string) => `i|${entryId}`;
-/** 结算带来的阶段变化：每个村落每天一条，重新结算时替换或撤掉 */
-const stageLifeIdOf = (date: ISODate, projectId: string) => `stage|${date}|${projectId}`;
-
-/** 项目的「最近一次真实推进」由结算记录重新算出 */
-function recomputeLastProgress(store: Store, projectId: string | undefined) {
-  const p = store.project(projectId);
-  if (!p) return;
-  let last: ISODate | undefined;
-  for (const e of store.data.entries) if (e.projectId === projectId && e.outcome !== 'skipped' && (!last || e.date > last)) last = e.date;
-  if (p.lastProgressAt !== last) store.put('projects', { ...p, lastProgressAt: last });
-}
-
-/** 撤销一条结算记录留下的所有后果：一生之书、打断记录、任务状态与推迟次数 */
-function revertEntry(store: Store, prev: SettlementEntry) {
-  store.del('life', lifeIdOf(prev.id));
-  store.del('interruptions', interruptionIdOf(prev.id));
-  if (prev.itemType !== 'task') return;
-  const t = store.task(prev.itemId);
-  if (!t) return;
-  const later = store.data.entries.some((e) => e.itemType === 'task' && e.itemId === t.id && e.date > prev.date);
-  if (later) {
-    // 之后的日子已经接着结算过这件事，只撤销推迟次数
-    if (prev.reason === 'postponed') store.put('tasks', { ...t, postponeCount: Math.max(0, t.postponeCount - 1) });
-    return;
-  }
-  // 回到结算前的样子：还开着，排在那一天
-  store.put('tasks', {
-    ...t,
-    status: 'open',
-    closedAt: undefined,
-    scheduledFor: prev.date,
-    postponeCount: prev.reason === 'postponed' ? Math.max(0, t.postponeCount - 1) : t.postponeCount,
-  });
-}
-
-/** 写一条结算记录，并让任务、一生之书、打断记录随之变化。改判时先撤销上一次的后果 */
+/** 写一条结算事实。改判只替换事实本身，并保留首次结算时的 seq。 */
 function recordEntry(store: Store, date: ISODate, item: SettleItem, outcome: Outcome, reason?: SkipReason) {
   const id = entryId(date, item.type, item.id);
-  const prev = store.data.entries.find((e) => e.id === id);
+  const prev = store.data.entries.find((entry) => entry.id === id);
   if (prev && prev.outcome === outcome && prev.reason === reason) return;
-  if (prev) revertEntry(store, prev);
   const projectId = item.projectId && item.projectId !== CHORES ? item.projectId : undefined;
   const entry: SettlementEntry = {
     id,
@@ -360,40 +305,11 @@ function recordEntry(store: Store, date: ISODate, item: SettleItem, outcome: Out
     title: item.title,
   };
   store.put('entries', entry);
-
-  const title = q(item.title);
-  const lifeBase = { date, projectId, taskId: item.type === 'task' ? item.id : undefined };
-  const lid = lifeIdOf(id);
-  if (outcome === 'done') life(store, { ...lifeBase, kind: 'done', text: item.type === 'task' ? `完成了${title}` : `${title}做了` }, lid);
-  else if (outcome === 'partial') life(store, { ...lifeBase, kind: 'partial', text: `${title}做了一部分` }, lid);
-  else life(store, { ...lifeBase, kind: 'skip', reason, text: `${title}没做${reason ? `：${REASON_TEXT[reason]}` : ''}` }, lid);
-
-  recomputeLastProgress(store, projectId);
-  if (prev?.projectId !== projectId) recomputeLastProgress(store, prev?.projectId);
-  if (reason === 'interrupted') store.put('interruptions', { id: interruptionIdOf(id), date, itemType: item.type, itemId: item.id, title: item.title, projectId });
-
-  if (item.type !== 'task') return;
-  const t = store.task(item.id);
-  if (!t) return;
-  if (outcome === 'done') store.put('tasks', { ...t, status: 'done', closedAt: date });
-  else if (outcome === 'partial') store.put('tasks', { ...t, status: 'open', closedAt: undefined, scheduledFor: addDays(date, 1) });
-  else if (reason === 'postponed') store.put('tasks', { ...t, status: 'open', closedAt: undefined, scheduledFor: addDays(date, 1), postponeCount: t.postponeCount + 1 });
-  else if (reason === 'not_important') store.put('tasks', { ...t, status: 'dropped', closedAt: date });
-  else store.put('tasks', { ...t, status: 'open', closedAt: undefined, scheduledFor: date });
 }
 
-/** 撤掉一条结算记录（重新结算时取消了这一条的决定） */
+/** 改判时取消决定：只删事实，所有后果由 read model 自动消失。 */
 function removeEntry(store: Store, prev: SettlementEntry) {
-  revertEntry(store, prev);
   store.del('entries', prev.id);
-  recomputeLastProgress(store, prev.projectId);
-}
-
-/** 当前每个活跃项目的阶段 */
-function stagesNow(store: Store): Map<string, Stage> {
-  const m = new Map<string, Stage>();
-  for (const [id, v] of store.villages()) m.set(id, v.stage);
-  return m;
 }
 
 /**
@@ -401,39 +317,34 @@ function stagesNow(store: Store): Map<string, Stage> {
  * 没有给出决定的条目不写记录（相当于这一条没记）。
  */
 export function settleDay(store: Store, date: ISODate, decisions: Map<string, Decision>): string {
-  // 这一天结算之前的阶段。重新结算时，以第一次结算前的阶段为准，而不是上一次结算后的
-  const before = stagesNow(store);
-  for (const [id] of before) {
-    const rec = store.data.life.find((l) => l.id === stageLifeIdOf(date, id));
-    if (rec?.fromStage != null) before.set(id, rec.fromStage as Stage);
-  }
+  // Rebuild the stage immediately before this day's settlement from facts,
+  // rather than remembering a fromStage snapshot.
+  const beforeData: Data = {
+    ...store.data,
+    entries: store.data.entries.filter((entry) => entry.date !== date),
+    days: store.data.days.filter((day) => day.date !== date),
+  };
+  const before = new Map<string, Stage>();
+  for (const [id, village] of computeAllVillages(beforeData, date)) before.set(id, village.stage);
+
   const items = itemsForDay(store.data, date);
-  for (const it of items) {
-    const d = decisions.get(it.key);
-    if (d) recordEntry(store, date, it, d.outcome, d.outcome === 'skipped' ? d.reason : undefined);
-    else if (it.entry) removeEntry(store, it.entry);
+  for (const item of items) {
+    const decision = decisions.get(item.key);
+    if (decision) recordEntry(store, date, item, decision.outcome, decision.outcome === 'skipped' ? decision.reason : undefined);
+    else if (item.entry) removeEntry(store, item.entry);
   }
   store.put('days', { date, status: 'settled' });
 
-  const after = stagesNow(store);
   const changes: StageChange[] = [];
-  for (const [id, to] of after) {
-    const p = store.project(id)!;
-    const from = before.get(id) ?? (p.lastStage as Stage | undefined) ?? 0;
-    const lid = stageLifeIdOf(date, id);
-    if (from !== to) {
-      changes.push({ project: p, from, to });
-      life(store, { date, kind: 'stage', projectId: id, fromStage: from, text: `村落进入「${STAGE_NAMES[to]}」阶段` }, lid);
-    } else if (store.data.life.some((l) => l.id === lid)) {
-      // 改判后这一天对这个村落不再有阶段变化
-      store.del('life', lid);
-    }
-    if (p.lastStage !== to) store.put('projects', { ...p, lastStage: to });
+  for (const [id, village] of computeAllVillages(store.data, date)) {
+    const project = store.project(id)!;
+    const from = before.get(id) ?? 0;
+    if (from !== village.stage) changes.push({ project, from, to: village.stage });
   }
-  const projects = new Map(store.data.projects.map((p) => [p.id, p] as const));
-  const dayEntries = store.data.entries.filter((e) => e.date === date);
+  const projects = new Map(store.data.projects.map((project) => [project.id, project] as const));
+  const dayEntries = store.data.entries.filter((entry) => entry.date === date);
   const text = dayLine(dayEntries, projects, changes);
-  const kind: ChronicleKind = changes.some((c) => c.to < c.from) ? 'recover' : changes.some((c) => c.to > c.from) ? 'quiet' : 'day';
+  const kind: ChronicleKind = changes.some((change) => change.to < change.from) ? 'recover' : changes.some((change) => change.to > change.from) ? 'quiet' : 'day';
   chronicle(store, date, text, kind, `day|${date}`);
   return text;
 }
@@ -452,17 +363,32 @@ export function archiveOldDays(store: Store): ISODate[] {
 export function refreshStages(store: Store): StageChange[] {
   const today = store.today();
   const changes: StageChange[] = [];
-  for (const [id, v] of store.villages()) {
-    const p = store.project(id);
-    if (!p) continue;
-    const from = (p.lastStage ?? 0) as Stage;
-    if (from === v.stage) continue;
-    changes.push({ project: p, from, to: v.stage });
-  }
-  for (const c of changes) {
-    life(store, { date: today, kind: 'stage', projectId: c.project.id, text: `村落进入「${STAGE_NAMES[c.to]}」阶段` });
-    chronicle(store, today, stageChangeText(c) + '。', c.to < c.from ? 'recover' : 'quiet');
-    store.put('projects', { ...store.project(c.project.id)!, lastStage: c.to });
+  const fixedStageLines = store.data.chronicle.filter((line) => line.id.startsWith('stage|'));
+  const legacyBoundary = fixedStageLines.length
+    ? undefined
+    : store.data.chronicle.reduce<ISODate | undefined>(
+        (last, line) => (!last || line.date > last ? line.date : last),
+        undefined,
+      );
+  const transitions = stageTransitions(store.data, today)
+    .filter((transition) => transition.source === 'time')
+    .filter((transition) => !legacyBoundary || transition.date > legacyBoundary)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.projectId.localeCompare(b.projectId));
+
+  for (const transition of transitions) {
+    const id = `stage|${transition.date}|${transition.projectId}`;
+    if (store.data.chronicle.some((line) => line.id === id)) continue;
+    const project = store.project(transition.projectId);
+    if (!project) continue;
+    const change: StageChange = { project, from: transition.from, to: transition.to };
+    changes.push(change);
+    chronicle(
+      store,
+      transition.date,
+      stageChangeText(change) + '。',
+      transition.to < transition.from ? 'recover' : 'quiet',
+      id,
+    );
   }
   return changes;
 }
@@ -533,23 +459,13 @@ export function mergeEvents(store: Store, sourceId: string, incoming: CalendarEv
   }
 }
 
-/** 给事件换 id，并把结算记录、一生之书、打断记录里的引用一并改过去 */
+/** 给事件换 id；一生之书和打断记录都由结算事实实时派生。 */
 function renameEvent(store: Store, ev: CalendarEvent, newId: string) {
   store.put('events', { ...ev, id: newId });
   store.del('events', ev.id);
-  for (const en of store.data.entries.filter((x) => x.itemType === 'event' && x.itemId === ev.id)) {
-    const nid = entryId(en.date, 'event', newId);
-    store.renameFact('entries', en.id, { ...en, id: nid, itemId: newId });
-    const l = store.data.life.find((x) => x.id === lifeIdOf(en.id));
-    if (l) {
-      store.put('life', { ...l, id: lifeIdOf(nid) });
-      store.del('life', l.id);
-    }
-    const i = store.data.interruptions.find((x) => x.id === interruptionIdOf(en.id));
-    if (i) {
-      store.put('interruptions', { ...i, id: interruptionIdOf(nid), itemId: newId });
-      store.del('interruptions', i.id);
-    }
+  for (const entry of store.data.entries.filter((row) => row.itemType === 'event' && row.itemId === ev.id)) {
+    const id = entryId(entry.date, 'event', newId);
+    store.renameFact('entries', entry.id, { ...entry, id, itemId: newId });
   }
 }
 
@@ -563,7 +479,6 @@ export function removeSource(store: Store, sourceId: string) {
 export function pullIntoDay(store: Store, taskId: string, date: ISODate) {
   const t = store.task(taskId);
   if (t && t.status === 'open' && t.projectId && t.scheduledFor !== date) {
-    store.put('tasks', { ...t, scheduledFor: date });
     operation(store, {
       date: store.today(),
       kind: 'task-rescheduled',
@@ -600,9 +515,8 @@ export function completeProject(store: Store, id: string, resting: 'landmark' | 
   const p = store.project(id);
   if (!p || p.status !== 'active') throw new ActionError('这个项目已经不在岛上了');
   const today = store.today();
-  for (const t of store.data.tasks) {
+  for (const t of store.tasks()) {
     if (t.projectId !== id || t.status !== 'open') continue;
-    store.put('tasks', { ...t, status: 'dropped', closedAt: today });
     operation(store, {
       date: today,
       kind: 'task-dropped',

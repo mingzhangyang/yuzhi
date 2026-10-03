@@ -33,7 +33,7 @@ export function buildScene(store: Store, selected: Selection | null, dusk: boole
   for (const p of store.activeProjects()) {
     const v = villages.get(p.id);
     if (!v) continue;
-    const open = store.data.tasks.filter((t) => t.projectId === p.id && t.status === 'open');
+    const open = store.tasks().filter((t) => t.projectId === p.id && t.status === 'open');
     const shown = open.length ? Math.max(1, Math.min(MAX_WALKERS, Math.ceil(open.length * WALK_SHARE[v.stage]))) : 0;
     views.push({
       slot: p.islandSlot,
@@ -53,7 +53,7 @@ export function buildScene(store: Store, selected: Selection | null, dusk: boole
     season: seasonOf(today),
     light: lightNow(store.clock(), dusk),
     villages: views,
-    dockShips: store.data.tasks.filter((t) => t.status === 'open' && !t.projectId).length,
+    dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
     choresCount: store.data.events.filter((e) => e.projectId === CHORES && !e.allDay && dateOfStamp(e.start) > addDays(today, -7) && dateOfStamp(e.start) <= today).length,
     granaryRatio: g.workHours ? g.available / g.workHours : 0,
     granaryLabel: `粮仓 ${g.available.toFixed(1)} 小时`,

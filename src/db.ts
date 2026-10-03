@@ -2,7 +2,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 import type { Data, Settings } from './types';
 import { CHORES } from './types';
 import { localDate } from './lib/date';
-import { MAX_VILLAGES, STAGE_NAMES } from './logic/config';
+import { MAX_VILLAGES } from './logic/config';
 import { runMigrationSteps, type MigrationStep } from './migrations';
 
 /** 数据集合名 → 主键字段 */
@@ -17,7 +17,6 @@ export const COLLECTIONS = {
   operations: 'id',
   chronicle: 'id',
   life: 'id',
-  interruptions: 'id',
   snapshots: 'date',
 } as const;
 export type Coll = keyof typeof COLLECTIONS;
@@ -25,8 +24,8 @@ export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
 const FACT_SEQ_KEY = 'factSeq';
-export const IDB_SCHEMA_VERSION = 3;
-export const DATA_VERSION = 2;
+export const IDB_SCHEMA_VERSION = 4;
+export const DATA_VERSION = 3;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -70,7 +69,6 @@ export function emptyData(): Data {
     operations: [],
     chronicle: [],
     life: [],
-    interruptions: [],
     snapshots: [],
     settings: defaultSettings(),
   };
@@ -174,6 +172,101 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       delete data.__legacyLifeOrder;
     },
   },
+  {
+    to: 3,
+    run(data) {
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
+      const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      const projects = Array.isArray(data.projects) ? data.projects : [];
+      const life = Array.isArray(data.life) ? data.life : [];
+
+      let seq = 0;
+      for (const value of [...entries, ...operations]) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const n = (value as Record<string, unknown>).seq;
+        if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
+      }
+
+      let baselineDate = '1970-01-01';
+      const considerDate = (value: unknown) => {
+        if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && value > baselineDate) baselineDate = value;
+      };
+      for (const value of [...entries, ...operations, ...life, ...(Array.isArray(data.days) ? data.days : []), ...(Array.isArray(data.snapshots) ? data.snapshots : [])]) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        considerDate((value as Record<string, unknown>).date);
+      }
+      for (const value of projects) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        considerDate(row.createdAt);
+        considerDate(row.closedAt);
+        considerDate(row.doneAt);
+        delete row.lastProgressAt;
+        delete row.lastStage;
+      }
+      for (const value of tasks) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        considerDate(row.createdAt);
+        considerDate(row.closedAt);
+      }
+      if (baselineDate === '1970-01-01') baselineDate = '2000-01-01';
+
+      for (const value of tasks) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.id !== 'string') continue;
+        if (row.postponeCount !== undefined && (!Number.isInteger(row.postponeCount) || (row.postponeCount as number) < 0)) {
+          throw new Error('旧数据里的 postponeCount 损坏');
+        }
+        const legacyEntries = entries
+          .filter((entry) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+            const e = entry as Record<string, unknown>;
+            return e.itemType === 'task' && e.itemId === row.id;
+          })
+          .map((entry) => structuredClone(entry));
+        const payload: Record<string, unknown> = {
+          status: typeof row.status === 'string' ? row.status : 'open',
+          postponeCount: row.postponeCount ?? 0,
+          legacyEntries,
+        };
+        if (typeof row.projectId === 'string') payload.projectId = row.projectId;
+        if (typeof row.scheduledFor === 'string') payload.scheduledFor = row.scheduledFor;
+        if (typeof row.closedAt === 'string') payload.closedAt = row.closedAt;
+        operations.push({
+          id: `op|v3-task-baseline|${row.id}`,
+          seq: ++seq,
+          date: baselineDate,
+          kind: 'task-state-baseline',
+          ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
+          taskId: row.id,
+          payload,
+        });
+        delete row.postponeCount;
+      }
+
+      const settlementLifeIds = new Set<string>();
+      for (const value of entries) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const id = (value as Record<string, unknown>).id;
+        if (typeof id === 'string') settlementLifeIds.add(`l|${id}`);
+      }
+      data.life = life.filter((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        const row = value as Record<string, unknown>;
+        if (row.kind === 'stage') return false;
+        if (typeof row.id === 'string' && settlementLifeIds.has(row.id)) return false;
+        delete row.fromStage;
+        return true;
+      });
+      data.projects = projects;
+      data.tasks = tasks;
+      data.operations = operations;
+      delete data.interruptions;
+    },
+  },
 ];
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
@@ -204,7 +297,8 @@ export class IdbPersistence implements Persistence {
   private dbp: Promise<IDBPDatabase>;
   constructor(name = DB_NAME) {
     this.dbp = openDB(name, IDB_SCHEMA_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 4 && db.objectStoreNames.contains('interruptions')) db.deleteObjectStore('interruptions');
         for (const c of COLL_NAMES) if (!db.objectStoreNames.contains(c)) db.createObjectStore(c, { keyPath: COLLECTIONS[c] });
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
       },
@@ -431,7 +525,7 @@ const ITEM_TYPE = oneOf('task', 'event');
 const OPERATION_KIND = oneOf(
   'project-created', 'project-renamed', 'project-restarted', 'project-trimmed', 'project-closed',
   'project-completed', 'project-resting-changed', 'task-created', 'task-arranged', 'task-rescheduled',
-  'task-moved', 'task-dropped', 'legacy-life',
+  'task-moved', 'task-dropped', 'task-state-baseline', 'legacy-life',
 );
 const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete');
 const OPERATION_LIFE = arrayOf({
@@ -450,14 +544,14 @@ const OPERATION_PAYLOAD: Check = (v) => {
 
 const SHAPES: Record<Coll, Shape> = {
   projects: {
-    id: isText, name: isText, createdAt: isDate, 'lastProgressAt?': isDate, status: oneOf('active', 'closed', 'done'),
+    id: isText, name: isText, createdAt: isDate, status: oneOf('active', 'closed', 'done'),
     islandSlot: intIn(0, MAX_VILLAGES - 1), 'closedAt?': isDate, 'closeReason?': isStr,
     'resets?': arrayOf({ date: isDate, neglect: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0, kind: oneOf('restart', 'trim') }),
-    'promptSnoozeUntil?': isDate, 'lastStage?': intIn(0, STAGE_NAMES.length - 1), 'doneAt?': isDate,
+    'promptSnoozeUntil?': isDate, 'doneAt?': isDate,
     'resting?': oneOf('landmark', 'archive'), 'landmarkIndex?': intIn(0),
   },
   tasks: {
-    id: isText, 'projectId?': isText, title: isText, 'scheduledFor?': isDate, postponeCount: intIn(0),
+    id: isText, 'projectId?': isText, title: isText, 'scheduledFor?': isDate,
     status: oneOf('open', 'done', 'dropped'), createdAt: isDate, 'closedAt?': isDate,
   },
   sources: { id: isText, name: isStr, 'icsUrl?': isStr, 'lastFetchedAt?': isStamp, 'lastError?': isStr },
@@ -479,9 +573,8 @@ const SHAPES: Record<Coll, Shape> = {
   life: {
     id: isText, date: isDate, 'projectId?': isText, 'taskId?': isText, text: isStr,
     kind: oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete'),
-    'reason?': REASON, 'fromStage?': intIn(0, STAGE_NAMES.length - 1),
+    'reason?': REASON,
   },
-  interruptions: { id: isText, date: isDate, itemType: ITEM_TYPE, itemId: isText, title: isStr, 'projectId?': isText },
   snapshots: { date: isDate, backlog: intIn(0) },
 };
 

@@ -109,7 +109,7 @@ export class SettleSheet {
 
     const tabs = days.map((x) => `<button data-day="${x}" class="${x === this.date ? 'on' : ''} ${x < today ? 'fog' : ''}">${esc(relDay(x, today))}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
-    const extra = s.data.tasks.filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
+    const extra = s.tasks().filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
     const extraSel = extra.length
       ? `<div class="sextra"><select data-pull aria-label="还做了别的事"><option value="">${this.date === today ? '今天' : '这天'}还做了别的事…</option>${extra.map((t) => `<option value="${t.id}">${esc(t.title)} · ${esc(s.project(t.projectId)?.name ?? '')}</option>`).join('')}</select></div>`
       : '';

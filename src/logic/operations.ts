@@ -5,6 +5,52 @@ const LIFE_KINDS = new Set<LifeKind>([
 ]);
 const REASONS = new Set<SkipReason>(['interrupted', 'no_energy', 'not_important', 'postponed']);
 
+const REASON_TEXT: Record<SkipReason, string> = {
+  interrupted: '被打断',
+  no_energy: '没精力',
+  not_important: '不重要了',
+  postponed: '推到明天',
+};
+
+export function settlementLifeEntries(data: Data): LifeEntry[] {
+  return data.entries.map((entry) => {
+    const title = `「${entry.title}」`;
+    const taskId = entry.itemType === 'task' ? entry.itemId : undefined;
+    if (entry.outcome === 'done') {
+      return {
+        id: `l|${entry.id}`,
+        date: entry.date,
+        factSeq: entry.seq,
+        projectId: entry.projectId,
+        taskId,
+        kind: 'done' as const,
+        text: entry.itemType === 'task' ? `完成了${title}` : `${title}做了`,
+      };
+    }
+    if (entry.outcome === 'partial') {
+      return {
+        id: `l|${entry.id}`,
+        date: entry.date,
+        factSeq: entry.seq,
+        projectId: entry.projectId,
+        taskId,
+        kind: 'partial' as const,
+        text: `${title}做了一部分`,
+      };
+    }
+    return {
+      id: `l|${entry.id}`,
+      date: entry.date,
+      factSeq: entry.seq,
+      projectId: entry.projectId,
+      taskId,
+      kind: 'skip' as const,
+      reason: entry.reason,
+      text: `${title}没做${entry.reason ? `：${REASON_TEXT[entry.reason]}` : ''}`,
+    };
+  });
+}
+
 /** Provisional synchronous order for the tab-local model. IdbPersistence reserves the authoritative shared seq atomically before first persistence. */
 export function nextFactSeq(data: Data): number {
   let max = 0;
@@ -59,15 +105,16 @@ export function compareLifeEntries(a: LifeEntry, b: LifeEntry): number {
   return a.id.localeCompare(b.id);
 }
 
-export function lifeEntries(data: Data): LifeEntry[] {
+export function lifeEntries(data: Data, derivedStageEntries: LifeEntry[] = []): LifeEntry[] {
   const migrated = new Set<string>();
   for (const event of data.operations) {
     const id = event.payload?.legacyLifeId;
     if (typeof id === 'string') migrated.add(id);
   }
+  const settlementIds = new Set(data.entries.map((entry) => `l|${entry.id}`));
   const settlementSeq = new Map(data.entries.map((entry) => [`l|${entry.id}`, entry.seq] as const));
   const compat = data.life
-    .filter((entry) => !migrated.has(entry.id))
+    .filter((entry) => !migrated.has(entry.id) && !settlementIds.has(entry.id) && entry.kind !== 'stage')
     .map((entry) => {
       const factSeq = settlementSeq.get(entry.id);
       return factSeq === undefined ? entry : { ...entry, factSeq };
@@ -75,5 +122,10 @@ export function lifeEntries(data: Data): LifeEntry[] {
   const operations = data.operations
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq || a.id.localeCompare(b.id));
-  return [...compat, ...operations.flatMap(operationLifeEntries)].sort(compareLifeEntries);
+  return [
+    ...compat,
+    ...operations.flatMap(operationLifeEntries),
+    ...settlementLifeEntries(data),
+    ...derivedStageEntries,
+  ].sort(compareLifeEntries);
 }

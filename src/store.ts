@@ -1,7 +1,8 @@
 import type { Data, ISODate, Settings } from './types';
 import { COLLECTIONS, type Coll, type Persistence } from './db';
 import { localDate } from './lib/date';
-import { computeAllVillages, type VillageState } from './logic/decay';
+import { computeAllVillages, markDecayDataChanged, type VillageState } from './logic/decay';
+import { taskState, taskStates } from './logic/read-model';
 
 type Item<C extends Coll> = Data[C][number];
 
@@ -86,6 +87,7 @@ export class Store {
 
   /** 标记数据已变化，并在本轮任务结束后通知界面 */
   changed(): void {
+    markDecayDataChanged(this.data);
     this.version++;
     if (this.pending) return;
     this.pending = true;
@@ -112,8 +114,20 @@ export class Store {
     return id ? this.data.projects.find((p) => p.id === id) : undefined;
   }
 
-  task(id: string | undefined) {
+  /** Raw entity record. Use only when editing entity-owned fields. */
+  taskRecord(id: string | undefined) {
     return id ? this.data.tasks.find((t) => t.id === id) : undefined;
+  }
+
+  /** Effective task after replaying facts. */
+  task(id: string | undefined) {
+    const raw = this.taskRecord(id);
+    return raw ? taskState(this.data, raw) : undefined;
+  }
+
+  /** Effective task list after replaying facts. */
+  tasks() {
+    return taskStates(this.data);
   }
 
   activeProjects() {

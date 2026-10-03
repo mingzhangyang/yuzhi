@@ -180,9 +180,11 @@ async function boot() {
 
   /** 新的一天：归档超过 3 天的未结算日子，记下阶段变化 */
   function daily() {
+    // Replay missed time-passage boundaries before archive lines advance the
+    // chronicle boundary used for legacy compatibility.
+    A.refreshStages(store);
     const archived = A.archiveOldDays(store);
     if (archived.length) toast(`${archived.map(fmtDay).join('、')}没有记录，已归档。不算做了，也不算没做。`);
-    A.refreshStages(store);
   }
 
   store.subscribe(update);

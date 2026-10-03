@@ -1,6 +1,7 @@
 import type { CalendarEvent, Data, ISODate, SettlementEntry } from '../types';
 import { addDays, hmToMinutes, startOfLocalDay } from '../lib/date';
 import { NO_ENERGY_CUT, NO_ENERGY_FLOOR, PARTIAL_WEIGHT } from './config';
+import { taskStates } from './read-model';
 
 const inLast7 = (d: ISODate, today: ISODate) => d > addDays(today, -7) && d <= today;
 
@@ -74,7 +75,7 @@ export function progress(data: Data, today: ISODate, days = 14): { week: number;
 export function backlog(data: Data, today: ISODate): { dock: number; overdue: number; total: number } {
   let dock = 0;
   let overdue = 0;
-  for (const t of data.tasks) {
+  for (const t of taskStates(data)) {
     if (t.status !== 'open') continue;
     if (!t.projectId) dock++;
     else if (t.scheduledFor && t.scheduledFor < today) overdue++;

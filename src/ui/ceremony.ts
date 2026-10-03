@@ -64,7 +64,7 @@ export class Ceremony {
     const s = this.store;
     const today = s.today();
     const sum = summarize(s.data, p, today);
-    const open = s.data.tasks.filter((t) => t.projectId === p.id && t.status === 'open').length;
+    const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
     this.box.innerHTML = `
       <div class="chead">
         <div class="kick"><span>落成仪式</span><button class="x" data-act="close" aria-label="先不完成">×</button></div>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages } from '../src/actions';
-import { recoverOne, stageOfNeglect } from '../src/logic/decay';
+import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, reopenProject, markTaskDone } from '../src/actions';
+import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
 
 describe('阶段换算', () => {
@@ -50,9 +50,8 @@ describe('衰败与恢复', () => {
     const p = createProject(h.store, '团队');
     h.setToday('2026-09-09');
     refreshStages(h.store);
-    expect(h.store.project(p.id)!.lastStage).toBe(1);
     const t = createTask(h.store, { title: '写周报', projectId: p.id, scheduledFor: h.today });
-    const stageLines = () => h.store.data.life.filter((l) => l.kind === 'stage' && l.id.startsWith('stage|')).map((l) => l.text);
+    const stageLines = () => stageLifeEntries(h.store.data, h.today).filter((l) => l.id.startsWith('stage|')).map((l) => l.text);
     const settle = (d: Parameters<typeof settleDay>[2] extends Map<string, infer V> ? V : never) => settleDay(h.store, h.today, new Map([[itemKey('task', t.id), d]]));
 
     settle({ outcome: 'done' });
@@ -63,7 +62,6 @@ describe('衰败与恢复', () => {
     settle({ outcome: 'skipped', reason: 'no_energy' });
     expect(h.store.villages().get(p.id)!.stage).toBe(1);
     expect(stageLines()).toEqual([]);
-    expect(h.store.project(p.id)!.lastStage).toBe(1);
 
     // 再改回做了：仍然只有一条
     settle({ outcome: 'done' });
@@ -127,6 +125,69 @@ describe('衰败与恢复', () => {
     trimProject(h.store, p.id, [a.id]);
     expect(h.store.task(a.id)!.status).toBe('dropped');
     expect(h.store.villages().get(p.id)!.stage).toBe(1);
+  });
+});
+
+describe('阶段历史重放', () => {
+  it('关闭期间不生成阶段变化，重开后从重启事实继续', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '暂停的项目');
+    h.setToday('2026-09-03');
+    closeProject(h.store, p.id, '先停一下');
+    h.setToday('2026-10-01');
+    reopenProject(h.store, p.id);
+
+    const closedGap = stageLifeEntries(h.store.data, h.today).filter(
+      (entry) => entry.projectId === p.id && entry.date > '2026-09-03' && entry.date < '2026-10-01',
+    );
+    expect(closedGap).toEqual([]);
+  });
+
+  it('离线跨过多个阶段后 refreshStages 会从最后记录边界补齐', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    createProject(h.store, '长期项目');
+    h.setToday('2026-10-01');
+
+    const changes = refreshStages(h.store);
+    expect(changes.map((change) => change.to)).toEqual([1, 2, 3]);
+    expect(h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.date)).toEqual([
+      '2026-09-09',
+      '2026-09-16',
+      '2026-09-30',
+    ]);
+  });
+
+  it('历史 pending 按当时任务状态重建，不把前一天误算成荒置并制造假恢复', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '团队');
+    const t = createTask(h.store, { title: '写周报', projectId: p.id, scheduledFor: '2026-09-08' });
+    h.setToday('2026-09-09');
+    markTaskDone(h.store, t.id);
+
+    expect(stageLifeEntries(h.store.data, h.today).filter((entry) => entry.id === `stage|2026-09-09|${p.id}`)).toEqual([]);
+  });
+
+  it('未结算日直接完成会立即移除推迟惩罚并生成恢复阶段史', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '拖延项目');
+    const t = createTask(h.store, { title: '难事', projectId: p.id, scheduledFor: h.today });
+    for (let k = 0; k < 3; k++) {
+      const date = h.store.task(t.id)!.scheduledFor!;
+      settleDay(h.store, date, new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+      h.setToday(h.store.task(t.id)!.scheduledFor!);
+    }
+    expect(h.store.villages().get(p.id)!.stage).toBe(1);
+
+    markTaskDone(h.store, t.id);
+    expect(h.store.villages().get(p.id)!.stage).toBe(0);
+    expect(stageLifeEntries(h.store.data, h.today).some((entry) => entry.projectId === p.id && entry.date === h.today && entry.text.includes('热闹'))).toBe(true);
+  });
+
+  it('阶段时间线对未变化的数据复用缓存结果', () => {
+    const h = makeStore('2026-09-01');
+    createProject(h.store, '缓存');
+    h.setToday('2026-10-01');
+    expect(stageTransitions(h.store.data, h.today)).toBe(stageTransitions(h.store.data, h.today));
   });
 });
 
