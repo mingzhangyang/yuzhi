@@ -18,8 +18,6 @@ const PROJECT_TASK_KINDS = new Set([
   'project-completed',
 ]);
 
-const beforeOrOn = (date: ISODate, through?: ISODate) => !through || date <= through;
-
 function text(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
