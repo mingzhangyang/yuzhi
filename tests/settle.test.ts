@@ -70,6 +70,25 @@ describe('晚间结算', () => {
     expect(pendingDays(h.store.data, h.today)).toEqual(['2026-09-02', '2026-09-04', '2026-09-06']);
   });
 
+  it('补录旧结算仍按全局 seq 覆盖较早写入的后续改期', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '补录历史');
+    const t = createTask(h.store, { title: '补录任务', projectId: p.id, scheduledFor: '2026-09-02' });
+
+    h.setToday('2026-09-03');
+    rescheduleTask(h.store, t.id, '2026-09-04');
+
+    // 9/5 才第一次补录 9/2；它拿到更大的 seq，所以权威回放里
+    // 这条旧日期 settlement 应覆盖 9/3 写入的改期。
+    h.setToday('2026-09-05');
+    settleDay(h.store, '2026-09-02', new Map([
+      [itemKey('task', t.id), { outcome: 'skipped', reason: 'no_energy' }],
+    ]));
+
+    expect(h.store.task(t.id)).toMatchObject({ status: 'open', scheduledFor: '2026-09-02' });
+    expect(pendingDays(h.store.data, h.today)).not.toContain('2026-09-04');
+  });
+
   it('结算之外直接记下做完', () => {
     const h = makeStore();
     const p = createProject(h.store, 'P');

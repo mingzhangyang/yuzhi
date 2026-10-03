@@ -290,10 +290,10 @@ export function taskState(data: Data, task: Task, throughDate?: ISODate): TaskVi
 }
 
 /**
- * Replays one task across multiple historical dates in a single forward pass.
- * This avoids calling taskState() for every candidate day (and therefore
- * repeatedly rescanning the full fact history) when reconstructing pending
- * days. Facts are sliced once for the task, then applied in date/seq order.
+ * Replays one task at multiple historical dates from a task-local fact slice.
+ * Each snapshot delegates precedence to taskState(): semantic date decides
+ * eligibility, while the shared monotonic seq remains the authoritative order.
+ * This avoids rescanning unrelated tasks/projects for every candidate date.
  */
 export function taskStatesForDates(data: Data, task: Task, dates: ISODate[]): Map<ISODate, TaskView> {
   const orderedDates = [...new Set(dates)]
@@ -303,55 +303,20 @@ export function taskStatesForDates(data: Data, task: Task, dates: ISODate[]): Ma
   if (!orderedDates.length) return out;
 
   const lastDate = orderedDates[orderedDates.length - 1];
-  const facts: Array<{ date: ISODate; seq: number; operation?: OperationEvent; entry?: SettlementEntry }> = [];
+  const taskData: Data = {
+    ...data,
+    tasks: [task],
+    entries: data.entries.filter(
+      (entry) => entry.itemType === 'task' && entry.itemId === task.id && entry.date <= lastDate,
+    ),
+    operations: data.operations.filter(
+      (event) =>
+        event.date <= lastDate &&
+        (event.taskId === task.id || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)),
+    ),
+  };
 
-  for (const event of data.operations) {
-    if (event.date < task.createdAt || event.date > lastDate) continue;
-    if (event.taskId === task.id || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)) {
-      facts.push({ date: event.date, seq: event.seq, operation: event });
-    }
-  }
-  for (const entry of data.entries) {
-    if (entry.itemType !== 'task' || entry.itemId !== task.id) continue;
-    if (entry.date < task.createdAt || entry.date > lastDate) continue;
-    facts.push({ date: entry.date, seq: entry.seq, entry });
-  }
-  facts.sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq);
-
-  let state = defaultState(task);
-  let baseSeq = 0;
-  let factIndex = 0;
-
-  for (const date of orderedDates) {
-    while (factIndex < facts.length && facts[factIndex].date <= date) {
-      const fact = facts[factIndex++];
-      const event = fact.operation;
-      if (event) {
-        if (event.kind === 'task-state-baseline' && event.taskId === task.id && event.seq >= baseSeq) {
-          state = baselineFrom(event, task);
-          reconcileLegacyEntries(state, data, task.id, event);
-          baseSeq = event.seq;
-        } else if (event.kind === 'task-created' && event.taskId === task.id && baseSeq === 0) {
-          state = createdFrom(event);
-          baseSeq = event.seq;
-        } else if (event.seq > baseSeq) {
-          applyOperation(state, task.id, event);
-        }
-      } else if (fact.entry && fact.seq > baseSeq) {
-        applySettlement(state, fact.entry);
-      }
-    }
-
-    out.set(date, {
-      ...task,
-      projectId: state.projectId,
-      scheduledFor: state.scheduledFor,
-      status: state.status,
-      closedAt: state.closedAt,
-      postponeCount: state.postponeCount,
-    });
-  }
-
+  for (const date of orderedDates) out.set(date, taskState(taskData, task, date));
   return out;
 }
 
