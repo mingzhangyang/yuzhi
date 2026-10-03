@@ -272,13 +272,13 @@ export function seedDemo(store: Store) {
     const p = store.project(pid)!;
     const date = addDays(today, -days);
     store.put('projects', { ...p, createdAt: date });
-    for (const l of store.data.life) if (l.projectId === pid && l.kind === 'start') store.put('life', { ...l, date });
+    for (const op of store.data.operations) if (op.projectId === pid && op.kind === 'project-created') store.put('operations', { ...op, date });
     for (const c of store.data.chronicle) if (c.text === `岛上立起了新村落「${p.name}」。`) store.put('chronicle', { ...c, date });
   };
   const doneOn = (pid: string, title: string, date: ISODate) => {
     const t = A.createTask(store, { title, projectId: pid, scheduledFor: date });
     store.put('tasks', { ...store.task(t.id)!, createdAt: date });
-    for (const l of store.data.life) if (l.taskId === t.id) store.put('life', { ...l, date });
+    for (const op of store.data.operations) if (op.taskId === t.id && op.kind === 'task-created') store.put('operations', { ...op, date });
     return t;
   };
   try {
@@ -316,7 +316,7 @@ export function seedDemo(store: Store) {
     }
     A.completeProject(store, photo.id, 'landmark');
     store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
-    for (const l of store.data.life) if (l.projectId === photo.id && l.kind === 'complete') store.put('life', { ...l, date: addDays(today, -10) });
+    for (const op of store.data.operations) if (op.projectId === photo.id && op.kind === 'project-completed') store.put('operations', { ...op, date: addDays(today, -10) });
     for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes('整理旧照片')) store.put('chronicle', { ...c, date: addDays(today, -10) });
 
     A.createTask(store, { title: '第 5 章初稿', projectId: write.id, scheduledFor: today });
