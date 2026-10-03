@@ -4,6 +4,8 @@ import { createProject, createTask, settleDay, archiveOldDays, restartProject, t
 import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
 import { lifeEntries } from '../src/logic/operations';
+import { emptyData, type Coll, type Persistence } from '../src/db';
+import { Store } from '../src/store';
 
 describe('阶段换算', () => {
   it('天数对应阶段', () => {
@@ -333,6 +335,44 @@ describe('阶段历史重放', () => {
     createProject(h.store, '缓存');
     h.setToday('2026-10-01');
     expect(stageTransitions(h.store.data, h.today)).toBe(stageTransitions(h.store.data, h.today));
+  });
+
+  it('持久层改写权威 fact seq 后会失效阶段时间线缓存', async () => {
+    const data = emptyData();
+    data.settings.firstDay = '2026-09-01';
+    data.projects.push({ id: 'p1', name: '并发村落', createdAt: '2026-09-01', status: 'active', islandSlot: 0 });
+    const persist: Persistence = {
+      async load() { return data; },
+      async put(coll: Coll) { return coll === 'entries' || coll === 'operations' ? 42 : undefined; },
+      async renameFact() { return 42; },
+      async del() {},
+      async putSettings() {},
+      async replaceAll() {},
+    };
+    const store = new Store(data, persist);
+    const entry = {
+      id: '2026-09-20|task|t1',
+      seq: 1,
+      date: '2026-09-20',
+      itemType: 'task' as const,
+      itemId: 't1',
+      outcome: 'done' as const,
+      projectId: 'p1',
+      title: '推进',
+    };
+    store.put('entries', entry);
+
+    const provisional = stageTransitions(data, '2026-09-20').find(
+      (row) => row.projectId === 'p1' && row.source === 'facts',
+    );
+    expect(provisional?.factSeq).toBe(1);
+
+    await store.flush();
+    expect(entry.seq).toBe(42);
+    const authoritative = stageTransitions(data, '2026-09-20').find(
+      (row) => row.projectId === 'p1' && row.source === 'facts',
+    );
+    expect(authoritative?.factSeq).toBe(42);
   });
 });
 
