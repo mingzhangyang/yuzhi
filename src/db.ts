@@ -38,7 +38,11 @@ function isStorageUnavailableCause(error: unknown): boolean {
 }
 
 export class StorageUnavailableError extends Error {
-  constructor(cause: unknown) {
+  constructor(
+    cause: unknown,
+    /** Data that was already read and validated before persistence failed. */
+    public readonly recoveredData?: Data,
+  ) {
     super('浏览器本地存储不可用', { cause });
     this.name = 'StorageUnavailableError';
   }
@@ -156,7 +160,7 @@ export class IdbPersistence implements Persistence {
       // Startup persistence failures such as quota/security errors mean the
       // browser cannot safely persist this session. Keep migration/version/
       // validation errors outside this block so they remain actionable.
-      if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error);
+      if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error, data);
       throw error;
     }
     return data;

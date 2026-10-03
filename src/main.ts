@@ -40,7 +40,7 @@ async function boot() {
       }
       return;
     }
-    per = new MemoryPersistence();
+    per = new MemoryPersistence(error.recoveredData);
     data = await per.load();
     setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
   }

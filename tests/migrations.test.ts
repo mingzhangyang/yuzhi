@@ -32,10 +32,17 @@ describe('数据迁移基础设施', () => {
     expect(() => runMigrationSteps({ n: 1 }, 2, 1, [])).toThrow('更新的屿志版本');
   });
 
-  it('只有明确的存储不可用错误才允许降级到临时内存', () => {
+  it('只有明确的存储不可用错误才允许降级到临时内存，并可携带已恢复的数据', () => {
     expect(isStorageUnavailableError(new StorageUnavailableError(new DOMException('blocked', 'SecurityError')))).toBe(true);
     expect(isStorageUnavailableError(new Error('本地数据版本号损坏'))).toBe(false);
     expect(isStorageUnavailableError(new DOMException('newer schema', 'VersionError'))).toBe(false);
+
+    const recovered = {
+      ...parseBackup(JSON.stringify(v1BackupFixture)),
+      projects: [{ ...parseBackup(JSON.stringify(v1BackupFixture)).projects[0], name: '已恢复村落' }],
+    };
+    const error = new StorageUnavailableError(new DOMException('full', 'QuotaExceededError'), recovered);
+    expect(error.recoveredData?.projects[0]?.name).toBe('已恢复村落');
   });
 
   it('共享校验器保留备份语境，不把本地数据错误误报成备份问题', async () => {
