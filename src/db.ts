@@ -55,10 +55,6 @@ type RawData = Record<string, unknown> & { settings: unknown };
 /** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
 const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [];
 
-function emptyRawData(): RawData {
-  return { ...Object.fromEntries(COLL_NAMES.map((c) => [c, []])), settings: defaultSettings() };
-}
-
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
   if (raw.settings === undefined) raw.settings = defaultSettings();
