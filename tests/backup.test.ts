@@ -14,6 +14,7 @@ describe('IndexedDB 与备份', () => {
     const again = await new IdbPersistence('test-db').load();
     expect(again.projects.map((x) => x.name)).toEqual(['团队']);
     expect(again.tasks.map((x) => x.title)).toEqual(['写周报']);
+    expect(again.operations.slice().sort((a, b) => a.seq - b.seq).map((x) => x.kind)).toEqual(['project-created', 'task-created']);
 
     const json = exportBackup(again);
     const parsed = parseBackup(json);
@@ -78,6 +79,7 @@ describe('写入失败', () => {
       put: async (_c: string, item: object) => void puts.push((item as { id: string }).id),
       del: async () => {},
       putSettings: async () => {},
+      renameFact: async () => {},
       replaceAll: async () => {
         throw new Error('磁盘满了');
       },

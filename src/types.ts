@@ -82,6 +82,8 @@ export type SkipReason = 'interrupted' | 'no_energy' | 'not_important' | 'postpo
 export interface SettlementEntry {
   /** `${date}|${itemType}|${itemId}` */
   id: string;
+  /** 首次结算时分配并保持不变；与 OperationEvent.seq 共用同一事实顺序。 */
+  seq: number;
   date: ISODate;
   itemType: 'task' | 'event';
   itemId: string;
@@ -108,12 +110,55 @@ export interface ChronicleLine {
   kind: ChronicleKind;
 }
 
+export type OperationKind =
+  | 'project-created'
+  | 'project-renamed'
+  | 'project-restarted'
+  | 'project-trimmed'
+  | 'project-closed'
+  | 'project-completed'
+  | 'project-resting-changed'
+  | 'task-created'
+  | 'task-arranged'
+  | 'task-rescheduled'
+  | 'task-moved'
+  | 'task-dropped'
+  | 'legacy-life';
+
+export interface OperationLifeSnapshot {
+  projectId?: string;
+  taskId?: string;
+  text: string;
+  kind: LifeKind;
+  reason?: SkipReason;
+}
+
+export interface OperationPayload extends Record<string, unknown> {
+  /** 一生之书 read model 所需的当时叙述快照；不再另写一份 life 业务事实。 */
+  life?: OperationLifeSnapshot[];
+  /** v1 迁移来源；用于让兼容 life 行与 operation read model 去重。 */
+  legacyLifeId?: string;
+}
+
+/** 用户主动操作事实；seq 与 SettlementEntry 共用同一单调递增事实顺序。 */
+export interface OperationEvent {
+  id: string;
+  seq: number;
+  date: ISODate;
+  kind: OperationKind;
+  projectId?: string;
+  taskId?: string;
+  payload?: OperationPayload;
+}
+
 export type LifeKind = 'start' | 'task' | 'done' | 'partial' | 'skip' | 'stage' | 'close' | 'restart' | 'trim' | 'drop' | 'event' | 'complete';
 
 /** 一生之书里的一行 */
 export interface LifeEntry {
   id: string;
   date: ISODate;
+  /** Read-model-only order shared by settlement and operation facts on the same day. */
+  factSeq?: number;
   projectId?: string;
   taskId?: string;
   text: string;
@@ -157,6 +202,7 @@ export interface Data {
   rules: ClassifyRule[];
   entries: SettlementEntry[];
   days: DayRecord[];
+  operations: OperationEvent[];
   chronicle: ChronicleLine[];
   life: LifeEntry[];
   interruptions: Interruption[];

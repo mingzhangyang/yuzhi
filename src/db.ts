@@ -14,6 +14,7 @@ export const COLLECTIONS = {
   rules: 'id',
   entries: 'id',
   days: 'date',
+  operations: 'id',
   chronicle: 'id',
   life: 'id',
   interruptions: 'id',
@@ -23,8 +24,9 @@ export type Coll = keyof typeof COLLECTIONS;
 export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
-export const IDB_SCHEMA_VERSION = 2;
-export const DATA_VERSION = 1;
+const FACT_SEQ_KEY = 'factSeq';
+export const IDB_SCHEMA_VERSION = 3;
+export const DATA_VERSION = 2;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -65,6 +67,7 @@ export function emptyData(): Data {
     rules: [],
     entries: [],
     days: [],
+    operations: [],
     chronicle: [],
     life: [],
     interruptions: [],
@@ -73,11 +76,105 @@ export function emptyData(): Data {
   };
 }
 
-type RawData = Record<string, unknown> & { settings: unknown };
+type RawData = Record<string, unknown> & {
+  settings: unknown;
+  /** v1 backup arrays preserve export order; IndexedDB getAll only preserves primary-key order. */
+  __legacyLifeOrder?: 'array' | 'id';
+};
 
 /** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
-const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [];
+const ACTIVE_LIFE_KINDS = new Set(['start', 'task', 'close', 'restart', 'trim', 'drop', 'event', 'complete']);
+const LEGACY_KIND_MAP: Record<string, string> = {
+  start: 'project-created',
+  close: 'project-closed',
+  restart: 'project-restarted',
+  trim: 'project-trimmed',
+  drop: 'task-dropped',
+  complete: 'project-completed',
+};
 
+const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
+  {
+    to: 2,
+    run(data) {
+      const life = Array.isArray(data.life) ? data.life : [];
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
+
+      // v2 introduces one stable fact sequence shared by settlement facts and
+      // explicit operation facts. Rejudging an old settlement keeps its seq,
+      // so later manual operations still replay after it.
+      let seq = 0;
+      for (const value of [...entries, ...operations]) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const n = (value as Record<string, unknown>).seq;
+        if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
+      }
+      const entryById = new Map<string, Record<string, unknown>>();
+      for (const value of entries) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.id === 'string') entryById.set(row.id, row);
+      }
+
+      const idbFallback = data.__legacyLifeOrder === 'id';
+      const orderedLife = life
+        .map((value, index) => ({ value, index }))
+        .sort((a, b) => {
+          const ar = a.value && typeof a.value === 'object' && !Array.isArray(a.value) ? a.value as Record<string, unknown> : {};
+          const br = b.value && typeof b.value === 'object' && !Array.isArray(b.value) ? b.value as Record<string, unknown> : {};
+          const byDate = String(ar.date ?? '').localeCompare(String(br.date ?? ''));
+          if (byDate) return byDate;
+          // Backups retain their serialized array order. IndexedDB v1 upgrades
+          // cannot recover legacy write order because getAll() returns key
+          // order, so use an explicit stable id fallback rather than pretending
+          // the incoming index is occurrence order.
+          return idbFallback
+            ? String(ar.id ?? '').localeCompare(String(br.id ?? '')) || a.index - b.index
+            : a.index - b.index;
+        });
+
+      for (const { value } of orderedLife) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.id !== 'string' || typeof row.date !== 'string' || typeof row.kind !== 'string') continue;
+
+        // Settlement-generated life rows already encode the legacy write order.
+        // Use that order to give the corresponding settlement a stable seq.
+        if (row.id.startsWith('l|')) {
+          const entry = entryById.get(row.id.slice(2));
+          if (entry && !Number.isInteger(entry.seq)) entry.seq = ++seq;
+        }
+
+        if (!ACTIVE_LIFE_KINDS.has(row.kind) || typeof row.text !== 'string') continue;
+        const lifeSnapshot: Record<string, unknown> = { kind: row.kind, text: row.text };
+        if (typeof row.projectId === 'string') lifeSnapshot.projectId = row.projectId;
+        if (typeof row.taskId === 'string') lifeSnapshot.taskId = row.taskId;
+        if (typeof row.reason === 'string') lifeSnapshot.reason = row.reason;
+        operations.push({
+          id: `op|legacy-life|${row.id}`,
+          seq: ++seq,
+          date: row.date,
+          kind: LEGACY_KIND_MAP[row.kind] ?? 'legacy-life',
+          ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
+          ...(typeof row.taskId === 'string' ? { taskId: row.taskId } : {}),
+          payload: { legacyLifeId: row.id, legacyKind: row.kind, life: [lifeSnapshot] },
+        });
+      }
+
+      // A few legacy settlement records may have no life row (for example a
+      // partially written old database). Keep them valid and deterministic.
+      const missing = [...entryById.values()]
+        .filter((row) => !Number.isInteger(row.seq))
+        .sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? '')));
+      for (const row of missing) row.seq = ++seq;
+
+      data.entries = entries;
+      data.operations = operations;
+      delete data.__legacyLifeOrder;
+    },
+  },
+];
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
   if (raw.settings === undefined) raw.settings = defaultSettings();
@@ -97,6 +194,7 @@ function parseStoredDataVersion(v: unknown): number | undefined {
 export interface Persistence {
   load(): Promise<Data>;
   put(coll: Coll, item: object): Promise<void>;
+  renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<void>;
   del(coll: Coll, key: string): Promise<void>;
   putSettings(s: Settings): Promise<void>;
   replaceAll(d: Data): Promise<void>;
@@ -141,6 +239,7 @@ export class IdbPersistence implements Persistence {
       throw error;
     }
     raw.settings = storedSettings ?? defaultSettings();
+    raw.__legacyLifeOrder = 'id';
 
     const storedVersion = parseStoredDataVersion(storedVersionValue);
     const fromVersion = storedVersion ?? LEGACY_DATA_VERSION;
@@ -166,8 +265,83 @@ export class IdbPersistence implements Persistence {
     return data;
   }
   async put(coll: Coll, item: object) {
+    if (coll === 'entries' || coll === 'operations') {
+      await this.putFact(coll, item);
+      return;
+    }
     await (await this.dbp).put(coll, structuredClone(item));
   }
+
+  /**
+   * entries / operations share one persisted sequence. The readwrite
+   * transaction serializes competing tabs, so two writers cannot commit the
+   * same seq even when both tab-local stores computed the same provisional one.
+   * Updating an existing fact keeps its original seq (rejudgment/backdating).
+   */
+  private async putFact(coll: 'entries' | 'operations', item: object) {
+    const db = await this.dbp;
+    const tx = db.transaction(['entries', 'operations', 'meta'], 'readwrite');
+    const store = tx.objectStore(coll);
+    const meta = tx.objectStore('meta');
+    const record = structuredClone(item) as Record<string, unknown>;
+    const key = record[COLLECTIONS[coll]];
+    const existing = typeof key === 'string' ? await store.get(key) as Record<string, unknown> | undefined : undefined;
+
+    const validSeq = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+    const existingSeq = existing?.seq;
+    let seq: number | undefined = validSeq(existingSeq) && existingSeq >= 1 ? existingSeq : undefined;
+    if (seq === undefined) {
+      const saved = await meta.get(FACT_SEQ_KEY);
+      if (validSeq(saved)) {
+        seq = saved;
+      } else {
+        seq = 0;
+        for (const fact of await tx.objectStore('entries').getAll() as Array<{ seq?: unknown }>) {
+          if (validSeq(fact.seq) && fact.seq > seq) seq = fact.seq;
+        }
+        for (const fact of await tx.objectStore('operations').getAll() as Array<{ seq?: unknown }>) {
+          if (validSeq(fact.seq) && fact.seq > seq) seq = fact.seq;
+        }
+      }
+      seq += 1;
+      await meta.put(seq, FACT_SEQ_KEY);
+    }
+
+    record.seq = seq;
+    // Store keeps the same object reference in memory; update it to the
+    // authoritative persisted value once the atomic reservation succeeds.
+    (item as Record<string, unknown>).seq = seq;
+    await store.put(record);
+    await tx.done;
+  }
+  async renameFact(coll: 'entries' | 'operations', oldKey: string, item: object) {
+    const db = await this.dbp;
+    const tx = db.transaction(coll, 'readwrite');
+    const store = tx.objectStore(coll);
+    const previous = await store.get(oldKey) as Record<string, unknown> | undefined;
+    if (!previous || typeof previous.seq !== 'number' || !Number.isInteger(previous.seq) || previous.seq < 1) {
+      tx.abort();
+      throw new Error(`找不到要重命名的事实：${oldKey}`);
+    }
+
+    const record = structuredClone(item) as Record<string, unknown>;
+    const newKey = record[COLLECTIONS[coll]];
+    if (typeof newKey !== 'string' || !newKey) {
+      tx.abort();
+      throw new Error('事实的新 key 无效');
+    }
+    if (newKey !== oldKey && await store.get(newKey)) {
+      tx.abort();
+      throw new Error(`事实的新 key 已存在：${newKey}`);
+    }
+
+    record.seq = previous.seq;
+    (item as Record<string, unknown>).seq = previous.seq;
+    if (newKey !== oldKey) await store.delete(oldKey);
+    await store.put(record);
+    await tx.done;
+  }
+
   async del(coll: Coll, key: string) {
     await (await this.dbp).delete(coll, key);
   }
@@ -185,8 +359,12 @@ export class IdbPersistence implements Persistence {
       for (const item of (d as unknown as Record<Coll, object[]>)[c]) await st.put(structuredClone(item));
     }
     const meta = tx.objectStore('meta');
+    let maxFactSeq = 0;
+    for (const entry of d.entries) if (entry.seq > maxFactSeq) maxFactSeq = entry.seq;
+    for (const event of d.operations) if (event.seq > maxFactSeq) maxFactSeq = event.seq;
     await meta.put({ ...d.settings }, 'settings');
     await meta.put(dataVersion, 'dataVersion');
+    await meta.put(maxFactSeq, FACT_SEQ_KEY);
     await tx.done;
   }
 }
@@ -198,6 +376,7 @@ export class MemoryPersistence implements Persistence {
     return structuredClone(this.data);
   }
   async put() {}
+  async renameFact() {}
   async del() {}
   async putSettings() {}
   async replaceAll(d: Data) {
@@ -249,6 +428,25 @@ type Shape = Record<string, Check>;
 const OUTCOME = oneOf('done', 'partial', 'skipped');
 const REASON = oneOf('interrupted', 'no_energy', 'not_important', 'postponed');
 const ITEM_TYPE = oneOf('task', 'event');
+const OPERATION_KIND = oneOf(
+  'project-created', 'project-renamed', 'project-restarted', 'project-trimmed', 'project-closed',
+  'project-completed', 'project-resting-changed', 'task-created', 'task-arranged', 'task-rescheduled',
+  'task-moved', 'task-dropped', 'legacy-life',
+);
+const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete');
+const OPERATION_LIFE = arrayOf({
+  'projectId?': isText, 'taskId?': isText, text: isStr, kind: LIFE_KIND, 'reason?': REASON,
+});
+const OPERATION_PAYLOAD: Check = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (o.legacyLifeId !== undefined && (typeof o.legacyLifeId !== 'string' || !o.legacyLifeId.trim())) return false;
+  if (o.life !== undefined && !OPERATION_LIFE(o.life)) return false;
+  // A migrated legacy row suppresses the original life record. Never accept
+  // that suppression marker unless the replacement snapshot is present.
+  if (o.legacyLifeId !== undefined && (!Array.isArray(o.life) || o.life.length === 0)) return false;
+  return true;
+};
 
 const SHAPES: Record<Coll, Shape> = {
   projects: {
@@ -269,10 +467,14 @@ const SHAPES: Record<Coll, Shape> = {
   },
   rules: { id: isText, contains: isText, projectId: isText },
   entries: {
-    id: isText, date: isDate, itemType: ITEM_TYPE, itemId: isText, outcome: OUTCOME, 'reason?': REASON,
+    id: isText, seq: intIn(1), date: isDate, itemType: ITEM_TYPE, itemId: isText, outcome: OUTCOME, 'reason?': REASON,
     'projectId?': isText, title: isStr,
   },
   days: { date: isDate, status: oneOf('settled', 'unrecorded') },
+  operations: {
+    id: isText, seq: intIn(1), date: isDate, kind: OPERATION_KIND,
+    'projectId?': isText, 'taskId?': isText, 'payload?': OPERATION_PAYLOAD,
+  },
   chronicle: { id: isText, date: isDate, text: isStr, kind: oneOf('day', 'event', 'quiet', 'recover', 'landmark') },
   life: {
     id: isText, date: isDate, 'projectId?': isText, 'taskId?': isText, text: isStr,
@@ -313,6 +515,11 @@ function checkRelations(d: Data, source: string) {
   for (const t of d.tasks) if (t.projectId !== undefined && !projects.has(t.projectId)) fail(`任务「${t.title}」所属的项目不存在`);
   for (const e of d.events) if (e.projectId !== undefined && e.projectId !== CHORES && !projects.has(e.projectId)) fail(`事件「${e.title}」所属的项目不存在`);
   for (const r of d.rules) if (r.projectId !== CHORES && !projects.has(r.projectId)) fail(`归类规则「${r.contains}」指向的项目不存在`);
+  const factSeqs = new Set<number>();
+  for (const fact of [...d.entries, ...d.operations]) {
+    if (factSeqs.has(fact.seq)) fail(`事实序号 ${fact.seq} 重复`);
+    factSeqs.add(fact.seq);
+  }
   const slots = new Set<number>();
   for (const p of d.projects) {
     if (p.status !== 'active') continue;
@@ -346,6 +553,7 @@ function rawBackupData(o: Record<string, unknown>): RawData {
     raw[key] = value;
   }
   ensureCurrentCollections(raw);
+  raw.__legacyLifeOrder = 'array';
   for (const c of COLL_NAMES) if (!Array.isArray(raw[c])) throw new Error(`备份里的 ${c} 格式不对`);
   return raw;
 }
