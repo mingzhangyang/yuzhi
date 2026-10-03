@@ -142,6 +142,35 @@ export function computeVillage(
   return { neglect, baseStage, postponePenalty: hasHeavyPostpone, stage, daysSinceProgress: sinceProgress };
 }
 
+function projectActiveAt(project: Project, operationDays: Map<ISODate, OperationEvent[]>, throughDate: ISODate): boolean {
+  if (project.createdAt > throughDate) return false;
+
+  const facts = [...operationDays.entries()]
+    .filter(([date]) => date <= throughDate)
+    .flatMap(([, events]) => events)
+    .slice()
+    .sort((a, b) => a.seq - b.seq);
+
+  let active = true;
+  let sawTerminalFact = false;
+  for (const event of facts) {
+    if (event.kind === 'project-created' || event.kind === 'project-restarted' || event.kind === 'project-trimmed') {
+      active = true;
+    } else if (event.kind === 'project-closed' || event.kind === 'project-completed') {
+      active = false;
+      sawTerminalFact = true;
+    }
+  }
+
+  // Compatibility fallback for legacy records whose lifecycle fact was never
+  // recorded. Explicit replay facts win whenever they exist.
+  if (!sawTerminalFact) {
+    if (project.doneAt && project.doneAt <= throughDate) active = false;
+    else if (project.closedAt && project.closedAt <= throughDate) active = false;
+  }
+  return active;
+}
+
 export function computeAllVillages(data: Data, today: ISODate): Map<string, VillageState> {
   const statusOf = dayStatusFn(data, today);
   const byProject = new Map<string, Map<ISODate, SettlementEntry[]>>();
@@ -157,11 +186,12 @@ export function computeAllVillages(data: Data, today: ISODate): Map<string, Vill
   const operations = projectOperations(data);
   const out = new Map<string, VillageState>();
   for (const project of data.projects) {
-    if (project.status !== 'active') continue;
+    const operationDays = operations.get(project.id) ?? new Map();
+    if (!projectActiveAt(project, operationDays, today)) continue;
     const heavy = tasks.some(
       (task) => task.projectId === project.id && task.status === 'open' && task.postponeCount >= POSTPONE_PENALTY_AT,
     );
-    out.set(project.id, computeVillage(project, byProject.get(project.id) ?? new Map(), statusOf, heavy, today, operations.get(project.id) ?? new Map()));
+    out.set(project.id, computeVillage(project, byProject.get(project.id) ?? new Map(), statusOf, heavy, today, operationDays));
   }
   return out;
 }
@@ -395,11 +425,26 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
         visibleStage = stageWithPenalty(neglect, heavy);
       }
 
+      const heavyAtDayStart = heavy;
       let factBaseline = active ? stageWithPenalty(neglect, heavy) : undefined;
       let factTransition: StageTransition | undefined;
       let factTransitionSeq: number | undefined;
       const activeRows: SettlementEntry[] = [];
       let progressApplied = false;
+      const heavyChange = heavyTimeline.get(project.id)?.get(date);
+      let heavyApplied = false;
+
+      const applyHeavyThrough = (seq: number) => {
+        if (heavyApplied || !heavyChange || heavyChange.factSeq === undefined || heavyChange.factSeq > seq) return;
+        const beforeHeavy = heavy;
+        heavy = heavyChange.heavy;
+        heavyApplied = true;
+        if (heavy !== beforeHeavy) {
+          factTransitionSeq = factTransitionSeq === undefined
+            ? heavyChange.factSeq
+            : Math.max(factTransitionSeq, heavyChange.factSeq);
+        }
+      };
 
       const captureBeforeDeactivate = () => {
         if (!active || factBaseline === undefined) return;
@@ -418,6 +463,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
       };
 
       for (const fact of dayFacts) {
+        applyHeavyThrough(fact.seq);
         const event = fact.operation;
         if (event) {
           if (event.kind === 'project-closed' || event.kind === 'project-completed') {
@@ -465,11 +511,11 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
         factBaseline = undefined;
       }
 
-      const previousHeavy = heavy;
-      const heavyChange = heavyTimeline.get(project.id)?.get(date);
-      if (heavyChange) {
+      if (!heavyApplied && heavyChange) {
+        const beforeHeavy = heavy;
         heavy = heavyChange.heavy;
-        if (heavy !== previousHeavy && heavyChange.factSeq !== undefined) {
+        heavyApplied = true;
+        if (heavy !== beforeHeavy && heavyChange.factSeq !== undefined) {
           factTransitionSeq = factTransitionSeq === undefined
             ? heavyChange.factSeq
             : Math.max(factTransitionSeq, heavyChange.factSeq);
@@ -499,7 +545,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
             statusOf(date) === 'empty' &&
             activeRows.length === 0 &&
             !resetToday &&
-            previousHeavy === heavy;
+            heavyAtDayStart === heavy;
           if (!pureTime) {
             factTransition = {
               id: `stage|${date}|${project.id}`,

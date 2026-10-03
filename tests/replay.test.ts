@@ -83,6 +83,23 @@ describe('Phase 2 fact replay', () => {
     });
   });
 
+  it('历史日期的村落计算不受项目当前已关闭状态影响', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '后来关闭');
+    const t = createTask(h.store, { title: '历史推进', projectId: p.id, scheduledFor: '2026-09-08' });
+    h.setToday('2026-09-08');
+    settleDay(h.store, h.today, new Map([[itemKey('task', t.id), { outcome: 'done' }]]));
+
+    h.setToday('2026-09-10');
+    closeProject(h.store, p.id, '后来关闭');
+    expect(h.store.project(p.id)?.status).toBe('closed');
+
+    // Rejudging 9/8 asks computeAllVillages(..., 9/8) for the before/after
+    // stage. The project was active on that date even though it is closed now.
+    settleDay(h.store, '2026-09-08', new Map([[itemKey('task', t.id), { outcome: 'partial' }]]));
+    expect(h.store.data.chronicle.find((line) => line.id === 'day|2026-09-08')).toBeTruthy();
+  });
+
   it('项目关闭后改判更早的 done 为 partial，任务仍在关闭事实处被放下', () => {
     const h = makeStore('2026-10-01');
     const p = createProject(h.store, '团队');
