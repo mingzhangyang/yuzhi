@@ -2,6 +2,7 @@ import type { Data, ISODate, Settings } from './types';
 import { COLLECTIONS, type Coll, type Persistence } from './db';
 import { localDate } from './lib/date';
 import { computeAllVillages, type VillageState } from './logic/decay';
+import { taskState, taskStates } from './logic/read-model';
 
 type Item<C extends Coll> = Data[C][number];
 
@@ -101,8 +102,20 @@ export class Store {
     return id ? this.data.projects.find((p) => p.id === id) : undefined;
   }
 
-  task(id: string | undefined) {
+  /** Raw entity record. Use only when editing entity-owned fields such as title/createdAt. */
+  taskRecord(id: string | undefined) {
     return id ? this.data.tasks.find((t) => t.id === id) : undefined;
+  }
+
+  /** Effective task after replaying operation + settlement facts. */
+  task(id: string | undefined) {
+    const raw = this.taskRecord(id);
+    return raw ? taskState(this.data, raw) : undefined;
+  }
+
+  /** Effective task list after fact replay. */
+  tasks() {
+    return taskStates(this.data);
   }
 
   activeProjects() {

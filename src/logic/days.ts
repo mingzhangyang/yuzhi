@@ -1,6 +1,7 @@
 import type { CalendarEvent, Data, ISODate, SettlementEntry, Task } from '../types';
 import { dateOfStamp, diffDays } from '../lib/date';
 import { ARCHIVE_AFTER_DAYS } from './config';
+import { taskStates } from './read-model';
 
 export interface SettleItem {
   key: string;
@@ -32,14 +33,15 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   for (const e of data.entries) if (e.date === date) entries.set(itemKey(e.itemType, e.itemId), e);
   const out: SettleItem[] = [];
   const seen = new Set<string>();
-  const taskById = new Map<string, Task>(data.tasks.map((t) => [t.id, t]));
+  const tasks = taskStates(data);
+  const taskById = new Map<string, Task>(tasks.map((t) => [t.id, t]));
 
   for (const ev of eventsOn(data.events, date)) {
     const key = itemKey('event', ev.id);
     seen.add(key);
     out.push({ key, type: 'event', id: ev.id, title: ev.title, projectId: ev.projectId, start: ev.start, end: ev.end, entry: entries.get(key) });
   }
-  for (const t of data.tasks) {
+  for (const t of tasks) {
     const key = itemKey('task', t.id);
     if (t.status === 'open' && t.scheduledFor === date && t.projectId) {
       seen.add(key);
@@ -66,7 +68,7 @@ export function pendingDays(data: Data, today: ISODate): ISODate[] {
   const consider = (d: ISODate | undefined) => {
     if (d && d >= first && d < today && !recorded.has(d)) found.add(d);
   };
-  for (const t of data.tasks) if (t.status === 'open' && t.projectId) consider(t.scheduledFor);
+  for (const t of taskStates(data, today)) if (t.status === 'open' && t.projectId) consider(t.scheduledFor);
   for (const e of data.events) if (!e.allDay) consider(dateOfStamp(e.start));
   return [...found].sort();
 }

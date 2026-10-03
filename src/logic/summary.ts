@@ -2,6 +2,8 @@ import type { Data, ISODate, Project, SkipReason } from '../types';
 import { diffDays } from '../lib/date';
 import { progressWeight } from './metrics';
 import { lifeEntries } from './operations';
+import { stageLifeEntries } from './decay';
+import { taskStates } from './read-model';
 
 export interface Blocker {
   text: string;
@@ -42,8 +44,8 @@ const REASON: Record<SkipReason, string> = {
 
 export function summarize(data: Data, p: Project, end: ISODate): ProjectSummary {
   const entries = data.entries.filter((e) => e.projectId === p.id);
-  const tasks = data.tasks.filter((t) => t.projectId === p.id);
-  const life = lifeEntries(data).filter((l) => l.projectId === p.id).sort((a, b) => a.date.localeCompare(b.date));
+  const tasks = taskStates(data, end).filter((t) => t.projectId === p.id);
+  const life = lifeEntries(data, stageLifeEntries(data, end)).filter((l) => l.projectId === p.id).sort((a, b) => a.date.localeCompare(b.date));
 
   let bricks = 0;
   const perDay = new Map<ISODate, number>();

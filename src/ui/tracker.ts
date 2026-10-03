@@ -3,7 +3,7 @@
  * 也承载码头、粮仓、杂务这些地图上能点的地方。
  */
 import type { Store } from '../store';
-import type { ISODate, LifeEntry, Project, Task } from '../types';
+import type { ISODate, LifeEntry, Project } from '../types';
 import { CHORES } from '../types';
 import { $, esc, setHTML, setText, toast } from './dom';
 import { closeModal, confirmModal, openModal } from './modal';
@@ -15,6 +15,8 @@ import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
 import { summarize } from '../logic/summary';
 import { lifeEntries } from '../logic/operations';
+import { stageLifeEntries } from '../logic/decay';
+import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
 
 export type View =
@@ -197,8 +199,9 @@ export class Tracker {
     const rows = ps
       .map((p) => {
         const v = vs.get(p.id)!;
-        const open = s.data.tasks.filter((t) => t.projectId === p.id && t.status === 'open').length;
-        const since = p.lastProgressAt ? `距上次推进 ${diffDays(p.lastProgressAt, today)} 天` : `立项 ${diffDays(p.createdAt, today)} 天，还没推进`;
+        const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
+        const progressAt = lastProgressAt(s.data, p.id);
+        const since = progressAt ? `距上次推进 ${diffDays(progressAt, today)} 天` : `立项 ${diffDays(p.createdAt, today)} 天，还没推进`;
         return `<button class="row" data-act="project" data-id="${p.id}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${open} 件未完成 · ${since}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${STAGE_NAMES[v.stage]}</span></button>`;
       })
       .join('');
@@ -221,7 +224,7 @@ export class Tracker {
     const s = this.store;
     const today = s.today();
     const v = s.villages().get(p.id);
-    const tasks = s.data.tasks.filter((t) => t.projectId === p.id);
+    const tasks = s.tasks().filter((t) => t.projectId === p.id);
     const open = tasks.filter((t) => t.status === 'open').sort((a, b) => (a.scheduledFor ?? '9999').localeCompare(b.scheduledFor ?? '9999'));
     const done = tasks.filter((t) => t.status === 'done').sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''));
     const active = p.status === 'active';
@@ -236,7 +239,8 @@ export class Tracker {
       active && stage === 3 ? '<span class="chip warn">任务可能放弃</span>' : '',
       `<span class="chip">${houseCount(s, p.id)} 间房</span>`,
     ].join('');
-    const since = p.lastProgressAt ? diffDays(p.lastProgressAt, today) : null;
+    const progressAt = lastProgressAt(s.data, p.id);
+    const since = progressAt ? diffDays(progressAt, today) : null;
     const taskRows = open
       .map((t) => {
         const late = t.scheduledFor && t.scheduledFor < today;
@@ -244,7 +248,7 @@ export class Tracker {
         return `<div class="task"><div class="tt" data-act="task" data-id="${t.id}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${t.id}" title="今天做完了" aria-label="今天做完了">✓</button><button class="iconbtn" data-act="resched" data-id="${t.id}" title="改日期" aria-label="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${t.id}" title="不重要了" aria-label="不重要了">✕</button></div>` : ''}</div>`;
       })
       .join('');
-    const life = lifeEntries(s.data).filter((l) => l.projectId === p.id);
+    const life = lifeEntries(s.data, stageLifeEntries(s.data, today)).filter((l) => l.projectId === p.id);
     const html = `
       ${this.back$()}
       <div class="who"><div class="emblem">${emblem(roofOf(p.islandSlot), active ? stage : 2)}</div><div><div class="fname">${esc(p.name)}</div><div class="fmeta">${fmtDay(p.createdAt)}立项 · 已 ${diffDays(p.createdAt, today)} 天${p.closedAt ? ` · ${fmtDay(p.closedAt)}关闭` : ''}${p.doneAt ? ` · ${fmtDay(p.doneAt)}落成` : ''}</div></div></div>
@@ -274,14 +278,14 @@ export class Tracker {
     return [html, p.name, active ? STAGE_NAMES[stage] + ` · ${open.length} 件未完成` : p.status === 'done' ? (p.resting === 'landmark' ? '海岸上的地标' : '灯塔里的档案') : '已关闭'];
   }
 
-  private task(t: Task): [string, string, string] {
+  private task(t: TaskView): [string, string, string] {
     const s = this.store;
     const today = s.today();
     const p = s.project(t.projectId);
     const late = t.status === 'open' && t.scheduledFor && t.scheduledFor < today;
     const statusChip = t.status === 'open' ? `<span class="chip ok">进行中</span>` : t.status === 'done' ? `<span class="chip ok">已完成</span>` : `<span class="chip">已放下</span>`;
     const entries = s.data.entries.filter((e) => e.itemType === 'task' && e.itemId === t.id);
-    const life = lifeEntries(s.data).filter((l) => l.taskId === t.id);
+    const life = lifeEntries(s.data, stageLifeEntries(s.data, today)).filter((l) => l.taskId === t.id);
     const projOpts = s.activeProjects().map((x) => `<option value="${x.id}"${x.id === t.projectId ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
     const html = `
       ${this.back$(p ? p.name : '码头')}
@@ -302,15 +306,15 @@ export class Tracker {
   private dock(): [string, string, string] {
     const s = this.store;
     const today = s.today();
-    const ships = s.data.tasks.filter((t) => t.status === 'open' && !t.projectId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    const overdue = s.data.tasks.filter((t) => t.status === 'open' && t.projectId && t.scheduledFor && t.scheduledFor < today).sort((a, b) => a.scheduledFor!.localeCompare(b.scheduledFor!));
+    const ships = s.tasks().filter((t) => t.status === 'open' && !t.projectId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const overdue = s.tasks().filter((t) => t.status === 'open' && t.projectId && t.scheduledFor && t.scheduledFor < today).sort((a, b) => a.scheduledFor!.localeCompare(b.scheduledFor!));
     const projOpts = s.activeProjects().map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
     const shipRows = ships
       .map(
         (t) => `<form class="ship" data-form="arrange" data-id="${t.id}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="住进哪个村落">${projOpts || '<option value="">（先建一个村落）</option>'}</select>${dateSelect('adate', today, t.scheduledFor)}<button class="btn small primary"${projOpts ? '' : ' disabled'}>安排</button><button type="button" class="btn small" data-act="decline" data-id="${t.id}">婉拒</button></div></form>`,
       )
       .join('');
-    const ints = s.data.interruptions.slice().sort((a, b) => b.date.localeCompare(a.date));
+    const ints = interruptions(s.data).sort((a, b) => b.date.localeCompare(a.date));
     const week = ints.filter((i) => i.date > addDays(today, -7));
     const byProj = new Map<string, number>();
     for (const i of week) byProj.set(i.projectId ?? '', (byProj.get(i.projectId ?? '') ?? 0) + 1);
@@ -606,7 +610,7 @@ export class Tracker {
     const s = this.store;
     const p = s.project(id);
     if (!p) return;
-    const open = s.data.tasks.filter((t) => t.projectId === id && t.status === 'open').length;
+    const open = s.tasks().filter((t) => t.projectId === id && t.status === 'open').length;
     openModal({
       kick: '最后一步由你决定',
       title: `正式关闭「${p.name}」？`,
@@ -626,8 +630,8 @@ export class Tracker {
 /** 搬离阶段的询问：重新启动 / 缩小规模 / 正式关闭 */
 export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
   const v = store.villages().get(p.id);
-  const open = store.data.tasks.filter((t) => t.projectId === p.id && t.status === 'open');
-  const reasons = lifeEntries(store.data).filter((l) => l.projectId === p.id && l.kind === 'skip' && l.reason);
+  const open = store.tasks().filter((t) => t.projectId === p.id && t.status === 'open');
+  const reasons = lifeEntries(store.data, stageLifeEntries(store.data, store.today())).filter((l) => l.projectId === p.id && l.kind === 'skip' && l.reason);
   const counts = new Map<string, number>();
   for (const r of reasons) counts.set(A.REASON_TEXT[r.reason!], (counts.get(A.REASON_TEXT[r.reason!]) ?? 0) + 1);
   const why = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n} 次`).join('、');

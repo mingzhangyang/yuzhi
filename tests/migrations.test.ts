@@ -13,6 +13,7 @@ import {
 } from '../src/db';
 import { runMigrationSteps } from '../src/migrations';
 import { lifeEntries } from '../src/logic/operations';
+import { interruptions, taskState } from '../src/logic/read-model';
 import { v1BackupFixture } from './fixtures/v1-backup';
 
 const dbName = (label: string) => `yuzhi-${label}-${Date.now()}-${Math.random()}`;
@@ -77,11 +78,16 @@ describe('数据迁移基础设施', () => {
 
   it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {
     const parsed = parseBackup(JSON.stringify(v1BackupFixture));
-    expect(parsed.projects[0]).toMatchObject({ id: 'p1', lastStage: 0 });
-    expect(parsed.tasks.find((t) => t.id === 't1')?.postponeCount).toBe(1);
-    expect(parsed.interruptions).toHaveLength(1);
-    expect(parsed.operations).toHaveLength(1);
-    expect(parsed.operations[0]).toMatchObject({ seq: 1, kind: 'project-created', projectId: 'p1' });
+    expect(parsed.projects[0]).toMatchObject({ id: 'p1' });
+    expect('lastStage' in parsed.projects[0]).toBe(false);
+    const rawTask = parsed.tasks.find((t) => t.id === 't1')!;
+    expect('postponeCount' in rawTask).toBe(false);
+    expect(taskState(parsed, rawTask).postponeCount).toBe(1);
+    expect(interruptions(parsed)).toHaveLength(1);
+    expect(parsed.life.some((entry) => ['done', 'partial', 'skip', 'stage'].includes(entry.kind))).toBe(false);
+    expect(parsed.operations).toHaveLength(3);
+    expect(parsed.operations.find((event) => event.kind === 'project-created')).toMatchObject({ seq: 1, projectId: 'p1' });
+    expect(parsed.operations.filter((event) => event.kind === 'task-state-baseline')).toHaveLength(2);
     expect(parsed.entries.map((entry) => entry.seq)).toEqual([2, 3]);
     const migratedLife = lifeEntries(parsed);
     expect(migratedLife).toHaveLength(3);
@@ -109,6 +115,7 @@ describe('数据迁移基础设施', () => {
     const inspect = await openDB(name, IDB_SCHEMA_VERSION);
     expect(await inspect.get('meta', 'dataVersion')).toBe(DATA_VERSION);
     for (const c of Object.keys(COLLECTIONS)) expect(inspect.objectStoreNames.contains(c)).toBe(true);
+    expect(inspect.objectStoreNames.contains('interruptions')).toBe(false);
     inspect.close();
   });
 

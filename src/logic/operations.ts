@@ -5,6 +5,49 @@ const LIFE_KINDS = new Set<LifeKind>([
 ]);
 const REASONS = new Set<SkipReason>(['interrupted', 'no_energy', 'not_important', 'postponed']);
 
+const REASON_TEXT: Record<SkipReason, string> = {
+  interrupted: '被打断',
+  no_energy: '没精力',
+  not_important: '不重要了',
+  postponed: '推到明天',
+};
+
+export function settlementLifeEntries(data: Data): LifeEntry[] {
+  return data.entries.map((entry) => {
+    const title = `「${entry.title}」`;
+    const taskId = entry.itemType === 'task' ? entry.itemId : undefined;
+    if (entry.outcome === 'done') {
+      return {
+        id: `l|${entry.id}`,
+        date: entry.date,
+        projectId: entry.projectId,
+        taskId,
+        kind: 'done',
+        text: entry.itemType === 'task' ? `完成了${title}` : `${title}做了`,
+      };
+    }
+    if (entry.outcome === 'partial') {
+      return {
+        id: `l|${entry.id}`,
+        date: entry.date,
+        projectId: entry.projectId,
+        taskId,
+        kind: 'partial',
+        text: `${title}做了一部分`,
+      };
+    }
+    return {
+      id: `l|${entry.id}`,
+      date: entry.date,
+      projectId: entry.projectId,
+      taskId,
+      kind: 'skip',
+      reason: entry.reason,
+      text: `${title}没做${entry.reason ? `：${REASON_TEXT[entry.reason]}` : ''}`,
+    };
+  });
+}
+
 export function nextFactSeq(data: Data): number {
   let max = 0;
   for (const event of data.operations) if (event.seq > max) max = event.seq;
@@ -48,12 +91,20 @@ export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
  * 一生之书 read model：结算 / 阶段兼容行仍来自 life；主动操作来自 operations。
  * v1 迁移出的 operation 保留 legacyLifeId，因此旧 life 行不会重复显示。
  */
-export function lifeEntries(data: Data): LifeEntry[] {
+export function lifeEntries(data: Data, derivedStageEntries: LifeEntry[] = []): LifeEntry[] {
   const migrated = new Set<string>();
   for (const event of data.operations) {
     const id = event.payload?.legacyLifeId;
     if (typeof id === 'string') migrated.add(id);
   }
-  const compat = data.life.filter((entry) => !migrated.has(entry.id));
-  return [...compat, ...data.operations.flatMap(operationLifeEntries)];
+  const settlementIds = new Set(data.entries.map((entry) => `l|${entry.id}`));
+  const compat = data.life.filter(
+    (entry) => !migrated.has(entry.id) && !settlementIds.has(entry.id) && entry.kind !== 'stage',
+  );
+  return [
+    ...compat,
+    ...data.operations.flatMap(operationLifeEntries),
+    ...settlementLifeEntries(data),
+    ...derivedStageEntries,
+  ];
 }

@@ -1,7 +1,8 @@
-import type { Data, ISODate, Project, SettlementEntry } from '../types';
+import type { Data, ISODate, LifeEntry, Project, SettlementEntry } from '../types';
 import { addDays } from '../lib/date';
-import { POSTPONE_PENALTY_AT, STAGE_START, type Stage } from './config';
+import { POSTPONE_PENALTY_AT, STAGE_NAMES, STAGE_START, type Stage } from './config';
 import { dayStatusFn, type DayStatus } from './days';
+import { taskState, taskStates } from './read-model';
 
 export interface VillageState {
   /** 折算后的「荒置天数」 */
@@ -51,7 +52,7 @@ export function computeVillage(
   hasHeavyPostpone: boolean,
   today: ISODate,
 ): VillageState {
-  const resets = (project.resets ?? []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const resets = (project.resets ?? []).filter((reset) => reset.date <= today).slice().sort((a, b) => a.date.localeCompare(b.date));
   let neglect = 0;
   let start = project.createdAt;
   const last = resets[resets.length - 1];
@@ -95,8 +96,80 @@ export function computeAllVillages(data: Data, today: ISODate): Map<string, Vill
   const out = new Map<string, VillageState>();
   for (const p of data.projects) {
     if (p.status !== 'active') continue;
-    const heavy = data.tasks.some((t) => t.projectId === p.id && t.status === 'open' && t.postponeCount >= POSTPONE_PENALTY_AT);
+    const heavy = taskStates(data, today).some((t) => t.projectId === p.id && t.status === 'open' && t.postponeCount >= POSTPONE_PENALTY_AT);
     out.set(p.id, computeVillage(p, byProject.get(p.id) ?? new Map(), statusOf, heavy, today));
+  }
+  return out;
+}
+
+
+/**
+ * Rebuild stage-history rows from the current facts and current decay rules.
+ * A day can have two replayed transitions: one visible at day start as time
+ * passes, and one net transition caused by that day's settlement.
+ */
+export function stageLifeEntries(data: Data, today: ISODate): LifeEntry[] {
+  const baseStatusOf = dayStatusFn(data, today);
+
+  const stageFor = (project: Project, date: ISODate, omitSettlementDate: boolean): Stage => {
+    const view: Data = omitSettlementDate
+      ? {
+          ...data,
+          entries: data.entries.filter((entry) => entry.date !== date),
+          days: data.days.filter((day) => day.date !== date),
+        }
+      : data;
+    const entriesByDate = new Map<ISODate, SettlementEntry[]>();
+    for (const entry of view.entries) {
+      if (entry.projectId !== project.id) continue;
+      const rows = entriesByDate.get(entry.date);
+      if (rows) rows.push(entry);
+      else entriesByDate.set(entry.date, [entry]);
+    }
+    const statusOf = omitSettlementDate
+      ? (day: ISODate): DayStatus => (day === date ? 'pending' : baseStatusOf(day))
+      : baseStatusOf;
+    const heavy = view.tasks.some((raw) => {
+      if (raw.createdAt > date) return false;
+      const task = taskState(view, raw, date);
+      return task.projectId === project.id && task.status === 'open' && task.postponeCount >= POSTPONE_PENALTY_AT;
+    });
+    return computeVillage(project, entriesByDate, statusOf, heavy, date).stage;
+  };
+
+  const out: LifeEntry[] = [];
+  for (const project of data.projects) {
+    let end = today;
+    const stopped = project.doneAt ?? project.closedAt;
+    if (stopped && stopped < end) end = stopped;
+    if (end < project.createdAt) continue;
+
+    let previous: Stage = 0;
+    for (let date = project.createdAt; date <= end; date = addDays(date, 1)) {
+      const startStage = stageFor(project, date, true);
+      if (startStage !== previous) {
+        out.push({
+          id: `stage-time|${date}|${project.id}`,
+          date,
+          projectId: project.id,
+          kind: 'stage',
+          text: `村落进入「${STAGE_NAMES[startStage]}」阶段`,
+        });
+      }
+
+      const settled = data.days.some((day) => day.date === date && day.status === 'settled');
+      const endStage = settled ? stageFor(project, date, false) : startStage;
+      if (settled && endStage !== startStage) {
+        out.push({
+          id: `stage|${date}|${project.id}`,
+          date,
+          projectId: project.id,
+          kind: 'stage',
+          text: `村落进入「${STAGE_NAMES[endStage]}」阶段`,
+        });
+      }
+      previous = endStage;
+    }
   }
   return out;
 }
