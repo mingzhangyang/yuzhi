@@ -120,12 +120,12 @@ describe('数据迁移基础设施', () => {
       outcome: 'done',
       title: '并发事件',
     };
-    await Promise.all([
+    const [operationSeq, entrySeq] = await Promise.all([
       left.put('operations', operation),
       right.put('entries', entry),
     ]);
 
-    expect(new Set([operation.seq, entry.seq]).size).toBe(2);
+    expect(new Set([operationSeq, entrySeq]).size).toBe(2);
     const loaded = await new IdbPersistence(name).load();
     expect([...loaded.operations, ...loaded.entries].map((fact) => fact.seq).sort((a, b) => a - b)).toEqual([1, 2]);
   });
