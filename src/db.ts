@@ -180,6 +180,7 @@ function parseStoredDataVersion(v: unknown): number | undefined {
 export interface Persistence {
   load(): Promise<Data>;
   put(coll: Coll, item: object): Promise<void>;
+  renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<void>;
   del(coll: Coll, key: string): Promise<void>;
   putSettings(s: Settings): Promise<void>;
   replaceAll(d: Data): Promise<void>;
@@ -298,6 +299,34 @@ export class IdbPersistence implements Persistence {
     await store.put(record);
     await tx.done;
   }
+  async renameFact(coll: 'entries' | 'operations', oldKey: string, item: object) {
+    const db = await this.dbp;
+    const tx = db.transaction(coll, 'readwrite');
+    const store = tx.objectStore(coll);
+    const previous = await store.get(oldKey) as Record<string, unknown> | undefined;
+    if (!previous || typeof previous.seq !== 'number' || !Number.isInteger(previous.seq) || previous.seq < 1) {
+      tx.abort();
+      throw new Error(`找不到要重命名的事实：${oldKey}`);
+    }
+
+    const record = structuredClone(item) as Record<string, unknown>;
+    const newKey = record[COLLECTIONS[coll]];
+    if (typeof newKey !== 'string' || !newKey) {
+      tx.abort();
+      throw new Error('事实的新 key 无效');
+    }
+    if (newKey !== oldKey && await store.get(newKey)) {
+      tx.abort();
+      throw new Error(`事实的新 key 已存在：${newKey}`);
+    }
+
+    record.seq = previous.seq;
+    (item as Record<string, unknown>).seq = previous.seq;
+    if (newKey !== oldKey) await store.delete(oldKey);
+    await store.put(record);
+    await tx.done;
+  }
+
   async del(coll: Coll, key: string) {
     await (await this.dbp).delete(coll, key);
   }
@@ -332,6 +361,7 @@ export class MemoryPersistence implements Persistence {
     return structuredClone(this.data);
   }
   async put() {}
+  async renameFact() {}
   async del() {}
   async putSettings() {}
   async replaceAll(d: Data) {

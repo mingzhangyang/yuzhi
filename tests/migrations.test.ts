@@ -129,6 +129,34 @@ describe('数据迁移基础设施', () => {
     expect([...loaded.operations, ...loaded.entries].map((fact) => fact.seq).sort((a, b) => a - b)).toEqual([1, 2]);
   });
 
+  it('事实改 key 时保留原持久化 seq，不重新排到队尾', async () => {
+    const name = dbName('fact-rename');
+    const per = new IdbPersistence(name);
+    await per.load();
+
+    const entry = {
+      id: '2026-10-01|event|legacy',
+      seq: 1,
+      date: '2026-10-01',
+      itemType: 'event',
+      itemId: 'legacy',
+      outcome: 'done',
+      title: '旧事件',
+    };
+    const operation = { id: 'o-after', seq: 2, date: '2026-10-01', kind: 'legacy-life' };
+    await per.put('entries', entry);
+    await per.put('operations', operation);
+    const originalSeq = entry.seq;
+
+    const renamed = { ...entry, id: '2026-10-01|event|stable', itemId: 'stable' };
+    await per.renameFact('entries', entry.id, renamed);
+
+    const loaded = await new IdbPersistence(name).load();
+    expect(loaded.entries.find((fact) => fact.id === entry.id)).toBeUndefined();
+    expect(loaded.entries.find((fact) => fact.id === renamed.id)).toMatchObject({ seq: originalSeq, itemId: 'stable' });
+    expect(loaded.operations.find((fact) => fact.id === operation.id)?.seq).toBeGreaterThan(originalSeq);
+  });
+
   it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {
     const parsed = parseBackup(JSON.stringify(v1BackupFixture));
     expect(parsed.projects[0]).toMatchObject({ id: 'p1', lastStage: 0 });

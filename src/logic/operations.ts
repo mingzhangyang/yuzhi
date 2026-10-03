@@ -41,6 +41,7 @@ export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
   return snapshotsOf(event).map((snapshot, index) => ({
     id: `oplife|${order}|${event.id}|${index}`,
     date: event.date,
+    factSeq: event.seq,
     ...snapshot,
   }));
 }
@@ -49,12 +50,30 @@ export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
  * 一生之书 read model：结算 / 阶段兼容行仍来自 life；主动操作来自 operations。
  * v1 迁移出的 operation 保留 legacyLifeId，因此旧 life 行不会重复显示。
  */
+export function compareLifeEntries(a: LifeEntry, b: LifeEntry): number {
+  const byDate = a.date.localeCompare(b.date);
+  if (byDate) return byDate;
+  if (a.factSeq !== undefined && b.factSeq !== undefined && a.factSeq !== b.factSeq) return a.factSeq - b.factSeq;
+  if (a.factSeq !== undefined && b.factSeq === undefined) return 1;
+  if (a.factSeq === undefined && b.factSeq !== undefined) return -1;
+  return a.id.localeCompare(b.id);
+}
+
 export function lifeEntries(data: Data): LifeEntry[] {
   const migrated = new Set<string>();
   for (const event of data.operations) {
     const id = event.payload?.legacyLifeId;
     if (typeof id === 'string') migrated.add(id);
   }
-  const compat = data.life.filter((entry) => !migrated.has(entry.id));
-  return [...compat, ...data.operations.flatMap(operationLifeEntries)];
+  const settlementSeq = new Map(data.entries.map((entry) => [`l|${entry.id}`, entry.seq] as const));
+  const compat = data.life
+    .filter((entry) => !migrated.has(entry.id))
+    .map((entry) => {
+      const factSeq = settlementSeq.get(entry.id);
+      return factSeq === undefined ? entry : { ...entry, factSeq };
+    });
+  const operations = data.operations
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq || a.id.localeCompare(b.id));
+  return [...compat, ...operations.flatMap(operationLifeEntries)].sort(compareLifeEntries);
 }

@@ -157,6 +157,8 @@ export type LifeKind = 'start' | 'task' | 'done' | 'partial' | 'skip' | 'stage' 
 export interface LifeEntry {
   id: string;
   date: ISODate;
+  /** Read-model-only order shared by settlement and operation facts on the same day. */
+  factSeq?: number;
   projectId?: string;
   taskId?: string;
   text: string;

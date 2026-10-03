@@ -4,6 +4,7 @@ import {
   createProject,
   createTask,
   dropTask,
+  markTaskDone,
   moveTask,
   rescheduleTask,
   restartProject,
@@ -50,6 +51,22 @@ describe('Operation facts', () => {
       '新任务「写周报」住进村落',
       '「写周报」改到10月3日',
       '重新启动，村落重新热闹起来',
+    ]);
+  });
+
+  it('同日 settlement 与 operation 共用 factSeq，并按真实发生顺序投影', () => {
+    const h = makeStore();
+    const p = createProject(h.store, '团队');
+    const t = createTask(h.store, { title: '写周报', projectId: p.id });
+    markTaskDone(h.store, t.id);
+    restartProject(h.store, p.id);
+
+    const rows = lifeEntries(h.store.data).filter((row) => row.projectId === p.id);
+    expect(rows.map((row) => [row.factSeq, row.text])).toEqual([
+      [1, '立项，村落「团队」在岛上落成'],
+      [2, '新任务「写周报」住进村落'],
+      [3, '完成了「写周报」'],
+      [4, '重新启动，村落重新热闹起来'],
     ]);
   });
 

@@ -539,8 +539,7 @@ function renameEvent(store: Store, ev: CalendarEvent, newId: string) {
   store.del('events', ev.id);
   for (const en of store.data.entries.filter((x) => x.itemType === 'event' && x.itemId === ev.id)) {
     const nid = entryId(en.date, 'event', newId);
-    store.put('entries', { ...en, id: nid, itemId: newId });
-    store.del('entries', en.id);
+    store.renameFact('entries', en.id, { ...en, id: nid, itemId: newId });
     const l = store.data.life.find((x) => x.id === lifeIdOf(en.id));
     if (l) {
       store.put('life', { ...l, id: lifeIdOf(nid) });

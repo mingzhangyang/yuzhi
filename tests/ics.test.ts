@@ -116,12 +116,14 @@ describe('日历合并', () => {
     classifyEvents(h.store, '牙医', p.id);
     const oldId = 'src|single-1|2026-09-10T01:30:00.000Z';
     settleDay(h.store, '2026-09-10', new Map([[itemKey('event', oldId), { outcome: 'skipped', reason: 'interrupted' }]]));
+    const originalSeq = h.store.data.entries.find((e) => e.itemType === 'event' && e.itemId === oldId)!.seq;
 
     mergeEvents(h.store, 'src', parseIcs(ICS, 'src', from, to).events, from.toISOString());
     expect(h.store.data.events.filter((e) => e.uid === 'single-1').map((e) => e.id)).toEqual(['src|single-1']);
     expect(h.store.data.events.find((e) => e.uid === 'single-1')).toMatchObject({ projectId: p.id, classified: true });
     const en = h.store.data.entries.filter((e) => e.itemType === 'event');
     expect(en.map((e) => e.itemId)).toEqual(['src|single-1']);
+    expect(en[0].seq).toBe(originalSeq);
     expect(h.store.data.interruptions.map((i) => i.itemId)).toEqual(['src|single-1']);
     expect(h.store.data.life.some((l) => l.id === `l|${en[0].id}`)).toBe(true);
     // 重复事件里没改期的那几次，id 本来就一样

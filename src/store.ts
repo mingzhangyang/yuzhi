@@ -36,6 +36,17 @@ export class Store {
     this.changed();
   }
 
+  renameFact<C extends 'entries' | 'operations'>(coll: C, oldKey: string, item: Item<C>): void {
+    const key = COLLECTIONS[coll];
+    const arr = this.data[coll] as unknown as Record<string, unknown>[];
+    const rec = item as unknown as Record<string, unknown>;
+    const i = arr.findIndex((x) => x[key] === oldKey);
+    if (i >= 0) arr[i] = rec;
+    else arr.push(rec);
+    this.queue(() => this.persist.renameFact(coll, oldKey, item as object));
+    this.changed();
+  }
+
   del<C extends Coll>(coll: C, keyValue: string): void {
     const key = COLLECTIONS[coll];
     const arr = this.data[coll] as unknown as Record<string, unknown>[];

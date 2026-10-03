@@ -14,7 +14,7 @@ import { addDays, dateOfStamp, diffDays, fmtDay, relDay, startOfLocalDay } from 
 import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
 import { summarize } from '../logic/summary';
-import { lifeEntries } from '../logic/operations';
+import { compareLifeEntries, lifeEntries } from '../logic/operations';
 import { summaryHTML } from './ceremony';
 
 export type View =
@@ -49,7 +49,7 @@ function lifeList(entries: LifeEntry[], today: ISODate, limit = 60) {
   if (!entries.length) return '<p class="empty">还没有记录。</p>';
   const rows = entries
     .slice()
-    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+    .sort((a, b) => compareLifeEntries(b, a))
     .slice(0, limit)
     .map((e) => `<li class="k-${e.kind}"><time>${esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
     .join('');
