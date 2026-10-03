@@ -5,6 +5,7 @@ const LIFE_KINDS = new Set<LifeKind>([
 ]);
 const REASONS = new Set<SkipReason>(['interrupted', 'no_energy', 'not_important', 'postponed']);
 
+/** Provisional synchronous order for the tab-local model. IdbPersistence reserves the authoritative shared seq atomically before first persistence. */
 export function nextFactSeq(data: Data): number {
   let max = 0;
   for (const event of data.operations) if (event.seq > max) max = event.seq;

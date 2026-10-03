@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
 import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents, arrangeTask, recordBacklogSnapshot } from '../src/actions';
-import { entryId, itemKey, itemsForDay, pendingDays } from '../src/logic/days';
+import { itemKey, itemsForDay, pendingDays } from '../src/logic/days';
 import { backlog, backlogSeries, condition, granary, progress } from '../src/logic/metrics';
 import { CHORES } from '../src/types';
 

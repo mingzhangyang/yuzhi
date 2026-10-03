@@ -27,3 +27,21 @@ export const v1BackupFixture = {
   interruptions: [{ id: 'i|2026-10-01|task|t2', date: '2026-10-01', itemType: 'task', itemId: 't2', title: '回邮件', projectId: 'p1' }],
   snapshots: [{ date: '2026-10-01', backlog: 1 }],
 } as const;
+
+
+/** v1 history fixture covering every active life kind migrated into operation facts. */
+export const v1OperationHistoryFixture = {
+  ...v1BackupFixture,
+  life: [
+    { id: 'l-start', date: '2026-10-01', projectId: 'p1', text: '立项，村落「团队」在岛上落成', kind: 'start' },
+    { id: 'l-task', date: '2026-10-01', projectId: 'p1', taskId: 't1', text: '新任务「写周报」住进村落', kind: 'task' },
+    { id: 'l-event', date: '2026-10-01', projectId: 'p1', taskId: 't1', text: '「写周报」改到10月2日', kind: 'event' },
+    { id: 'l-restart', date: '2026-10-01', projectId: 'p1', text: '重新启动，村落重新热闹起来', kind: 'restart' },
+    { id: 'l-trim', date: '2026-10-01', projectId: 'p1', text: '缩小规模，轻装继续', kind: 'trim' },
+    { id: 'l-close', date: '2026-10-01', projectId: 'p1', text: '正式关闭：方向变化', kind: 'close' },
+    { id: 'l-drop', date: '2026-10-01', projectId: 'p1', taskId: 't2', text: '「回邮件」不重要了，移出村落', kind: 'drop', reason: 'not_important' },
+    { id: 'l-complete', date: '2026-10-01', projectId: 'p1', text: '落成，立为海岸上的地标', kind: 'complete' },
+    { id: 'l|2026-10-01|task|t1', date: '2026-10-01', projectId: 'p1', taskId: 't1', text: '「写周报」没做：推到明天', kind: 'skip', reason: 'postponed' },
+    { id: 'l|2026-10-01|task|t2', date: '2026-10-01', projectId: 'p1', taskId: 't2', text: '「回邮件」没做：被打断', kind: 'skip', reason: 'interrupted' },
+  ],
+} as const;

@@ -13,7 +13,7 @@ import {
 } from '../src/db';
 import { runMigrationSteps } from '../src/migrations';
 import { lifeEntries } from '../src/logic/operations';
-import { v1BackupFixture } from './fixtures/v1-backup';
+import { v1BackupFixture, v1OperationHistoryFixture } from './fixtures/v1-backup';
 
 const dbName = (label: string) => `yuzhi-${label}-${Date.now()}-${Math.random()}`;
 
@@ -73,6 +73,60 @@ describe('数据迁移基础设施', () => {
     badRaw.close();
 
     await expect(new IdbPersistence(badRecordName).load()).rejects.toThrow('本地数据里的 projects 第 1 条记录损坏');
+  });
+
+  it('迁移全部主动 life kind，并保留同日事实顺序', () => {
+    const parsed = parseBackup(JSON.stringify(v1OperationHistoryFixture));
+    expect(parsed.operations.map((event) => [event.seq, event.kind])).toEqual([
+      [1, 'project-created'],
+      [2, 'legacy-life'],
+      [3, 'legacy-life'],
+      [4, 'project-restarted'],
+      [5, 'project-trimmed'],
+      [6, 'project-closed'],
+      [7, 'task-dropped'],
+      [8, 'project-completed'],
+    ]);
+    expect(parsed.entries.map((entry) => entry.seq)).toEqual([9, 10]);
+
+    const activeKinds = new Set(['start', 'task', 'event', 'restart', 'trim', 'close', 'drop', 'complete']);
+    expect(lifeEntries(parsed).filter((entry) => activeKinds.has(entry.kind)).map((entry) => entry.text)).toEqual([
+      '立项，村落「团队」在岛上落成',
+      '新任务「写周报」住进村落',
+      '「写周报」改到10月2日',
+      '重新启动，村落重新热闹起来',
+      '缩小规模，轻装继续',
+      '正式关闭：方向变化',
+      '「回邮件」不重要了，移出村落',
+      '落成，立为海岸上的地标',
+    ]);
+  });
+
+  it('两个 persistence 实例并发写事实时原子分配唯一 seq', async () => {
+    const name = dbName('fact-seq');
+    await new IdbPersistence(name).load();
+    const left = new IdbPersistence(name);
+    const right = new IdbPersistence(name);
+    await Promise.all([left.load(), right.load()]);
+
+    const operation = { id: 'o-left', seq: 1, date: '2026-10-01', kind: 'legacy-life' };
+    const entry = {
+      id: '2026-10-01|event|e-right',
+      seq: 1,
+      date: '2026-10-01',
+      itemType: 'event',
+      itemId: 'e-right',
+      outcome: 'done',
+      title: '并发事件',
+    };
+    await Promise.all([
+      left.put('operations', operation),
+      right.put('entries', entry),
+    ]);
+
+    expect(new Set([operation.seq, entry.seq]).size).toBe(2);
+    const loaded = await new IdbPersistence(name).load();
+    expect([...loaded.operations, ...loaded.entries].map((fact) => fact.seq).sort((a, b) => a - b)).toEqual([1, 2]);
   });
 
   it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {

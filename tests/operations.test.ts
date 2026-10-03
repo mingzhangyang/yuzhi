@@ -37,6 +37,22 @@ describe('Operation facts', () => {
     ]);
   });
 
+  it('reload 后即使 operations 数组按随机主键顺序返回，life projection 仍按 date/seq 排序', () => {
+    const h = makeStore();
+    const p = createProject(h.store, '团队');
+    const t = createTask(h.store, { title: '写周报', projectId: p.id, scheduledFor: h.today });
+    rescheduleTask(h.store, t.id, '2026-10-03');
+    restartProject(h.store, p.id);
+
+    h.store.data.operations.reverse();
+    expect(lifeEntries(h.store.data).map((row) => row.text)).toEqual([
+      '立项，村落「团队」在岛上落成',
+      '新任务「写周报」住进村落',
+      '「写周报」改到10月3日',
+      '重新启动，村落重新热闹起来',
+    ]);
+  });
+
   it('同一次搬村只保存一个 operation fact，但能投影到两个村落的一生之书', () => {
     const h = makeStore();
     const a = createProject(h.store, '甲');

@@ -24,6 +24,7 @@ export type Coll = keyof typeof COLLECTIONS;
 export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
+const FACT_SEQ_KEY = 'factSeq';
 export const IDB_SCHEMA_VERSION = 3;
 export const DATA_VERSION = 2;
 const LEGACY_DATA_VERSION = 1;
@@ -248,7 +249,54 @@ export class IdbPersistence implements Persistence {
     return data;
   }
   async put(coll: Coll, item: object) {
+    if (coll === 'entries' || coll === 'operations') {
+      await this.putFact(coll, item);
+      return;
+    }
     await (await this.dbp).put(coll, structuredClone(item));
+  }
+
+  /**
+   * entries / operations share one persisted sequence. The readwrite
+   * transaction serializes competing tabs, so two writers cannot commit the
+   * same seq even when both tab-local stores computed the same provisional one.
+   * Updating an existing fact keeps its original seq (rejudgment/backdating).
+   */
+  private async putFact(coll: 'entries' | 'operations', item: object) {
+    const db = await this.dbp;
+    const tx = db.transaction(['entries', 'operations', 'meta'], 'readwrite');
+    const store = tx.objectStore(coll);
+    const meta = tx.objectStore('meta');
+    const record = structuredClone(item) as Record<string, unknown>;
+    const key = record[COLLECTIONS[coll]];
+    const existing = typeof key === 'string' ? await store.get(key) as Record<string, unknown> | undefined : undefined;
+
+    const validSeq = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+    const existingSeq = existing?.seq;
+    let seq: number | undefined = validSeq(existingSeq) && existingSeq >= 1 ? existingSeq : undefined;
+    if (seq === undefined) {
+      const saved = await meta.get(FACT_SEQ_KEY);
+      if (validSeq(saved)) {
+        seq = saved;
+      } else {
+        seq = 0;
+        for (const fact of await tx.objectStore('entries').getAll() as Array<{ seq?: unknown }>) {
+          if (validSeq(fact.seq) && fact.seq > seq) seq = fact.seq;
+        }
+        for (const fact of await tx.objectStore('operations').getAll() as Array<{ seq?: unknown }>) {
+          if (validSeq(fact.seq) && fact.seq > seq) seq = fact.seq;
+        }
+      }
+      seq += 1;
+      await meta.put(seq, FACT_SEQ_KEY);
+    }
+
+    record.seq = seq;
+    // Store keeps the same object reference in memory; update it to the
+    // authoritative persisted value once the atomic reservation succeeds.
+    (item as Record<string, unknown>).seq = seq;
+    await store.put(record);
+    await tx.done;
   }
   async del(coll: Coll, key: string) {
     await (await this.dbp).delete(coll, key);
@@ -267,8 +315,12 @@ export class IdbPersistence implements Persistence {
       for (const item of (d as unknown as Record<Coll, object[]>)[c]) await st.put(structuredClone(item));
     }
     const meta = tx.objectStore('meta');
+    let maxFactSeq = 0;
+    for (const entry of d.entries) if (entry.seq > maxFactSeq) maxFactSeq = entry.seq;
+    for (const event of d.operations) if (event.seq > maxFactSeq) maxFactSeq = event.seq;
     await meta.put({ ...d.settings }, 'settings');
     await meta.put(dataVersion, 'dataVersion');
+    await meta.put(maxFactSeq, FACT_SEQ_KEY);
     await tx.done;
   }
 }
