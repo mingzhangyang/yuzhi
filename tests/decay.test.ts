@@ -175,6 +175,37 @@ describe('阶段历史重放', () => {
     expect(h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.date)).toEqual(['2026-09-30']);
   });
 
+  it('改判历史结算后 refreshStages 删除已失效的派生阶段行', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '会恢复的项目');
+    h.setToday('2026-09-08');
+    const t = createTask(h.store, { title: '推进一下', projectId: p.id, scheduledFor: h.today });
+    const key = itemKey('task', t.id);
+    settleDay(h.store, h.today, new Map([[key, { outcome: 'skipped', reason: 'no_energy' }]]));
+
+    h.setToday('2026-10-01');
+    refreshStages(h.store);
+    const beforeIds = h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.id);
+    expect(beforeIds.length).toBeGreaterThan(0);
+
+    h.setToday('2026-09-08');
+    settleDay(h.store, h.today, new Map([[key, { outcome: 'done' }]]));
+    h.setToday('2026-10-01');
+    refreshStages(h.store);
+
+    const expectedIds = stageTransitions(h.store.data, h.today)
+      .filter((transition) => transition.source === 'time')
+      .map((transition) => `stage|${transition.date}|${transition.projectId}`)
+      .sort();
+    const actualIds = h.store.data.chronicle
+      .filter((line) => line.id.startsWith('stage|'))
+      .map((line) => line.id)
+      .sort();
+
+    expect(actualIds).toEqual(expectedIds);
+    expect(beforeIds.some((id) => !actualIds.includes(id))).toBe(true);
+  });
+
   it('历史 pending 按当时任务状态重建，不把前一天误算成荒置并制造假恢复', () => {
     const h = makeStore('2026-09-01', '2026-09-01');
     const p = createProject(h.store, '团队');

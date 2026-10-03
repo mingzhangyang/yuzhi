@@ -164,96 +164,71 @@ function reconcileLegacyEntries(
   taskId: string,
   baseline: OperationEvent,
 ) {
-  const originals = legacyEntriesOf(baseline).slice().sort((a, b) => b.seq - a.seq);
+  const originals = legacyEntriesOf(baseline).slice().sort((a, b) => a.seq - b.seq);
   if (!originals.length) return;
-  const currentById = new Map(
-    data.entries
-      .filter((entry) => entry.itemType === 'task' && entry.itemId === taskId && entry.seq < baseline.seq)
-      .map((entry) => [entry.id, entry] as const),
-  );
+  const currentEntries = data.entries
+    .filter((entry) => entry.itemType === 'task' && entry.itemId === taskId && entry.seq < baseline.seq)
+    .slice()
+    .sort((a, b) => a.seq - b.seq);
+  const currentById = new Map(currentEntries.map((entry) => [entry.id, entry] as const));
+  const firstChanged = originals.find((original) => !sameSettlement(currentById.get(original.id), original));
+  if (!firstChanged) return;
 
-  for (const original of originals) {
-    const current = currentById.get(original.id);
-    if (sameSettlement(current, original)) continue;
+  const operations = data.operations
+    .filter(
+      (event) =>
+        event.seq > firstChanged.seq &&
+        event.seq < baseline.seq &&
+        (event.taskId === taskId || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)),
+    )
+    .map((operation) => ({ seq: operation.seq, operation }));
 
-    const laterEntries = data.entries.filter(
-      (entry) =>
-        entry.itemType === 'task' &&
-        entry.itemId === taskId &&
-        entry.seq > original.seq &&
-        entry.seq < baseline.seq,
-    );
-    const laterOps = data.operations
-      .filter(
-        (event) =>
-          event.seq > original.seq &&
-          event.seq < baseline.seq &&
-          (event.taskId === taskId || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)),
-      )
-      .sort((a, b) => a.seq - b.seq);
+  const replay = (entries: SettlementEntry[], postponeCount: number): MutableTaskState => {
+    const replayed: MutableTaskState = {
+      projectId: firstChanged.projectId,
+      scheduledFor: firstChanged.date,
+      status: 'open',
+      closedAt: undefined,
+      postponeCount,
+    };
+    const facts: Array<{ seq: number; operation?: OperationEvent; entry?: SettlementEntry }> = [
+      ...operations,
+      ...entries
+        .filter((entry) => entry.seq >= firstChanged.seq && entry.seq < baseline.seq)
+        .map((entry) => ({ seq: entry.seq, entry })),
+    ].sort((a, b) => a.seq - b.seq);
 
-    // Project-wide facts only affect this task while replay says the task
-    // actually belongs to that project at that sequence. An unrelated close
-    // must not protect a migrated baked-in status from reconciliation.
-    let replayedProjectId = original.projectId;
-    let projectStatusOverridden = false;
-    let postponeReset = false;
-    for (const event of laterOps) {
-      if (event.taskId === taskId) {
-        if (event.kind === 'task-arranged') replayedProjectId = event.projectId;
-        else if (event.kind === 'task-moved') replayedProjectId = text(event.payload?.toProjectId);
-      }
-      if (!event.projectId || event.projectId !== replayedProjectId) continue;
-      if (event.kind === 'project-closed' || event.kind === 'project-completed') projectStatusOverridden = true;
-      if (event.kind === 'project-restarted' || event.kind === 'project-trimmed') postponeReset = true;
+    for (const fact of facts) {
+      if (fact.operation) applyOperation(replayed, taskId, fact.operation);
+      else if (fact.entry) applySettlement(replayed, fact.entry);
     }
+    return replayed;
+  };
 
-    const statusOverridden =
-      laterEntries.length > 0 ||
-      laterOps.some((event) => event.kind === 'task-dropped' && event.taskId === taskId) ||
-      projectStatusOverridden;
-    const scheduleOverridden =
-      laterEntries.some((entry) => entry.outcome === 'partial' || (entry.outcome === 'skipped' && entry.reason !== 'not_important')) ||
-      laterOps.some((event) =>
-        event.taskId === taskId &&
-        (
-          event.kind === 'task-rescheduled' ||
-          event.kind === 'task-arranged' ||
-          (event.kind === 'task-moved' && !text(event.payload?.toProjectId))
-        )
-      );
+  // The baseline is the exact v2 end state. Replaying the original suffix and
+  // the corrected suffix from the same pre-settlement state tells us which
+  // final fields truly change. This also preserves the conditional semantics
+  // of project close/restart facts instead of treating their mere presence as
+  // an unconditional override.
+  const oldFromZero = replay(originals, 0);
+  const oldFromOne = replay(originals, 1);
+  const carriesPriorPostpones = oldFromOne.postponeCount === oldFromZero.postponeCount + 1;
+  const inferredPostpones = carriesPriorPostpones
+    ? Math.max(0, state.postponeCount - oldFromZero.postponeCount)
+    : 0;
+  const oldFinal = inferredPostpones === 0 ? oldFromZero : replay(originals, inferredPostpones);
+  const newFinal = replay(currentEntries, inferredPostpones);
 
-    // Undo the original v2 side effect, but never overwrite a later fact that
-    // already superseded the same field.
-    if (!statusOverridden) {
-      state.status = 'open';
-      state.closedAt = undefined;
-    }
-    if (!scheduleOverridden) state.scheduledFor = original.date;
-    if (original.reason === 'postponed' && !postponeReset) {
-      state.postponeCount = Math.max(0, state.postponeCount - 1);
-    }
-
-    if (!current) continue;
-
-    if (!statusOverridden) {
-      if (current.outcome === 'done') {
-        state.status = 'done';
-        state.closedAt = current.date;
-      } else if (current.reason === 'not_important') {
-        state.status = 'dropped';
-        state.closedAt = current.date;
-      } else {
-        state.status = 'open';
-        state.closedAt = undefined;
-      }
-    }
-    if (!scheduleOverridden) {
-      if (current.outcome === 'partial' || current.reason === 'postponed') state.scheduledFor = addDays(current.date, 1);
-      else if (current.outcome === 'skipped' && current.reason !== 'not_important') state.scheduledFor = current.date;
-    }
-    if (current.reason === 'postponed' && !postponeReset) state.postponeCount += 1;
+  // Only replace fields whose baseline value is explained by the old replay.
+  // If some legacy behavior outside the structured fact stream produced a
+  // different value, keep that compatibility value rather than clobbering it.
+  if (state.projectId === oldFinal.projectId) state.projectId = newFinal.projectId;
+  if (state.scheduledFor === oldFinal.scheduledFor) state.scheduledFor = newFinal.scheduledFor;
+  if (state.status === oldFinal.status && state.closedAt === oldFinal.closedAt) {
+    state.status = newFinal.status;
+    state.closedAt = newFinal.closedAt;
   }
+  if (state.postponeCount === oldFinal.postponeCount) state.postponeCount = newFinal.postponeCount;
 }
 
 /**

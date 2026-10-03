@@ -325,6 +325,49 @@ describe('数据迁移基础设施', () => {
     });
   });
 
+  it('改判旧结算后按新状态顺序重放后续 restart/close', () => {
+    const legacy = JSON.parse(JSON.stringify(v1BackupFixture)) as any;
+    legacy.projects[0] = {
+      ...legacy.projects[0],
+      status: 'closed',
+      closedAt: '2026-10-01',
+    };
+    legacy.tasks[0] = {
+      ...legacy.tasks[0],
+      status: 'done',
+      closedAt: '2026-10-01',
+      scheduledFor: '2026-10-01',
+      postponeCount: 3,
+    };
+    legacy.entries[0] = { ...legacy.entries[0], outcome: 'done' };
+    delete legacy.entries[0].reason;
+    const taskLifeIndex = legacy.life.findIndex((row: any) => row.id === 'l|2026-10-01|task|t1');
+    legacy.life[taskLifeIndex] = {
+      ...legacy.life[taskLifeIndex],
+      kind: 'done',
+      text: '完成了「写周报」',
+    };
+    delete legacy.life[taskLifeIndex].reason;
+    legacy.life.splice(
+      taskLifeIndex + 1,
+      0,
+      { id: 'l-restart-after-done', date: '2026-10-01', projectId: 'p1', text: '重新启动', kind: 'restart' },
+      { id: 'l-close-after-done', date: '2026-10-01', projectId: 'p1', text: '正式关闭', kind: 'close' },
+    );
+
+    const migrated = parseBackup(JSON.stringify(legacy));
+    const raw = migrated.tasks.find((task) => task.id === 't1')!;
+    expect(taskState(migrated, raw)).toMatchObject({ status: 'done', postponeCount: 3 });
+
+    migrated.entries = migrated.entries.filter((entry) => !(entry.itemType === 'task' && entry.itemId === 't1'));
+    expect(taskState(migrated, raw)).toMatchObject({
+      status: 'dropped',
+      closedAt: '2026-10-01',
+      postponeCount: 0,
+      scheduledFor: '2026-10-01',
+    });
+  });
+
   it('没有 meta.dataVersion 的现有数据库按 v1 接管，并写入当前数据版本', async () => {
     const name = dbName('legacy');
     const first = new IdbPersistence(name);
