@@ -3,6 +3,7 @@ import type { Data, Settings } from './types';
 import { CHORES } from './types';
 import { localDate } from './lib/date';
 import { MAX_VILLAGES, STAGE_NAMES } from './logic/config';
+import { runMigrationSteps, type MigrationStep } from './migrations';
 
 /** 数据集合名 → 主键字段 */
 export const COLLECTIONS = {
@@ -22,9 +23,11 @@ export type Coll = keyof typeof COLLECTIONS;
 export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
-const DB_VERSION = 2;
+export const IDB_SCHEMA_VERSION = 2;
+export const DATA_VERSION = 1;
+const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = DATA_VERSION;
 
 export function defaultSettings(): Settings {
   return { workStart: '09:00', workEnd: '18:00', firstDay: localDate(), theme: 'auto' };
@@ -47,6 +50,26 @@ export function emptyData(): Data {
   };
 }
 
+type RawData = { [C in Coll]: unknown[] } & { settings: unknown };
+
+/** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
+const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [];
+
+function emptyRawData(): RawData {
+  const collections = Object.fromEntries(COLL_NAMES.map((c) => [c, []])) as { [C in Coll]: unknown[] };
+  return { ...collections, settings: defaultSettings() };
+}
+
+function migrateRawData(raw: RawData, fromVersion: number) {
+  return runMigrationSteps(raw, fromVersion, DATA_VERSION, DATA_MIGRATIONS);
+}
+
+function parseStoredDataVersion(v: unknown): number | undefined {
+  if (v === undefined) return undefined;
+  if (!Number.isInteger(v) || (v as number) < 1) throw new Error('本地数据版本号损坏');
+  return v as number;
+}
+
 export interface Persistence {
   load(): Promise<Data>;
   put(coll: Coll, item: object): Promise<void>;
@@ -58,21 +81,38 @@ export interface Persistence {
 export class IdbPersistence implements Persistence {
   private dbp: Promise<IDBPDatabase>;
   constructor(name = DB_NAME) {
-    this.dbp = openDB(name, DB_VERSION, {
+    this.dbp = openDB(name, IDB_SCHEMA_VERSION, {
       upgrade(db) {
         for (const c of COLL_NAMES) if (!db.objectStoreNames.contains(c)) db.createObjectStore(c, { keyPath: COLLECTIONS[c] });
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+      },
+      blocking(_currentVersion, _blockedVersion, event) {
+        // Do not let an old tab keep a future schema upgrade blocked indefinitely.
+        (event.target as IDBDatabase | null)?.close();
       },
     });
   }
   async load(): Promise<Data> {
     const db = await this.dbp;
-    const d = emptyData();
-    for (const c of COLL_NAMES) (d as unknown as Record<Coll, unknown[]>)[c] = await db.getAll(c);
-    const s = (await db.get('meta', 'settings')) as Settings | undefined;
-    if (s) d.settings = { ...defaultSettings(), ...s };
-    else await db.put('meta', d.settings, 'settings');
-    return d;
+    const raw = emptyRawData();
+    for (const c of COLL_NAMES) raw[c] = await db.getAll(c);
+    const storedSettings = await db.get('meta', 'settings');
+    raw.settings = storedSettings ?? defaultSettings();
+
+    const storedVersion = parseStoredDataVersion(await db.get('meta', 'dataVersion'));
+    const fromVersion = storedVersion ?? LEGACY_DATA_VERSION;
+    const migrated = migrateRawData(raw, fromVersion);
+    const data = validateCurrentData(migrated.data);
+
+    if (migrated.version !== fromVersion) {
+      await this.writeAll(db, data, migrated.version);
+    } else if (storedVersion === undefined || storedSettings === undefined) {
+      const tx = db.transaction('meta', 'readwrite');
+      if (storedSettings === undefined) await tx.objectStore('meta').put({ ...data.settings }, 'settings');
+      if (storedVersion === undefined) await tx.objectStore('meta').put(DATA_VERSION, 'dataVersion');
+      await tx.done;
+    }
+    return data;
   }
   async put(coll: Coll, item: object) {
     await (await this.dbp).put(coll, structuredClone(item));
@@ -84,14 +124,18 @@ export class IdbPersistence implements Persistence {
     await (await this.dbp).put('meta', { ...s }, 'settings');
   }
   async replaceAll(d: Data) {
-    const db = await this.dbp;
+    await this.writeAll(await this.dbp, d, DATA_VERSION);
+  }
+  private async writeAll(db: IDBPDatabase, d: Data, dataVersion: number) {
     const tx = db.transaction([...COLL_NAMES, 'meta'], 'readwrite');
     for (const c of COLL_NAMES) {
       const st = tx.objectStore(c);
       await st.clear();
       for (const item of (d as unknown as Record<Coll, object[]>)[c]) await st.put(structuredClone(item));
     }
-    await tx.objectStore('meta').put({ ...d.settings }, 'settings');
+    const meta = tx.objectStore('meta');
+    await meta.put({ ...d.settings }, 'settings');
+    await meta.put(dataVersion, 'dataVersion');
     await tx.done;
   }
 }
@@ -225,6 +269,34 @@ function checkRelations(d: Data) {
   }
 }
 
+function validateCurrentData(raw: RawData): Data {
+  const d = emptyData();
+  for (const c of COLL_NAMES) {
+    const v = raw[c];
+    if (!Array.isArray(v)) throw new Error(`数据里的 ${c} 格式不对`);
+    v.forEach((x, i) => {
+      const bad = badField(x, SHAPES[c]);
+      if (bad) throw new Error(`数据里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
+    });
+    (d as unknown as Record<Coll, unknown[]>)[c] = v;
+  }
+  d.settings = parseSettings(raw.settings);
+  checkRelations(d);
+  return d;
+}
+
+function rawBackupData(o: Record<string, unknown>): RawData {
+  const raw = emptyRawData();
+  for (const c of COLL_NAMES) {
+    const v = o[c];
+    if (v == null) continue;
+    if (!Array.isArray(v)) throw new Error(`备份里的 ${c} 格式不对`);
+    raw[c] = v;
+  }
+  raw.settings = o.settings ?? defaultSettings();
+  return raw;
+}
+
 export function exportBackup(d: Data): string {
   const out: Record<string, unknown> = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), settings: d.settings };
   for (const c of COLL_NAMES) out[c] = (d as unknown as Record<Coll, unknown[]>)[c];
@@ -240,19 +312,9 @@ export function parseBackup(text: string): Data {
     throw new Error('这不是有效的 JSON 文件');
   }
   if (!o || o.format !== BACKUP_FORMAT) throw new Error('这不是屿志的备份文件');
-  if (typeof o.version !== 'number' || o.version > BACKUP_VERSION) throw new Error('备份来自更新的版本，请先升级屿志');
-  const d = emptyData();
-  for (const c of COLL_NAMES) {
-    const v = o[c];
-    if (v == null) continue;
-    if (!Array.isArray(v)) throw new Error(`备份里的 ${c} 格式不对`);
-    v.forEach((x, i) => {
-      const bad = badField(x, SHAPES[c]);
-      if (bad) throw new Error(`备份里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
-    });
-    (d as unknown as Record<Coll, unknown[]>)[c] = v;
-  }
-  if (o.settings != null) d.settings = parseSettings(o.settings);
-  checkRelations(d);
-  return d;
+  if (!Number.isInteger(o.version) || (o.version as number) < LEGACY_DATA_VERSION) throw new Error('备份版本号不对');
+  if ((o.version as number) > DATA_VERSION) throw new Error('备份来自更新的版本，请先升级屿志');
+
+  const migrated = migrateRawData(rawBackupData(o), o.version as number);
+  return validateCurrentData(migrated.data);
 }
