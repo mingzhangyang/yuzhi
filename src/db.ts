@@ -29,6 +29,25 @@ const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
 
+const STORAGE_UNAVAILABLE_NAMES = new Set(['SecurityError', 'NotAllowedError', 'InvalidStateError', 'UnknownError', 'QuotaExceededError', 'NotSupportedError']);
+
+function isStorageUnavailableCause(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const name = (error as { name?: unknown }).name;
+  return typeof name === 'string' && STORAGE_UNAVAILABLE_NAMES.has(name);
+}
+
+export class StorageUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super('浏览器本地存储不可用', { cause });
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+export function isStorageUnavailableError(error: unknown): error is StorageUnavailableError {
+  return error instanceof StorageUnavailableError;
+}
+
 export function defaultSettings(): Settings {
   return { workStart: '09:00', workEnd: '18:00', firstDay: localDate(), theme: 'auto' };
 }
@@ -94,19 +113,32 @@ export class IdbPersistence implements Persistence {
     });
   }
   async load(): Promise<Data> {
-    const db = await this.dbp;
-    // Read every persisted collection, including legacy stores that are no
-    // longer part of the current Data type. A skipped-version upgrade may
-    // still need them as migration input.
-    const raw: RawData = { settings: defaultSettings() };
-    for (const name of Array.from(db.objectStoreNames)) {
-      if (name !== 'meta') raw[name] = await db.getAll(name);
+    let db: IDBPDatabase;
+    let raw: RawData;
+    let storedSettings: unknown;
+    let storedVersionValue: unknown;
+    try {
+      db = await this.dbp;
+      // Read every persisted collection, including legacy stores that are no
+      // longer part of the current Data type. A skipped-version upgrade may
+      // still need them as migration input.
+      raw = { settings: defaultSettings() };
+      for (const name of Array.from(db.objectStoreNames)) {
+        if (name !== 'meta') raw[name] = await db.getAll(name);
+      }
+      ensureCurrentCollections(raw);
+      storedSettings = await db.get('meta', 'settings');
+      storedVersionValue = await db.get('meta', 'dataVersion');
+    } catch (error) {
+      // Only known browser/IndexedDB availability failures may fall back to
+      // transient memory storage. Migration, version and validation failures
+      // must remain visible so we never make existing data look "empty".
+      if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error);
+      throw error;
     }
-    ensureCurrentCollections(raw);
-    const storedSettings = await db.get('meta', 'settings');
     raw.settings = storedSettings ?? defaultSettings();
 
-    const storedVersion = parseStoredDataVersion(await db.get('meta', 'dataVersion'));
+    const storedVersion = parseStoredDataVersion(storedVersionValue);
     const fromVersion = storedVersion ?? LEGACY_DATA_VERSION;
     const migrated = migrateRawData(raw, fromVersion);
     const data = validateCurrentData(migrated.data);

@@ -1,5 +1,5 @@
 import './styles.css';
-import { IdbPersistence, MemoryPersistence, exportBackup, parseBackup, type Persistence } from './db';
+import { IdbPersistence, MemoryPersistence, exportBackup, isStorageUnavailableError, parseBackup, type Persistence } from './db';
 import { Store } from './store';
 import type { Data } from './types';
 import { IslandRenderer, type Selection } from './island/render';
@@ -23,7 +23,23 @@ async function boot() {
   let data: Data;
   try {
     data = await per.load();
-  } catch {
+  } catch (error) {
+    if (!isStorageUnavailableError(error)) {
+      console.error('无法打开屿志本地数据', error);
+      const message = error instanceof Error ? error.message : String(error);
+      const wrap = document.querySelector<HTMLElement>('.wrap');
+      if (wrap) {
+        setHTML(
+          wrap,
+          `<section class="card panel" role="alert" style="max-width:760px;margin:48px auto">
+            <h2>无法打开已有数据</h2>
+            <p>${esc(message)}</p>
+            <p>为了保护原有记录，屿志没有切换到空白临时数据，也没有覆盖本地数据。请先刷新页面；如果提示数据来自更新版本，请先更新屿志。不要清除浏览器站点数据。</p>
+          </section>`,
+        );
+      }
+      return;
+    }
     per = new MemoryPersistence();
     data = await per.load();
     setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);

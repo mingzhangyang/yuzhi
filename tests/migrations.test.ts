@@ -6,7 +6,9 @@ import {
   DATA_VERSION,
   IDB_SCHEMA_VERSION,
   IdbPersistence,
+  StorageUnavailableError,
   exportBackup,
+  isStorageUnavailableError,
   parseBackup,
 } from '../src/db';
 import { runMigrationSteps } from '../src/migrations';
@@ -28,6 +30,12 @@ describe('数据迁移基础设施', () => {
   it('缺少中间迁移或数据来自未来版本时明确失败', () => {
     expect(() => runMigrationSteps({ n: 1 }, 1, 3, [{ to: 3, run() {} }])).toThrow('v1 → v2');
     expect(() => runMigrationSteps({ n: 1 }, 2, 1, [])).toThrow('更新的屿志版本');
+  });
+
+  it('只有明确的存储不可用错误才允许降级到临时内存', () => {
+    expect(isStorageUnavailableError(new StorageUnavailableError(new DOMException('blocked', 'SecurityError')))).toBe(true);
+    expect(isStorageUnavailableError(new Error('本地数据版本号损坏'))).toBe(false);
+    expect(isStorageUnavailableError(new DOMException('newer schema', 'VersionError'))).toBe(false);
   });
 
   it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {
