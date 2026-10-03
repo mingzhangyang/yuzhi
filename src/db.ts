@@ -308,8 +308,10 @@ function parseStoredDataVersion(v: unknown): number | undefined {
 
 export interface Persistence {
   load(): Promise<Data>;
-  put(coll: Coll, item: object): Promise<void>;
-  renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<void>;
+  /** Returns the authoritative persisted seq for fact collections. */
+  put(coll: Coll, item: object): Promise<number | undefined>;
+  /** Returns the preserved authoritative seq for the renamed fact. */
+  renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<number>;
   del(coll: Coll, key: string): Promise<void>;
   putSettings(s: Settings): Promise<void>;
   replaceAll(d: Data): Promise<void>;
@@ -380,12 +382,12 @@ export class IdbPersistence implements Persistence {
     }
     return data;
   }
-  async put(coll: Coll, item: object) {
+  async put(coll: Coll, item: object): Promise<number | undefined> {
     if (coll === 'entries' || coll === 'operations') {
-      await this.putFact(coll, item);
-      return;
+      return this.putFact(coll, item);
     }
     await (await this.dbp).put(coll, structuredClone(item));
+    return undefined;
   }
 
   /**
@@ -394,7 +396,7 @@ export class IdbPersistence implements Persistence {
    * same seq even when both tab-local stores computed the same provisional one.
    * Updating an existing fact keeps its original seq (rejudgment/backdating).
    */
-  private async putFact(coll: 'entries' | 'operations', item: object) {
+  private async putFact(coll: 'entries' | 'operations', item: object): Promise<number> {
     const db = await this.dbp;
     const tx = db.transaction(['entries', 'operations', 'meta'], 'readwrite');
     const store = tx.objectStore(coll);
@@ -424,13 +426,11 @@ export class IdbPersistence implements Persistence {
     }
 
     record.seq = seq;
-    // Store keeps the same object reference in memory; update it to the
-    // authoritative persisted value once the atomic reservation succeeds.
-    (item as Record<string, unknown>).seq = seq;
     await store.put(record);
     await tx.done;
+    return seq;
   }
-  async renameFact(coll: 'entries' | 'operations', oldKey: string, item: object) {
+  async renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<number> {
     const db = await this.dbp;
     const tx = db.transaction(coll, 'readwrite');
     const store = tx.objectStore(coll);
@@ -452,10 +452,10 @@ export class IdbPersistence implements Persistence {
     }
 
     record.seq = previous.seq;
-    (item as Record<string, unknown>).seq = previous.seq;
     if (newKey !== oldKey) await store.delete(oldKey);
     await store.put(record);
     await tx.done;
+    return previous.seq;
   }
 
   async del(coll: Coll, key: string) {
@@ -491,8 +491,11 @@ export class MemoryPersistence implements Persistence {
   async load() {
     return structuredClone(this.data);
   }
-  async put() {}
-  async renameFact() {}
+  async put() { return undefined; }
+  async renameFact(_coll: 'entries' | 'operations', _oldKey: string, item: object) {
+    const seq = (item as { seq?: unknown }).seq;
+    return typeof seq === 'number' ? seq : 0;
+  }
   async del() {}
   async putSettings() {}
   async replaceAll(d: Data) {
