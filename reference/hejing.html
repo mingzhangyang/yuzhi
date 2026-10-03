@@ -1,0 +1,1660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>禾境 · 一座生长中的微型文明</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eceee2;--panel:#fafbf5;--ink:#263022;--muted:#6f7666;--faint:#9fa594;--line:#dfe2d2;
+  --accent:#4f7136;--accent-ink:#ffffff;--accent-soft:#e2ead3;--chip:#f0f2e8;--warn:#a8622a;--warn-soft:#f5e6d5;
+  --map:#e3e8d6;--label:#ffffff;--shadow:0 1px 2px rgba(50,60,30,.05),0 8px 22px rgba(50,60,30,.05);
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:light;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#151812;--panel:#1e221a;--ink:#e6e8dc;--muted:#a2a896;--faint:#767c6c;--line:#30362a;
+    --accent:#9dc173;--accent-ink:#15200c;--accent-soft:#29341f;--chip:#252a20;--warn:#e19c63;--warn-soft:#3a2b1d;
+    --map:#1a1f17;--label:#262b21;--shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151812;--panel:#1e221a;--ink:#e6e8dc;--muted:#a2a896;--faint:#767c6c;--line:#30362a;
+  --accent:#9dc173;--accent-ink:#15200c;--accent-soft:#29341f;--chip:#252a20;--warn:#e19c63;--warn-soft:#3a2b1d;
+  --map:#1a1f17;--label:#262b21;--shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+button,select,input{font:inherit;color:inherit}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1440px;margin:0 auto;padding:18px clamp(12px,2.4vw,28px) 36px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px;margin-bottom:16px}
+h1{font-family:"Noto Serif SC","Songti SC","STSong",serif;font-weight:700;font-size:clamp(21px,2.8vw,30px);margin:0;letter-spacing:.02em;line-height:1.25}
+.sub{margin:4px 0 0;color:var(--muted);font-size:13px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.date{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;padding-right:4px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;line-height:1.4}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);min-width:62px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
+.seg button{border:0;background:none;padding:6px 11px;font-size:13px;color:var(--muted);cursor:pointer;line-height:1.4}
+.seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.stat{padding:12px 14px 11px;min-width:0;border-radius:12px}
+.stat .top{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
+.stat .top span:last-child{color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat .mid{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin:3px 0 2px}
+.stat .val{font-size:26px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat .val small{font-size:12px;font-weight:500;color:var(--muted);margin-left:3px}
+.stat svg{width:72px;height:26px;flex:none;color:var(--accent);overflow:visible}
+.stat .foot{font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.main{display:grid;grid-template-columns:250px minmax(0,1fr) 310px;gap:12px;align-items:start}
+.panel{padding:14px 14px 16px;min-width:0}
+.ptitle{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:650;font-size:14.5px}
+.ptitle small{font-weight:500;font-size:11px;color:var(--faint)}
+.pdesc{margin:2px 0 12px;font-size:12px;color:var(--muted)}
+.seed{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid var(--line);background:var(--chip);border-radius:11px;padding:9px 10px;margin:0 0 8px;cursor:pointer;transition:border-color .15s,transform .1s}
+.seed:hover:not(:disabled){border-color:var(--accent)}
+.seed:active:not(:disabled){transform:scale(.985)}
+.seed:disabled{cursor:default;opacity:.6}
+.seed.active{opacity:1;border-color:var(--warn);background:var(--warn-soft)}
+.seed .ic{width:30px;height:30px;flex:none;border-radius:8px;background:var(--panel);display:grid;place-items:center;color:var(--accent)}
+.seed.active .ic{color:var(--warn)}
+.seed .ic svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.seed .tx{min-width:0;flex:1}
+.seed .tx b{display:block;font-size:13px;font-weight:600}
+.seed .tx span{display:block;font-size:11.5px;color:var(--muted);line-height:1.35}
+.seed .st{font-style:normal;font-size:11px;color:var(--warn);white-space:nowrap}
+.more-item{display:none}
+#seeds.showmore .more-item{display:flex}
+.linkbtn{display:block;margin:0 auto;border:0;background:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 8px}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.rule{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin:12px 0 6px}
+.rule b{font-size:18px;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--chip);font-size:13px}
+.hint{font-size:11.5px;color:var(--muted);margin:6px 0 0;line-height:1.5}
+.maphead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.badge{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.badge.warn{background:var(--warn-soft);color:var(--warn)}
+.mapwrap{position:relative;border-radius:12px;background:var(--map);overflow:hidden;aspect-ratio:16/10}
+#map{display:block;width:100%;height:100%;touch-action:pan-y;cursor:pointer}
+.zoom{position:absolute;right:10px;bottom:10px;display:flex;gap:4px}
+.zoom button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:15px;line-height:1;padding:0}
+.tip{position:absolute;left:10px;bottom:10px;font-size:11.5px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:4px 10px;border-radius:99px;pointer-events:none;transition:opacity .4s}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:10px 2px 0;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.chron{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.chron ol{list-style:none;margin:8px 0 0;padding:0;max-height:210px;overflow:auto}
+.chron li{display:flex;gap:10px;font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.chron li:last-child{border-bottom:0}
+.chron time,.life time{flex:none;color:var(--faint);font-size:11.5px;font-variant-numeric:tabular-nums;min-width:56px}
+.chron li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;margin-top:7px;background:var(--faint)}
+.chron li.k-event::before{background:var(--warn)}
+.chron li.k-birth::before{background:#6ea24f}
+.chron li.k-death::before{background:#7d7d7d}
+.chron li.k-bond::before{background:#d47a8e}
+.chron li.k-leave::before{background:#b98b3c}
+.chron li.k-choice::before{background:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.check{display:flex;gap:8px;align-items:center;font-size:13px;margin-top:14px;cursor:pointer}
+.check input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+.sect-row{display:flex;justify-content:space-between;align-items:baseline}
+.favor{font-weight:500;font-size:11.5px;color:var(--accent)}
+.help{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.help button{text-align:left;border:1px solid var(--line);background:var(--chip);border-radius:9px;padding:7px 9px;cursor:pointer;line-height:1.35}
+.help button:hover:not(:disabled){border-color:var(--accent)}
+.help button:disabled{opacity:.45;cursor:default}
+.help button b{display:block;font-size:12.5px;font-weight:600}
+.help button span{font-size:11px;color:var(--muted)}
+.help .wide{grid-column:1/-1}
+.intro{display:flex;gap:6px;margin-top:8px}
+.intro[hidden]{display:none}
+.intro select{flex:1;min-width:0;font-size:12px}
+.dlg-back{position:fixed;inset:0;z-index:50;background:rgba(22,28,16,.42);display:flex;align-items:center;justify-content:center;padding:20px}
+.dlg-back[hidden]{display:none}
+.dlg{outline:none;width:100%;max-width:460px;max-height:86vh;overflow:auto;padding:20px 20px 18px;border-radius:16px}
+.dlg .kick{font-size:12px;color:var(--warn);font-weight:600}
+.dlg h2{font-family:"Noto Serif SC","Songti SC",serif;font-size:22px;margin:4px 0 8px;line-height:1.35}
+.dlg p{margin:0 0 6px;line-height:1.75}
+.opt{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--chip);border-radius:11px;padding:10px 12px;margin-top:8px;cursor:pointer}
+.opt:hover:not(:disabled){border-color:var(--accent)}
+.opt:disabled{opacity:.5;cursor:default}
+.opt b{display:block;font-size:14px;font-weight:600}
+.opt span{font-size:12px;color:var(--muted)}
+#dlgDone{margin-top:12px;width:100%;padding:9px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.purse{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.palette{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.palette[hidden],.toolhint[hidden]{display:none}
+.palette button{flex:none;border:1px solid var(--line);background:var(--chip);border-radius:9px;padding:6px 12px;cursor:pointer;text-align:left;line-height:1.3}
+.palette button.on{border-color:var(--accent);background:var(--accent-soft)}
+.palette b{display:block;font-size:13px}
+.palette span{font-size:11px;color:var(--muted)}
+.toolhint{margin:0 0 8px;font-size:12px;color:var(--muted);line-height:1.5}
+.toast{position:absolute;left:50%;top:10px;transform:translate(-50%,-6px);background:var(--ink);color:var(--panel);font-size:12.5px;padding:6px 14px;border-radius:99px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:90%;text-align:center;line-height:1.4}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.bad{background:var(--warn);color:#fff}
+#map.build,#map.raze{cursor:crosshair}
+#map.move{cursor:grab}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+.goal{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 14px;margin-bottom:12px;border-color:var(--accent)}
+.goal[hidden]{display:none}
+.goal .gname{font-weight:650;font-size:14px}
+.goal .gtxt{font-size:12.5px;color:var(--muted);flex:1;min-width:200px}
+.gbar{flex-basis:100%;height:6px;border-radius:9px;background:var(--chip);overflow:hidden;border:1px solid var(--line)}
+.gbar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+.goal .linkbtn{margin:0;padding:2px 0}
+.opt.done b::after{content:"  已完成";font-size:11px;font-weight:500;color:var(--accent)}
+.opt.free{background:none}
+.mnote{font-size:12px;color:var(--muted);margin:12px 0 0}
+.alert{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:10px;width:min(560px,calc(100% - 24px));padding:10px 12px 10px 16px;border-color:var(--warn);box-shadow:0 10px 30px rgba(30,30,10,.18)}
+.alert[hidden]{display:none}
+.alert .atx{flex:1;min-width:0;font-size:13px;line-height:1.45}
+.alert .atx b{margin-right:4px}
+.alert .more{font-size:11px;color:var(--faint);display:block}
+.nav .watch{width:auto;height:26px;padding:0 9px;}
+.watch{font-size:12px;border:1px solid var(--line);background:var(--chip);border-radius:7px;padding:3px 9px;cursor:pointer}
+.watch.on{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.nav{display:flex;gap:4px}
+.nav button{width:26px;height:26px;border-radius:7px;border:1px solid var(--line);background:var(--chip);cursor:pointer;line-height:1;padding:0}
+.who{display:flex;gap:12px;align-items:center;margin:12px 0 8px}
+.avatar{width:54px;height:54px;border-radius:12px;overflow:hidden;flex:none;border:1px solid var(--line)}
+.avatar svg{width:100%;height:100%;display:block}
+.fname{font-size:20px;font-weight:700;font-family:"Noto Serif SC","Songti SC",serif;line-height:1.3}
+.fmeta{font-size:12px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+.chip{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--chip);color:var(--muted);border:1px solid var(--line)}
+.chip.job{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.chip.gone{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px 0;margin-bottom:12px}
+.nums div{text-align:center}
+.nums div+div{border-left:1px solid var(--line)}
+.nums b{display:block;font-size:20px;font-variant-numeric:tabular-nums;line-height:1.3}
+.nums span{font-size:11px;color:var(--faint)}
+.bar{display:grid;grid-template-columns:34px 1fr 34px;gap:8px;align-items:center;font-size:11.5px;color:var(--muted);margin:5px 0}
+.bar .tr{height:5px;border-radius:9px;background:var(--chip);overflow:hidden;border:1px solid var(--line)}
+.bar .tr i{display:block;height:100%;background:var(--accent);border-radius:9px;transition:width .3s}
+.bar em{font-style:normal;text-align:right;font-variant-numeric:tabular-nums}
+.sect{font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 6px}
+.rels{display:flex;flex-wrap:wrap;gap:5px}
+.rel{font-size:11.5px;border:1px solid var(--line);background:var(--chip);border-radius:7px;padding:3px 8px;cursor:pointer}
+.rel em{font-style:normal;color:var(--faint);margin-right:3px}
+.rel.bad{color:var(--warn)}
+.rel.gone{opacity:.55}
+.life{list-style:none;padding:0;margin:0;max-height:250px;overflow:auto}
+.life li{display:flex;gap:8px;font-size:12.5px;padding:4px 0}
+.empty{font-size:12px;color:var(--faint)}
+.quick{display:flex;gap:6px;margin-top:14px}
+.quick button{flex:1;font-size:12px;border:1px solid var(--line);background:var(--chip);border-radius:8px;padding:6px 4px;cursor:pointer}
+details.how{margin-top:16px;font-size:13px;color:var(--muted);padding:12px 16px}
+details.how summary{cursor:pointer;color:var(--ink);font-weight:600}
+details.how p{margin:8px 0 0;max-width:72ch}
+@media (prefers-reduced-motion:reduce){.bar .tr i,.seed,.tip{transition:none}}
+@media (max-width:1180px){
+  .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .main{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .mapcard{grid-column:1/-1;order:-2}
+  .right{order:-1}
+}
+@media (max-width:680px){
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .stats .stat:first-child{grid-column:1/-1}
+  .stat .val{font-size:22px}
+  .main{grid-template-columns:minmax(0,1fr)}
+  .mapwrap{aspect-ratio:16/12}
+  .goal{gap:6px 14px}
+  .goal .gtxt{flex-basis:100%;order:2}
+  .goal .gbar{order:3}
+  .dlg-back{align-items:flex-end;padding:0}
+  .dlg{border-radius:18px 18px 0 0;max-height:80vh;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+  header{align-items:flex-start}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>禾境 · 一座生长中的微型文明</h1>
+      <p class="sub">轻轻一点改变，看看三十个人生流向何方。</p>
+    </div>
+    <div class="controls">
+      <span class="date" id="date"></span>
+      <button class="btn primary" id="play">暂停</button>
+      <div class="seg" id="speed"><button data-s="1" class="on">1×</button><button data-s="3">3×</button><button data-s="10">10×</button></div>
+      <button class="btn" id="chBtn">挑战</button>
+      <button class="btn" id="reset">重来</button>
+    </div>
+  </header>
+
+  <div class="goal card" id="goal" hidden>
+    <span class="gname" id="gName"></span>
+    <span class="gtxt" id="gTxt"></span>
+    <button class="linkbtn" id="gQuit">放弃挑战</button>
+    <div class="gbar"><i id="gBar"></i></div>
+  </div>
+
+  <section class="stats" id="stats"></section>
+
+  <div class="main">
+    <aside class="card panel left">
+      <div class="ptitle">改变的种子</div>
+      <p class="pdesc">轻轻拨动，世界会回应。</p>
+      <div id="seeds"></div>
+      <button class="linkbtn" id="moreSeeds">更多自然事件 ▾</button>
+      <div class="divider"></div>
+      <div class="ptitle">共同的规则</div>
+      <label class="rule" for="tax"><span>生产税率</span><b id="taxv">15%</b></label>
+      <input type="range" id="tax" min="0" max="40" step="1" value="15">
+      <p class="hint">每份收入的这一部分归入公库，用于公共事务和再分配。</p>
+      <label class="rule" for="policy"><span>公共粮食分配</span></label>
+      <select id="policy">
+        <option value="need">按需分配</option>
+        <option value="equal">平均分配</option>
+        <option value="work">按劳分配</option>
+        <option value="market">自由市场</option>
+      </select>
+      <p class="hint" id="policyDesc"></p>
+      <label class="check"><input type="checkbox" id="dilOn" checked> 让溪谷时常来找我做决定</label>
+      <label class="check"><input type="checkbox" id="alOn" checked> 我关注的人遇到大事时暂停</label>
+    </aside>
+
+    <section class="card panel mapcard">
+      <div class="maphead">
+        <div><div class="ptitle">溪谷群岛</div><p class="pdesc">三个聚落，一条溪流，一座山。</p></div>
+        <span class="badge" id="weather"></span>
+      </div>
+      <div class="toolbar">
+        <div class="seg" id="tools"><button data-t="look" class="on">观察</button><button data-t="build">建造</button><button data-t="move">搬家</button><button data-t="raze">拆除</button></div>
+        <span class="purse" id="purse"></span>
+      </div>
+      <div class="palette" id="palette" hidden>
+        <button data-b="granary" class="on"><b>粮仓</b><span>60 金</span></button>
+        <button data-b="well"><b>水井</b><span>30 金</span></button>
+        <button data-b="market"><b>集市</b><span>70 金</span></button>
+        <button data-b="teahouse"><b>茶馆</b><span>50 金</span></button>
+      </div>
+      <p class="toolhint" id="toolhint" hidden></p>
+      <div class="mapwrap" id="mapwrap">
+        <canvas id="map" aria-label="溪谷群岛地图，点击居民查看他们的一生"></canvas>
+        <div class="zoom"><button id="zin" aria-label="放大">+</button><button id="zout" aria-label="缩小">−</button><button id="zfit" aria-label="复位">⤢</button></div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        <div class="tip" id="tip">点一下小人，追踪 TA 的一生</div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="chron">
+        <div class="ptitle">编年史 <small id="chronCount"></small></div>
+        <ol id="chron"></ol>
+      </div>
+    </section>
+
+    <aside class="card panel right">
+      <div class="ptitle">命运追踪 <span class="nav"><button class="watch" id="fWatch">关注</button><button id="pPrev" aria-label="上一位">‹</button><button id="pNext" aria-label="下一位">›</button></span></div>
+      <div class="who"><div class="avatar" id="fAvatar"></div><div><div class="fname" id="fName"></div><div class="fmeta" id="fMeta"></div></div></div>
+      <div class="chips" id="fChips"></div>
+      <div class="nums">
+        <div><b id="fHappy"></b><span>幸福 /100</span></div>
+        <div><b id="fWealth"></b><span>财富（金）</span></div>
+        <div><b id="fHealth"></b><span>健康 /100</span></div>
+      </div>
+      <div id="fBars">
+        <div class="bar"><span>技能</span><div class="tr"><i id="bSkill"></i></div><em id="vSkill"></em></div>
+        <div class="bar"><span>温饱</span><div class="tr"><i id="bFed"></i></div><em id="vFed"></em></div>
+        <div class="bar"><span>朋友</span><div class="tr"><i id="bFr"></i></div><em id="vFr"></em></div>
+      </div>
+      <div class="sect sect-row">伸出援手 <span class="favor" id="favor"></span></div>
+      <div class="help" id="help">
+        <button data-h="gift"><b>送一笔钱</b><span>财富 +30</span></button>
+        <button data-h="teach"><b>传授手艺</b><span>技能 +25</span></button>
+        <button data-h="heal"><b>请郎中调养</b><span>健康 +40</span></button>
+        <button data-h="visit"><b>登门陪伴</b><span>幸福 +20</span></button>
+        <button data-h="intro" class="wide"><b>牵线认识一个人</b><span>多一个朋友；两个单身的人，也许会走到一起</span></button>
+      </div>
+      <div class="intro" id="intro" hidden><select id="introSel" aria-label="选择要介绍的人"></select><button class="btn primary" id="introGo">介绍</button></div>
+      <p class="hint">每次花 1 点恩惠，每 20 日恢复 1 点，最多 5 点。你帮过的人，头顶会有一颗小金星。</p>
+      <div class="sect">与人相连</div>
+      <div class="rels" id="fRels"></div>
+      <div class="sect">一生之书</div>
+      <ol class="life" id="fLife"></ol>
+      <div class="quick"><button data-q="rand">随机一人</button><button data-q="happy">最幸福的人</button><button data-q="sad">最愁苦的人</button></div>
+    </aside>
+  </div>
+
+  <details class="card how">
+    <summary>这个世界如何运转</summary>
+    <p>每个居民每天都会劳作、吃饭、花钱，也会和邻居来往。农夫种粮、渔民打鱼，粮食进入公共粮仓；大家花钱买粮，钱再流回种粮打鱼的人手里。樵夫和矿工把木材、矿石卖到岛外，带回新的财富；工匠和商人靠别人的日常消费过活。</p>
+    <p>税收进入公库。公库每天拿出一小部分做公共事务（修路、照看老人），这会提升凝聚力；剩下的按你选的“公共粮食分配”方式，在粮食短缺时决定谁先吃上饭，并定期接济或返还给居民。</p>
+    <p>每隔一段时间，溪谷会来找你做一个两难的决定：要不要和商队交易、收不收留逃荒的人、田界之争判给谁。没有标准答案，每个选择都会写进编年史和当事人的一生。你也可以在命运追踪里花“恩惠”直接帮某一个人，看这一点改变会把他的人生带向哪里。</p>
+    <p>地图也可以直接动手改。用“建造”花公库的钱盖粮仓、水井、集市、茶馆，每种建筑只惠及它所在的村子（粮仓除外，它让整个溪谷多存粮）。用“搬家”把一个人拖到别的村子，伴侣和年幼的孩子会一起搬过去。</p>
+    <p>点“挑战”可以选一个有明确目标的剧本，比如熬过三年大旱、让贫富差距缩小。你正在追踪的人，以及你点了“关注”或帮过的人，遇到结婚、生子、挨饿、重病、想离开这样的大事时，世界会暂停，等你决定要不要出手。</p>
+    <p>一个人的幸福取决于温饱、财富、朋友、伴侣和健康，也会被税负和贫富差距影响。关系好的人会结为伴侣、生儿育女；长期愁苦的人会离开溪谷。进度会自动保存在这个浏览器里。</p>
+  </details>
+</div>
+
+<div class="dlg-back" id="dlg" hidden>
+  <div class="dlg card" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="dlgT">
+    <div class="kick" id="dlgK">溪谷需要你做决定</div>
+    <h2 id="dlgT"></h2>
+    <p id="dlgX"></p>
+    <div id="dlgO"></div>
+  </div>
+</div>
+
+<div class="dlg-back" id="mdl" hidden>
+  <div class="dlg card" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mdlT">
+    <div class="kick" id="mdlK"></div>
+    <h2 id="mdlT"></h2>
+    <p id="mdlX"></p>
+    <div id="mdlO"></div>
+  </div>
+</div>
+
+<div class="alert card" id="alert" hidden role="alert">
+  <div class="atx"><b id="aName"></b><span id="aTxt"></span><span class="more" id="aMore"></span></div>
+  <button class="btn" id="aGo">看看</button>
+  <button class="btn primary" id="aOk">继续</button>
+</div>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const rand=(a,b)=>a+Math.random()*(b-a);
+const randi=(a,b)=>Math.floor(a+Math.random()*(b-a+1));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const has=(p,t)=>p.traits.indexOf(t)>=0;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+const YEAR=40,SEASON=10,SEASONS=['春','夏','秋','冬'];
+const SAVE='hejing-save-v1';
+const JOBS={
+  farmer:{n:'农夫',c:'#c99a2e'},
+  fisher:{n:'渔民',c:'#3f86ad'},
+  woodcutter:{n:'樵夫',c:'#4f7d3a'},
+  craftsman:{n:'工匠',c:'#b0643d'},
+  merchant:{n:'商人',c:'#8656a6'},
+  miner:{n:'矿工',c:'#5d6070'},
+  child:{n:'孩童',c:'#e3928f'},
+  elder:{n:'长者',c:'#9a968a'}
+};
+const TRAITS=['勤劳','乐天','内向','好客','节俭','体弱','好学','急躁'];
+const SURN='林陈周吴许沈苏何叶江方余顾唐宋程谢韩温秦'.split('');
+const GIVEN='禾溪松竹青安远明宁平秋春雨山石桐柳芸岚舟川麦穗晴望归野星原澄蘅'.split('');
+const SKIN=['#f1c9a5','#e6b48c','#d9a074','#c98d62'];
+const HAIR=['#2f2620','#4a3426','#1f1c1a','#6b4a2e','#3b2f2a'];
+const POLICIES={
+  need:'粮食不够时，先保障孩童、老人和病弱者；买不起粮的人由公库垫付。公库每十日接济最穷的四分之一。',
+  equal:'粮食不够时人人减量、同样一份；买不起粮的人由公库垫付。公库每十日把三成积蓄平分给每个人。',
+  work:'粮食不够时，劳动者按贡献优先领粮。公库每十日按收入多少返还给劳动者。',
+  market:'粮食价高者得，买不起就挨饿，公库不接济个人。富人无忧，穷人在饥荒中最先受苦。'
+};
+
+/* ---------------- 地图 ---------------- */
+const N=20;
+const VDEF={
+  pine:{n:'松林镇',ci:5,cj:6,roof:'#4c6a84'},
+  grain:{n:'禾谷村',ci:6,cj:13,roof:'#b5553d'},
+  bay:{n:'溪湾聚落',ci:15,cj:12,roof:'#3f7a86'}
+};
+const VKEYS=['pine','grain','bay'];
+const MAP=(function(){
+  const r=mulberry32(20261003);
+  const g=[];const c=(N-1)/2;
+  for(let i=0;i<N;i++){g[i]=[];for(let j=0;j<N;j++){
+    const dx=i-c,dy=j-c,ang=Math.atan2(dy,dx),d=Math.hypot(dx,dy);
+    const rm=8.7+0.7*Math.sin(3*ang+1.3)+0.45*Math.sin(5*ang+0.4)+(r()-0.5)*0.8;
+    g[i][j]=d<rm?{i,j,type:'grass',v:r(),trees:[],slot:false}:null;
+  }}
+  const at=(i,j)=>(i>=0&&j>=0&&i<N&&j<N)?g[i][j]:null;
+  const all=[];for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(g[i][j])all.push(g[i][j]);
+  const dist=(t,i,j)=>Math.hypot(t.i-i,t.j-j);
+  all.forEach(t=>{if(dist(t,14.5,5)<2.5+r()*0.4)t.type='mountain';});
+  const water=[];let ci=13,cj=7;
+  for(let s=0;s<45;s++){
+    const t=at(ci,cj);if(!t)break;
+    if(t.type!=='mountain'&&t.type!=='water'){t.type='water';water.push(t);}
+    const x=r();if(x<0.58)cj++;else if(x<0.86)ci--;else ci++;
+  }
+  const V={};
+  for(const k of VKEYS){
+    const d=VDEF[k];let best=null,bd=1e9;
+    all.forEach(t=>{if(t.type!=='grass')return;const dd=dist(t,d.ci,d.cj);if(dd<bd){bd=dd;best=t;}});
+    best.type='plaza';
+    const slots=all.filter(t=>t.type==='grass'&&!t.slot&&dist(t,best.i,best.j)<=2.3)
+      .sort((a,b)=>dist(a,best.i,best.j)-dist(b,best.i,best.j)).slice(0,12);
+    slots.forEach(t=>t.slot=true);
+    V[k]={key:k,n:d.n,roof:d.roof,center:best,slots};
+  }
+  const FS=[[3,3.5,2.7,'pine'],[7.5,2,2.1,'pine'],[2.5,9.5,1.7,'round'],[10.5,10,1.5,'round'],[17,8,1.6,'pine'],[9,16.5,1.4,'round']];
+  all.forEach(t=>{if(t.type!=='grass'||t.slot)return;for(const f of FS){if(dist(t,f[0],f[1])<f[2]&&r()<0.82){t.type='forest';t.kind=f[3];break;}}});
+  const gc=V.grain.center;
+  all.forEach(t=>{if(t.type!=='grass'||t.slot)return;const dd=dist(t,gc.i,gc.j);if(dd>1.4&&dd<4.3&&r()<0.85)t.type='field';});
+  all.forEach(t=>{
+    if(t.type==='forest'){const n=2+(r()<0.5?1:0);for(let k=0;k<n;k++)t.trees.push({dx:(r()-0.5)*0.55,dy:(r()-0.5)*0.55,s:0.75+r()*0.45,kind:t.kind});}
+    else if(t.type==='grass'&&!t.slot&&r()<0.08)t.trees.push({dx:(r()-0.5)*0.4,dy:(r()-0.5)*0.4,s:0.7+r()*0.4,kind:r()<0.5?'pine':'round'});
+    t.trees.sort((a,b)=>(a.dx+a.dy)-(b.dx+b.dy));
+  });
+  let mine=null,md=1e9;
+  all.forEach(t=>{if((t.type==='grass'||t.type==='forest')&&!t.slot){const dd=dist(t,12,3.8);if(dd<md){md=dd;mine=t;}}});
+  mine.type='grass';mine.trees=[];mine.mine=true;
+  const mineAdj=all.filter(t=>dist(t,mine.i,mine.j)<1.6&&t.type!=='water'&&t.type!=='mountain');
+  all.forEach(t=>{t.orig=t.type;t.otrees=t.trees.slice();});
+  const edge=all.filter(t=>!at(t.i+1,t.j)||!at(t.i,t.j+1)||!at(t.i-1,t.j)||!at(t.i,t.j-1));
+  all.sort((a,b)=>(a.i+a.j)-(b.i+b.j)||a.i-b.i);
+  return {g,at,all,water,forest:all.filter(t=>t.type==='forest'),fields:all.filter(t=>t.type==='field'),V,mine,mineAdj,edge,plazas:VKEYS.map(k=>V[k].center)};
+})();
+
+/* ---------------- 状态 ---------------- */
+let S;
+function newState(){
+  return {v:1,day:0,food:388,treasury:60,people:[],dead:[],nextId:1,tax:0.15,policy:'need',
+    drought:0,plague:0,plagueId:0,festival:0,caravan:0,mine:false,canal:false,cd:{},
+    cohesion:57,publicPerCap:0,gini:0.25,births:0,deaths:0,left:0,trades:0,foodProd:0,foodCons:0,price:1,
+    built:[],rot:0,watch:[],alerts:[],alertsOn:true,ch:null,hungerDeaths:0,lastHunger:'',lastLeft:'',favor:3,pending:null,nextDilemma:25,lastDil:'',dilemmasOn:true,school:false,mineClosed:0,
+    chron:[],chronVer:0,hist:{pop:[],food:[],wealth:[],happy:[],coh:[]},sel:null,speed:1,paused:false};
+}
+const ageY=p=>Math.floor(p.age/YEAR);
+const ta=p=>p.gender==='女'?'她':'他';
+const seasonIdx=()=>Math.floor((S.day%YEAR)/SEASON);
+const isWorker=p=>p.job!=='child'&&p.job!=='elder';
+const need=p=>p.job==='child'?0.07:0.11;
+function dateLabel(d){return `${Math.floor(d/YEAR)+1}年${SEASONS[Math.floor((d%YEAR)/SEASON)]}`;}
+function log(p,t){p.hist.push({d:S.day,t});if(p.hist.length>60)p.hist.splice(0,p.hist.length-60);}
+function chron(t,k){S.chron.push({d:S.day,t,k:k||'info'});if(S.chron.length>120)S.chron.shift();S.chronVer++;dirty=true;}
+function friendCount(p){let n=0;for(const k in p.rel)if(p.rel[k]>=40)n++;return n;}
+function living(id){for(const p of S.people)if(p.id===id)return p;return null;}
+function byId(id){return living(id)||S.dead.find(p=>p.id===id)||null;}
+function uniqueName(){
+  const used=new Set(S.people.map(p=>p.name));
+  for(let k=0;k<40;k++){const n=Math.random()<0.14?'阿'+pick(GIVEN):pick(SURN)+pick(GIVEN)+(Math.random()<0.45?pick(GIVEN):'');if(!used.has(n))return n;}
+  return pick(SURN)+pick(GIVEN)+pick(GIVEN);
+}
+function foodDays(){let n=0;for(const p of S.people)n+=need(p);return n>0?S.food/n:999;}
+function chooseJob(p){
+  if(S.mine&&Math.random()<0.22)return 'miner';
+  if(S.people.length&&foodDays()<20&&Math.random()<0.55)return p.village==='bay'?'fisher':'farmer';
+  const T={grain:[['farmer',.66],['craftsman',.2],['merchant',.14]],pine:[['woodcutter',.5],['craftsman',.33],['farmer',.17]],bay:[['fisher',.55],['merchant',.28],['craftsman',.17]]}[p.village];
+  let x=Math.random();for(const [j,w] of T){if((x-=w)<0)return j;}return T[0][0];
+}
+function freeSlot(v){
+  const used=new Set(S.people.filter(q=>q.village===v).map(q=>q.home));
+  const n=MAP.V[v].slots.length;for(let k=0;k<n;k++)if(!used.has(k))return k;return randi(0,n-1);
+}
+function homeTile(p){const sl=MAP.V[p.village].slots;return sl[p.home%sl.length];}
+function makePerson(o){
+  const p={id:S.nextId++,name:o.name||uniqueName(),gender:o.gender||(Math.random()<0.5?'男':'女'),age:o.age,village:o.village,job:'child',
+    wealth:o.wealth!=null?o.wealth:0,happiness:o.happiness!=null?o.happiness:rand(50,68),health:100,skill:o.skill!=null?o.skill:rand(10,40),
+    traits:[],rel:{},met:{},partner:null,parents:o.parents||[],children:[],hist:[],fed:1,hungerDays:0,sadDays:0,lastIncome:0,
+    status:'alive',home:0,x:0,y:0,tx:0,ty:0,skin:pick(SKIN),hair:pick(HAIR),lastBirth:-999,plagueTag:0};
+  const nt=Math.random()<0.55?2:1;
+  while(p.traits.length<nt){const t=pick(TRAITS);if(!p.traits.includes(t))p.traits.push(t);}
+  if(p.age>=62*YEAR)p.job='elder';else if(p.age>=14*YEAR)p.job=chooseJob(p);
+  p.home=o.home!=null?o.home:freeSlot(p.village);
+  const h=homeTile(p);p.x=p.tx=h.i+rand(-0.3,0.3);p.y=p.ty=h.j+rand(-0.3,0.3);
+  S.people.push(p);return p;
+}
+function setRel(p,q,v){p.rel[q.id]=v;q.rel[p.id]=v;if(v>=40){p.met[q.id]=1;q.met[p.id]=1;}}
+function bond(a,b){a.partner=b.id;b.partner=a.id;setRel(a,b,85);}
+
+function seedPopulation(){
+  const plan={pine:10,grain:11,bay:9};
+  const Y=(a,b)=>randi(a,b)*YEAR+randi(0,YEAR-1);
+  for(const v of VKEYS){
+    const a1=makePerson({village:v,age:Y(24,40),gender:'男',wealth:rand(12,40),home:0});
+    const a2=makePerson({village:v,age:Y(23,38),gender:'女',wealth:rand(12,40),home:0});
+    const b1=makePerson({village:v,age:Y(30,50),gender:'男',wealth:rand(10,45),home:1});
+    const b2=makePerson({village:v,age:Y(28,48),gender:'女',wealth:rand(10,45),home:1});
+    bond(a1,a2);bond(b1,b2);
+    const c1=makePerson({village:v,age:Y(2,9),home:0,parents:[a1.id,a2.id],skill:rand(5,15)});
+    const c2=makePerson({village:v,age:Y(6,12),home:1,parents:[b1.id,b2.id],skill:rand(5,15)});
+    a1.children.push(c1.id);a2.children.push(c1.id);b1.children.push(c2.id);b2.children.push(c2.id);
+    setRel(c1,a1,80);setRel(c1,a2,80);setRel(c2,b1,80);setRel(c2,b2,80);
+    for(let k=0;k<plan[v]-6;k++){
+      if(k===0)makePerson({village:v,age:Y(62,71),wealth:rand(20,60)});
+      else makePerson({village:v,age:Y(17,45),wealth:rand(6,35)});
+    }
+  }
+  const P=S.people;
+  const hero=P.find(p=>p.village==='grain'&&p.job==='farmer'&&!p.partner)||P.find(p=>p.village==='grain'&&p.job!=='child')||P[0];
+  hero.name='阿禾';S.sel=hero.id;
+  for(const p of P){
+    const vs=P.filter(q=>q.village===p.village&&q!==p);
+    for(let k=0;k<2;k++){const q=pick(vs);if(!(q.id in p.rel))setRel(p,q,rand(25,60));}
+    const vn=MAP.V[p.village].n;
+    if(p.job==='child'){const ps=p.parents.map(id=>byId(id)).filter(Boolean).map(q=>q.name);log(p,`在${vn}长大，父母是${ps.join('与')}`);}
+    else log(p,`在${vn}生活，是一名${JOBS[p.job].n}`);
+    if(p.partner){const q=byId(p.partner);log(p,`与${q.name}相伴多年`);}
+  }
+}
+
+/* ---------------- 每日模拟 ---------------- */
+function changeRel(p,q,d){
+  const a=p.rel[q.id]||0,b=clamp(a+d,-100,100);p.rel[q.id]=b;q.rel[p.id]=b;
+  if(a<40&&b>=40&&!p.met[q.id]){p.met[q.id]=1;q.met[p.id]=1;log(p,`与${q.name}成了朋友`);log(q,`与${p.name}成了朋友`);}
+  else if(a>-30&&b<=-30){log(p,`与${q.name}起了嫌隙`);log(q,`与${p.name}起了嫌隙`);}
+}
+function notify(p,text){
+  if(!S.alertsOn||!p)return;
+  if(p.id!==S.sel&&!S.watch.includes(p.id))return;
+  if(S.alerts.some(a=>a.id===p.id&&a.text===text))return;
+  S.alerts.push({id:p.id,name:p.name,text});if(S.alerts.length>5)S.alerts.shift();dirty=true;
+}
+function remove(p,status,cause){
+  const i=S.people.indexOf(p);if(i<0)return;S.people.splice(i,1);
+  p.status=status;p.endDay=S.day;p.cause=cause||'';
+  if(status==='dead'){
+    S.deaths++;
+    const msg=cause==='寿终'?`在${ageY(p)}岁时安详离世`:cause==='饥饿'?'在饥饿中离世':'因疫病离世';
+    log(p,msg);chron(`${p.name}${msg}。`,'death');notify(p,msg);
+    if(cause==='饥饿'){S.hungerDeaths++;S.lastHunger=p.name;}
+  }else if(cause==='wander'){S.left++;S.lastLeft=p.name;notify(p,'离开溪谷，去外面闯荡了');log(p,'带着大家的祝福，离开溪谷去外面闯荡');chron(`${p.name} 离开溪谷，去外面闯荡了。`,'leave');}
+  else{S.left++;S.lastLeft=p.name;notify(p,'对生活失去了指望，离开了溪谷');log(p,'对生活失去了指望，离开了溪谷');chron(`${p.name} 离开了溪谷，去远方寻找生计。`,'leave');}
+  for(const q of S.people){
+    const r=q.rel[p.id];if(r==null)continue;delete q.rel[p.id];
+    if(q.partner===p.id){q.partner=null;q.happiness-=18;const t=status==='dead'?`失去了伴侣${p.name}`:`伴侣${p.name}离开了溪谷`;log(q,t);notify(q,t);}
+    else if(r>=70&&status==='dead'){q.happiness-=8;log(q,`送别了挚友${p.name}`);}
+  }
+  S.dead.push(p);if(S.dead.length>150)S.dead.shift();
+}
+function nearestOf(list,h){let b=null,bd=1e9;for(let k=0;k<3;k++){const c=pick(list);const d=Math.hypot(c.i-h.i,c.j-h.j);if(d<bd){bd=d;b=c;}}return b;}
+function assignTarget(p){
+  const V=MAP.V[p.village],home=homeTile(p);let t;const r=Math.random();
+  if(!isWorker(p))t=r<0.5?home:r<0.8?V.center:pick(V.slots);
+  else if(r<0.62){
+    switch(p.job){
+      case 'farmer':t=nearestOf(MAP.fields,home);break;
+      case 'fisher':t=nearestOf(MAP.water,home);break;
+      case 'woodcutter':t=nearestOf(MAP.forest,home);break;
+      case 'miner':t=S.mine?pick(MAP.mineAdj):V.center;break;
+      case 'merchant':t=pick(MAP.plazas);break;
+      default:t=Math.random()<0.5?V.center:home;
+    }
+  }else t=r<0.85?home:V.center;
+  p.tx=t.i+rand(-0.32,0.32);p.ty=t.j+rand(-0.32,0.32);
+}
+function pushHist(){
+  const P=S.people,H=S.hist,n=P.length||1;
+  const add=(k,v)=>{H[k].push(v);if(H[k].length>90)H[k].shift();};
+  add('pop',P.length);add('food',S.food);
+  add('wealth',P.reduce((t,p)=>t+Math.max(0,p.wealth),0)+S.treasury);
+  add('happy',P.reduce((t,p)=>t+p.happiness,0)/n);add('coh',S.cohesion);
+}
+
+function tick(){
+  const P=S.people;if(!P.length)return;
+  S.day++;
+  const se=seasonIdx(),pol=S.policy;
+  if(S.day%YEAR===0)chron(`第${S.day/YEAR+1}年开始了。溪谷有 ${P.length} 人，粮仓存粮 ${Math.round(S.food)} 担。`,'info');
+  if(S.drought>0&&--S.drought===0)chron('雨水终于回到溪谷，旱情结束了。','event');
+  if(S.plague>0&&--S.plague===0)chron('疫病渐渐平息。','event');
+  if(S.festival>0)S.festival--;
+  if(S.caravan>0&&--S.caravan===0)chron('商队收拾行装，离开了溪湾。','info');
+  if(S.mineClosed>0&&--S.mineClosed===0)chron('矿洞整修完毕，矿工们重新下井。','info');
+  if(S.day%20===0&&S.favor<5)S.favor++;
+
+  for(const p of P){
+    p.age++;
+    if(p.job==='child'&&p.age>=14*YEAR){p.job=chooseJob(p);p.skill=Math.max(p.skill,15);log(p,`长大成人，成为一名${JOBS[p.job].n}`);notify(p,`长大成人，成为一名${JOBS[p.job].n}`);}
+    else if(isWorker(p)&&p.age>=62*YEAR){p.job='elder';log(p,'放下了劳作，成了村里的长者');}
+  }
+
+  // 劳作
+  const farmK=[1.0,1.3,1.6,0.25][se]*(S.drought>0?0.3:1)*(S.canal?1.35:1);
+  const fishK=[1.0,1.1,1.0,0.6][se]*(S.drought>0?0.8:1);
+  const inc=new Map(),prod=new Map();let food=0;
+  for(const p of P){
+    if(!isWorker(p)){if(p.job==='child')p.skill=clamp(p.skill+0.05*(S.school?3:1),0,100);continue;}
+    const k=(0.6+p.skill/125)*(0.4+0.6*p.health/100)*(p.fed<0.8?0.75:1)*(has(p,'勤劳')?1.15:1);
+    let x=0;
+    switch(p.job){
+      case 'farmer':{const f=0.46*farmK*k;food+=f;prod.set(p,f);break;}
+      case 'fisher':{const f=0.34*fishK*k;food+=f;prod.set(p,f);break;}
+      case 'woodcutter':x=0.95*k;break;
+      case 'miner':x=S.mineClosed>0?0:2.3*k;break;
+      case 'craftsman':x=0.35*k;break;
+      case 'merchant':x=0.3*k*(S.caravan>0?2.5:1)*(1+0.3*Math.min(2,BC(p.village,'market')));break;
+    }
+    inc.set(p,x);
+    p.skill=clamp(p.skill+0.12*(has(p,'好学')?1.6:1)*(1-p.skill/100),0,100);
+  }
+  S.food+=food;
+
+  // 分粮与买粮
+  let totalNeed=0;for(const p of P)totalNeed+=need(p);
+  const price=clamp(3*Math.pow(20/Math.max(S.food/totalNeed,0.5),0.35),0.8,9);
+  const share=new Map();let avail=S.food;
+  if(avail>=totalNeed){for(const p of P)share.set(p,need(p));}
+  else if(pol==='equal'){const r=avail/totalNeed;for(const p of P)share.set(p,need(p)*r);}
+  else{
+    let first,second;
+    if(pol==='need'){first=P.filter(p=>p.job==='child'||p.job==='elder'||p.health<50);second=P.filter(p=>!first.includes(p));}
+    else if(pol==='work'){const sc=p=>(inc.get(p)||0)+(prod.get(p)||0)*3;first=P.filter(isWorker).sort((a,b)=>sc(b)-sc(a));second=P.filter(p=>!isWorker(p));}
+    else{first=[...P].sort((a,b)=>b.wealth-a.wealth);second=[];}
+    let a=avail;
+    for(const p of first){const s=Math.min(need(p),a);share.set(p,s);a-=s;}
+    if(second.length){const n2=second.reduce((t,p)=>t+need(p),0);const r=n2>0?Math.min(1,a/n2):0;for(const p of second)share.set(p,need(p)*r);}
+  }
+  let foodPool=0,trades=0;
+  for(const p of P){
+    let s=Math.min(share.get(p)||0,avail);
+    if(s<=0){p.fed=0;continue;}
+    const cost=s*price*(has(p,'节俭')?0.9:1);
+    let payer=p;
+    if(p.job==='child'){const ps=p.parents.map(living).filter(Boolean).sort((a,b)=>b.wealth-a.wealth);if(ps.length)payer=ps[0];}
+    if(payer.wealth>=cost){payer.wealth-=cost;foodPool+=cost;trades++;}
+    else{
+      const pay=Math.max(0,payer.wealth);payer.wealth-=pay;
+      if(pol==='market'){s=s*pay/cost;foodPool+=pay;if(pay>0)trades++;}
+      else{const sub=Math.min(S.treasury,cost-pay);S.treasury-=sub;foodPool+=pay+sub;trades++;}
+    }
+    avail-=s;p.fed=s/need(p);
+  }
+  S.food=Math.max(0,avail);
+  const fcap=foodCap();S.rot=S.food>fcap?(S.food-fcap)*0.02:0;S.food-=S.rot;
+  const merch=P.filter(p=>p.job==='merchant'),crafts=P.filter(p=>p.job==='craftsman');
+  const mcut=merch.length?foodPool*0.08:0;
+  for(const m of merch)inc.set(m,(inc.get(m)||0)+mcut/merch.length);
+  const rest=foodPool-mcut;
+  if(food>0){for(const [p,f] of prod)inc.set(p,(inc.get(p)||0)+rest*f/food);trades+=prod.size;}else S.treasury+=rest;
+
+  // 日常消费
+  let goods=0;
+  for(const p of P){if(p.job==='child')continue;const w=Math.max(0,p.wealth);const sp=Math.min(w,0.15+w*0.012);p.wealth-=sp;goods+=sp;if(sp>0.02)trades++;}
+  const cw=crafts.reduce((t,p)=>t+0.5+p.skill/100,0);
+  for(const p of crafts)inc.set(p,(inc.get(p)||0)+goods*0.45*(0.5+p.skill/100)/cw);
+  for(const p of merch)inc.set(p,(inc.get(p)||0)+goods*0.15/merch.length);
+
+  // 收税与公库
+  for(const [p,x] of inc){const t=x*S.tax;S.treasury+=t;p.wealth+=x-t;p.lastIncome=x;}
+  const pw=S.treasury*0.03;S.treasury-=pw;S.publicPerCap=pw/P.length;
+  if(S.day%10===0&&S.treasury>10){
+    if(pol==='equal'){const amt=S.treasury*0.3;S.treasury-=amt;for(const p of P)p.wealth+=amt/P.length;}
+    else if(pol==='work'){const ws=P.filter(isWorker);const tot=ws.reduce((t,p)=>t+p.lastIncome,0);if(tot>0){const amt=S.treasury*0.3;S.treasury-=amt;for(const p of ws)p.wealth+=amt*p.lastIncome/tot;}}
+    else if(pol==='need'){const poor=[...P].sort((a,b)=>a.wealth-b.wealth).slice(0,Math.max(1,Math.ceil(P.length/4)));const amt=S.treasury*0.25;S.treasury-=amt;for(const p of poor)p.wealth+=amt/poor.length;}
+  }
+  S.trades=trades;S.foodProd=food;S.foodCons=totalNeed;S.price=price;
+
+  // 健康
+  for(const p of P){
+    if(p.fed<0.7){p.hungerDays++;p.health-=(1-p.fed)*5*(has(p,'体弱')?1.3:1);if(p.hungerDays===3){log(p,'粮食不够，开始挨饿');notify(p,'开始挨饿了，也许需要你帮一把');}}
+    else{
+      if(p.hungerDays>=3)log(p,'终于又吃上了饱饭');p.hungerDays=0;
+      const cap=p.age>60*YEAR?100-(ageY(p)-60)*2.5:100;
+      p.health=Math.min(Math.max(cap,0),p.health+(has(p,'体弱')?0.5:1.3)+(BC(p.village,'well')?0.6:0));
+    }
+    if(S.plague>0&&p.plagueTag!==S.plagueId&&Math.random()<0.035*(BC(p.village,'well')?0.5:1)){
+      p.plagueTag=S.plagueId;
+      p.health-=rand(15,38)*(has(p,'体弱')?1.5:1)*((p.job==='child'||p.job==='elder')?1.3:1);
+      log(p,'染上了疫病');notify(p,'染上了疫病');
+    }
+    if(p.health<30&&!p.lowWarn){p.lowWarn=1;notify(p,`身体很差，健康只剩 ${Math.max(0,Math.round(p.health))}`);}
+    else if(p.health>60)p.lowWarn=0;
+  }
+
+  // 幸福
+  const ws=P.map(p=>Math.max(0,p.wealth)).sort((a,b)=>a-b),n=ws.length,sumW=ws.reduce((a,b)=>a+b,0);
+  let gn=0;if(sumW>0){let cum=0;for(let k=0;k<n;k++)cum+=(k+1)*ws[k];gn=(2*cum)/(n*sumW)-(n+1)/n;}
+  const avgW=sumW/n;S.gini=gn;
+  for(const p of P){
+    const fr=friendCount(p);
+    let t=30+Math.log2(1+Math.max(0,p.wealth))*4.2;
+    t+=p.fed>=0.95?12:-30*(1-p.fed);
+    t+=Math.min(5,fr)*3.5+(p.partner?8:0)+(p.health-75)/5;
+    t-=S.tax*(p.wealth>avgW?40:15);
+    t-=gn*(p.wealth<avgW?28:8);
+    if(p.job==='child')t+=15;
+    if(S.festival>0)t+=14;if(S.drought>0)t-=5;if(se===3)t-=3;if(has(p,'乐天'))t+=7;
+    t+=Math.min(6,S.publicPerCap*8)+2*Math.min(2,BC(p.village,'market'))+2*Math.min(2,BC(p.village,'teahouse'));
+    p.happiness=clamp(p.happiness+(t-p.happiness)*0.07+rand(-0.8,0.8),0,100);
+    if(p.happiness<22)p.sadDays++;else p.sadDays=Math.max(0,p.sadDays-1);
+    if(p.sadDays===7&&p.job!=='child')notify(p,'愁苦了很久，再这样下去可能会离开溪谷');
+  }
+
+  // 来往
+  const byV={};for(const v of VKEYS)byV[v]=[];for(const p of P)byV[p.village].push(p);
+  for(const p of P){
+    let k=(has(p,'好客')?1.6:has(p,'内向')?0.5:1)*(S.festival>0?2:1)*(BC(p.village,'teahouse')?1.4:1),times=0;
+    while(k>0){if(Math.random()<Math.min(1,k)*0.6)times++;k-=1;}
+    for(let t=0;t<times;t++){
+      const q=pick(Math.random()<0.75?byV[p.village]:P);if(!q||q===p)continue;
+      let d=rand(-1.5,5);
+      if(p.happiness<35||q.happiness<35)d-=3;
+      if(has(p,'急躁'))d+=rand(-4,1);
+      if(has(p,'好客'))d+=1;
+      if(S.festival>0)d+=3;
+      if(pol==='market'&&Math.abs(p.wealth-q.wealth)>60)d-=1.5;
+      if(S.drought>0&&(pol==='need'||pol==='equal'))d+=1;
+      d+=(S.cohesion-50)/40;
+      changeRel(p,q,d);
+    }
+  }
+  if(S.day%10===0)for(const p of P)for(const k in p.rel){p.rel[k]*=0.97;if(Math.abs(p.rel[k])<2)delete p.rel[k];}
+
+  // 伴侣
+  for(const p of P){
+    if(p.partner||p.job==='child'||p.age<18*YEAR||p.age>50*YEAR||Math.random()>0.04)continue;
+    for(const k in p.rel){
+      if(p.rel[k]<70)continue;const q=living(+k);
+      if(!q||q.partner||q.gender===p.gender||q.age<18*YEAR||q.age>50*YEAR)continue;
+      if(p.parents.includes(q.id)||q.parents.includes(p.id)||p.parents.some(x=>q.parents.includes(x)))continue;
+      p.partner=q.id;q.partner=p.id;
+      if(p.village!==q.village){const mv=p.happiness<q.happiness?p:q,st=mv===p?q:p;mv.village=st.village;mv.home=st.home;log(mv,`搬到了${MAP.V[st.village].n}`);}
+      else q.home=p.home;
+      log(p,`与${q.name}结为伴侣`);log(q,`与${p.name}结为伴侣`);notify(p,`与${q.name}结为伴侣了`);notify(q,`与${p.name}结为伴侣了`);
+      chron(`${p.name} 与 ${q.name} 结为伴侣。`,'bond');break;
+    }
+  }
+
+  // 新生
+  const fd=S.food/totalNeed;
+  for(const m of [...P]){
+    if(m.gender!=='女'||!m.partner||m.age<18*YEAR||m.age>42*YEAR||S.day-m.lastBirth<60)continue;
+    const f=living(m.partner);if(!f)continue;
+    if(fd<15||(m.happiness+f.happiness)/2<50)continue;
+    if(Math.random()>0.012*(P.length<60?1:0.3))continue;
+    m.lastBirth=S.day;
+    const c=makePerson({village:m.village,age:0,home:m.home,parents:[f.id,m.id],skill:rand(5,15),happiness:70});
+    m.children.push(c.id);f.children.push(c.id);setRel(c,m,80);setRel(c,f,80);
+    log(c,`出生在${MAP.V[c.village].n}，父母是${f.name}与${m.name}`);
+    log(m,`迎来了孩子${c.name}`);log(f,`迎来了孩子${c.name}`);notify(m,`迎来了孩子${c.name}`);notify(f,`迎来了孩子${c.name}`);
+    S.births++;chron(`${f.name} 与 ${m.name} 的孩子 ${c.name} 出生了。`,'birth');
+  }
+
+  // 离世与离开
+  for(const p of [...P]){
+    let cause=null;
+    if(p.health<=0)cause=p.hungerDays>2?'饥饿':'疫病';
+    else if(p.age>58*YEAR&&Math.random()<0.0006*(ageY(p)-57))cause='寿终';
+    if(cause){remove(p,'dead',cause);continue;}
+    if(p.sadDays>12&&p.job!=='child'&&Math.random()<0.06)remove(p,'left');
+  }
+  if(!P.length){chron('最后一个人也离开了。溪谷重归寂静。','death');S.paused=true;return;}
+
+  // 改行
+  const wk=P.filter(isWorker),avgInc=wk.length?wk.reduce((t,p)=>t+p.lastIncome,0)/wk.length:0;
+  const fd2=foodDays();
+  for(const p of wk){
+    if(Math.random()>(fd2<15&&p.job!=='farmer'&&p.job!=='fisher'?0.03:0.004))continue;
+    let nj=null;
+    if(fd2<15&&p.job!=='farmer'&&p.job!=='fisher'&&Math.random()<0.6)nj=p.village==='bay'?'fisher':'farmer';
+    else if(S.mine&&p.job!=='miner'&&p.wealth<avgW*0.7&&Math.random()<0.5)nj='miner';
+    else if(p.lastIncome<avgInc*0.45)nj=chooseJob(p);
+    if(nj&&nj!==p.job){p.job=nj;p.skill*=0.5;log(p,`改行做了${JOBS[nj].n}`);}
+  }
+
+  // 凝聚力
+  const avgF=P.reduce((t,p)=>t+friendCount(p),0)/P.length;
+  const sadFrac=P.filter(p=>p.happiness<35).length/P.length;
+  let ct=40+avgF*6-gn*40+Math.min(10,S.publicPerCap*12)+(S.festival>0?10:0)-sadFrac*25;
+  if(S.drought>0)ct+=(pol==='need'||pol==='equal')?4:-8;
+  ct+=pol==='market'?-4:pol==='equal'?3:0;
+  ct+=3*Math.min(2,BT('teahouse'));
+  S.cohesion=clamp(S.cohesion+(clamp(ct,0,100)-S.cohesion)*0.04,0,100);
+
+  pushHist();
+  for(const p of P)if(Math.random()<0.4)assignTarget(p);
+  computeHouses();
+  maybeDilemma();
+  if(S.ch&&!S.ch.result){const C=CHALLENGES[S.ch.id];if(C&&C.tick)C.tick();checkChallenge();}
+}
+
+/* ---------------- 改变的种子 ---------------- */
+const ICONS={
+  drought:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
+  mine:'<svg viewBox="0 0 24 24"><path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9.5 4L12 20M14.5 4L12 20"/></svg>',
+  immigrants:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><path d="M16 7h5M18.5 4.5v5"/></svg>',
+  festival:'<svg viewBox="0 0 24 24"><path d="M12 21V5"/><path d="M12 9c-2.5 0-4-1.5-4.5-4 2.5 0 4 1.5 4.5 4zM12 9c2.5 0 4-1.5 4.5-4-2.5 0-4 1.5-4.5 4zM12 14c-2.5 0-4-1.5-4.5-4 2.5 0 4 1.5 4.5 4zM12 14c2.5 0 4-1.5 4.5-4-2.5 0-4 1.5-4.5 4z"/></svg>',
+  plague:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 3.5v3.5M12 17v3.5M3.5 12H7M17 12h3.5M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/></svg>',
+  caravan:'<svg viewBox="0 0 24 24"><path d="M3 16V8h12v8M15 11h3.5l2.5 3v2h-6"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/></svg>',
+  canal:'<svg viewBox="0 0 24 24"><path d="M3 8c3-2 5 2 9 0s6-2 9 0M3 13c3-2 5 2 9 0s6-2 9 0M3 18c3-2 5 2 9 0s6-2 9 0"/></svg>'
+};
+function cdLeft(k){return Math.max(0,(S.cd[k]||0)-S.day);}
+const cdState=k=>cdLeft(k)?`${cdLeft(k)}日后可再用`:'';
+const SEEDS=[
+  {k:'drought',n:'降下干旱',d:'三十日少雨，庄稼减产七成',
+    st:()=>S.drought>0?`进行中 ${S.drought}日`:'',dis:()=>S.drought>0,on:()=>S.drought>0,
+    go(){S.drought=30;chron('旱灾降临溪谷，田里的禾苗开始发黄。','event');}},
+  {k:'mine',n:'发现矿脉',d:'山脚露出矿石，带来新的财富',
+    st:()=>S.mine?'已发现':'',dis:()=>S.mine,on:()=>false,
+    go(){
+      S.mine=true;chron('有人在山脚下发现了一条矿脉。','event');
+      const ws=S.people.filter(isWorker).sort((a,b)=>a.wealth-b.wealth);let n=0;
+      for(const p of ws){if(n>=Math.max(2,Math.ceil(ws.length*0.25)))break;if(n<2||Math.random()<0.35){p.job='miner';p.skill*=0.5;log(p,'听说发现了矿脉，扛起镐头当了矿工');n++;}}
+    }},
+  {k:'immigrants',n:'迎来移民',d:'五到七位陌生人前来定居',cd:20,
+    st:()=>S.ch&&S.ch.id==='grow'&&!S.ch.result?'本挑战不可用':cdState('immigrants'),dis:()=>cdLeft('immigrants')>0||(S.ch&&S.ch.id==='grow'&&!S.ch.result),on:()=>false,
+    go(){
+      const n=randi(5,7),v=pick(VKEYS),ps=[];
+      for(let k=0;k<n;k++){
+        const p=makePerson({village:v,age:randi(18,40)*YEAR+randi(0,YEAR-1),wealth:rand(2,8),happiness:58,skill:rand(15,55)});
+        const e=pick(MAP.edge);p.x=e.i;p.y=e.j;assignTarget(p);const h=homeTile(p);p.tx=h.i;p.ty=h.j;
+        log(p,`从远方迁来，在${MAP.V[v].n}落脚`);ps.push(p);
+      }
+      for(let k=0;k+1<ps.length;k+=2)setRel(ps[k],ps[k+1],rand(20,45));
+      chron(`${n} 位移民来到${MAP.V[v].n}，带着行囊和陌生的口音。`,'event');computeHouses();
+    }},
+  {k:'festival',more:true,n:'举办丰收节',d:'公库出资，人们欢聚几日',cd:30,
+    st:()=>S.festival>0?'正在欢庆':cdState('festival'),dis:()=>cdLeft('festival')>0,on:()=>S.festival>0,
+    go(){const c=Math.min(S.treasury,40);S.treasury-=c;S.festival=6;S.people.forEach(p=>p.happiness=Math.min(100,p.happiness+6));chron(`溪谷办起了丰收节，公库出资 ${Math.round(c)} 金，人们彻夜欢歌。`,'event');}},
+  {k:'plague',more:true,n:'疫病流行',d:'十五日内，人人都可能染病',cd:30,
+    st:()=>S.plague>0?`进行中 ${S.plague}日`:cdState('plague'),dis:()=>S.plague>0||cdLeft('plague')>0,on:()=>S.plague>0,
+    go(){S.plague=15;S.plagueId++;chron('一场疫病在溪谷蔓延开来。','event');}},
+  {k:'caravan',more:true,n:'商队到访',d:'带来六十担粮食，商人生意兴隆',cd:25,
+    st:()=>S.caravan>0?`停留中 ${S.caravan}日`:cdState('caravan'),dis:()=>cdLeft('caravan')>0,on:()=>S.caravan>0,
+    go(){S.food+=60;const c=Math.min(S.treasury,45);S.treasury-=c;S.caravan=10;chron(`一支商队来到溪湾，公库花 ${Math.round(c)} 金换来六十担粮食。`,'event');}},
+  {k:'canal',more:true,n:'修建水渠',d:'花公库 150 金，农田从此增产',
+    st:()=>S.canal?'已建成':S.treasury<150?`公库 ${Math.round(S.treasury)}/150`:'',dis:()=>S.canal||S.treasury<150,on:()=>false,
+    go(){S.treasury-=150;S.canal=true;chron('人们引溪水入田，水渠修成了，往后的收成会更好。','event');}}
+];
+function trigger(s){if(s.dis())return;s.go();if(s.cd)S.cd[s.k]=S.day+s.cd;dirty=true;updateUI();}
+function buildSeeds(){
+  const box=$('seeds');box.innerHTML='';
+  for(const s of SEEDS){
+    const b=document.createElement('button');b.className='seed'+(s.more?' more-item':'');
+    b.innerHTML=`<span class="ic">${ICONS[s.k]}</span><span class="tx"><b>${s.n}</b><span>${s.d}</span></span><em class="st"></em>`;
+    b.addEventListener('click',()=>trigger(s));s.el=b;s.stEl=b.querySelector('.st');box.appendChild(b);
+  }
+  $('moreSeeds').addEventListener('click',()=>{const on=box.classList.toggle('showmore');$('moreSeeds').textContent=on?'收起 ▴':'更多自然事件 ▾';});
+}
+
+
+/* ---------------- 两难抉择 ---------------- */
+const nm=id=>{const p=byId(id);return p?p.name:'某人';};
+const VN=v=>MAP.V[v].n;
+const adults=()=>S.people.filter(p=>p.job!=='child');
+function moodVillage(v,a){for(const p of S.people)if(p.village===v)p.happiness=clamp(p.happiness+a,0,100);}
+const DILEMMAS={
+  trade:{
+    when:()=>S.treasury>=30?{}:null,
+    title:()=>'商队的交易',
+    text:()=>`一支路过的商队愿意用 50 担粮食，换走公库里的 60 金。粮仓现在还够吃 ${Math.floor(foodDays())} 天，公库有 ${Math.round(S.treasury)} 金。`,
+    opts:()=>[
+      {t:'答应交易',h:'粮食 +50，公库 −60',ok:()=>S.treasury>=60,go(){S.treasury-=60;S.food+=50;return '商队卸下粮袋，粮仓里多了 50 担粮食。';}},
+      {t:'讨价还价',h:'也许能少花点，也许会谈崩',go(){
+        if(Math.random()<0.55){const c=Math.min(35,S.treasury);S.treasury-=c;S.food+=50;return `商队首领笑着让了步，只收了 ${Math.round(c)} 金。`;}
+        for(const p of S.people)if(p.job==='merchant')p.happiness=clamp(p.happiness-5,0,100);
+        return '商队觉得受了冒犯，转身离开了。溪湾的商人们有些失落。';}},
+      {t:'婉拒',h:'一切照旧',go:()=>'商队收起货物，继续上路了。'}
+    ]
+  },
+  taxcut:{
+    when(){if(S.tax<0.08)return null;const v=pick(VKEYS);const ps=S.people.filter(q=>q.village===v&&isWorker(q));return ps.length?{v,p:pick(ps).id}:null;},
+    title:()=>'减税请愿',
+    text:d=>`${nm(d.p)}带着${VN(d.v)}的十几个人来请愿：日子过得紧巴，希望把生产税率从 ${Math.round(S.tax*100)}% 降到 ${Math.max(0,Math.round(S.tax*100)-5)}%。`,
+    opts:d=>[
+      {t:'答应减税',h:`税率 −5%，${VN(d.v)}的人会很满意，公库收入变少`,go(){S.tax=Math.max(0,S.tax-0.05);moodVillage(d.v,8);syncControls();const p=living(d.p);if(p)log(p,'带头请愿减税，如愿以偿');return `税率降到了 ${Math.round(S.tax*100)}%，${VN(d.v)}的人奔走相告。`;}},
+      {t:'各让一步',h:'税率 −2%',go(){S.tax=Math.max(0,S.tax-0.02);moodVillage(d.v,3);syncControls();return `税率降到了 ${Math.round(S.tax*100)}%。请愿的人不算满意，但也接受了。`;}},
+      {t:'拒绝',h:'公库不受影响，但请愿的人会失望',go(){moodVillage(d.v,-8);S.cohesion=clamp(S.cohesion-4,0,100);const p=living(d.p);if(p)log(p,'请愿被拒，心里很不是滋味');return `请愿的人垂着头散去，${VN(d.v)}里多了些怨言。`;}}
+    ]
+  },
+  levy:{
+    when(){if(foodDays()>25&&S.drought===0)return null;const r=adults().sort((a,b)=>b.wealth-a.wealth).slice(0,3);return r.length===3&&r[2].wealth>=20?{ids:r.map(p=>p.id)}:null;},
+    title:()=>'要不要向富户征钱',
+    text:d=>`粮食越来越紧，只够吃 ${Math.floor(foodDays())} 天了。有人提议：向最富的三户，${d.ids.map(nm).join('、')}，征收一半家财，拿去岛外买粮。`,
+    opts:d=>[
+      {t:'征收',h:'能买回不少粮食，但三户会心生怨恨',go(){
+        let sum=0;for(const id of d.ids){const p=living(id);if(!p)continue;const x=Math.max(0,p.wealth)*0.5;p.wealth-=x;sum+=x;p.happiness=clamp(p.happiness-20,0,100);log(p,`一半家财（${Math.round(x)} 金）被征去买粮`);}
+        const f=Math.round(sum/2.5);S.food+=f;return `征得 ${Math.round(sum)} 金，从岛外买回 ${f} 担粮食。`;}},
+      {t:'登门劝捐',h:'看他们愿不愿意，捐多少算多少',go(){
+        let sum=0;const names=[];
+        for(const id of d.ids){const p=living(id);if(!p)continue;if(Math.random()<(p.happiness>55||has(p,'好客')?0.75:0.3)){const x=Math.max(0,p.wealth)*0.25;p.wealth-=x;sum+=x;p.happiness=clamp(p.happiness+6,0,100);names.push(p.name);log(p,`主动捐出 ${Math.round(x)} 金买粮`);}}
+        if(!sum)return '三户都推说手头紧，一分也没捐。';
+        const f=Math.round(sum/2.5);S.food+=f;S.cohesion=clamp(S.cohesion+3,0,100);return `${names.join('、')}捐了 ${Math.round(sum)} 金，买回 ${f} 担粮食。`;}},
+      {t:'不干预',h:'各家自己想办法',go:()=>'富户们照旧过日子，穷人只能勒紧裤腰带。'}
+    ]
+  },
+  refugees:{
+    when:()=>({n:randi(3,4),v:pick(VKEYS)}),
+    title:()=>'岸边的逃荒者',
+    text:d=>`一家 ${d.n} 口人坐着破船漂到${VN(d.v)}附近的岸边，衣衫褴褛，请求留下来。粮仓还够吃 ${Math.floor(foodDays())} 天。`,
+    opts:d=>[
+      {t:'收留他们',h:`人口 +${d.n}，吃饭的嘴也多了`,go(){
+        const Y=(a,b)=>randi(a,b)*YEAR+randi(0,YEAR-1),e=pick(MAP.edge);
+        const fa=makePerson({village:d.v,age:Y(26,40),gender:'男',wealth:1,happiness:60});
+        const mo=makePerson({village:d.v,age:Y(24,38),gender:'女',wealth:1,happiness:60,home:fa.home});
+        bond(fa,mo);const fam=[fa,mo];
+        for(let k=2;k<d.n;k++){const c=makePerson({village:d.v,age:Y(1,11),home:fa.home,parents:[fa.id,mo.id],happiness:60});fa.children.push(c.id);mo.children.push(c.id);setRel(c,fa,80);setRel(c,mo,80);fam.push(c);}
+        for(const p of fam){p.x=e.i;p.y=e.j;const h=homeTile(p);p.tx=h.i;p.ty=h.j;log(p,`一家人逃荒到溪谷，在${VN(d.v)}被收留`);}
+        computeHouses();return `${fa.name}一家在${VN(d.v)}搭起了新家。`;}},
+      {t:'送些粮食，请他们离开',h:'粮食 −20',go(){S.food=Math.max(0,S.food-20);return '他们带着粮食，划船去了别处。';}},
+      {t:'拒绝',h:'有人会觉得溪谷变冷漠了',go(){S.cohesion=clamp(S.cohesion-5,0,100);for(const p of S.people)if(has(p,'好客'))p.happiness=clamp(p.happiness-6,0,100);return '破船又漂走了。好几个人在岸边站了很久。';}}
+    ]
+  },
+  dispute:{
+    when(){
+      for(const p of S.people){if(p.job==='child')continue;for(const k in p.rel){if(p.rel[k]<=-15){const q=living(+k);if(q&&q.job!=='child')return {a:p.id,b:q.id};}}}
+      const v=pick(VKEYS),ps=S.people.filter(q=>q.village===v&&isWorker(q));if(ps.length<2)return null;
+      const a=pick(ps);let b=pick(ps),n=0;while(b===a&&n++<10)b=pick(ps);return b===a?null:{a:a.id,b:b.id};},
+    title:()=>'田界之争',
+    text:d=>`${nm(d.a)}和${nm(d.b)}为一块地的归属吵得不可开交，两人都来找你评理。`,
+    opts:d=>{
+      const judge=(w,l)=>()=>{const W=living(w),L=living(l);if(!W||!L)return '还没等你开口，两人已经不争了。';
+        W.happiness=clamp(W.happiness+10,0,100);W.wealth+=8;L.happiness=clamp(L.happiness-12,0,100);L.wealth-=Math.min(8,Math.max(0,L.wealth));
+        setRel(W,L,Math.min(W.rel[L.id]||0,-40));log(W,`和${L.name}争地，赢了`);log(L,`和${W.name}争地输了，心里不服`);
+        return `地判给了${W.name}。${L.name}很不服气，两人从此见面不说话。`;};
+      return [
+        {t:`判给${nm(d.a)}`,h:`${nm(d.a)}满意，${nm(d.b)}不服`,go:judge(d.a,d.b)},
+        {t:`判给${nm(d.b)}`,h:`${nm(d.b)}满意，${nm(d.a)}不服`,go:judge(d.b,d.a)},
+        {t:'调解：公库出 10 金，地两人分',h:'也许能化敌为友，也许谁都不买账',ok:()=>S.treasury>=10,go(){
+          S.treasury-=10;const A=living(d.a),B=living(d.b);if(!A||!B)return '这事已经不了了之。';
+          if(Math.random()<0.65){setRel(A,B,Math.max(A.rel[B.id]||0,50));log(A,`和${B.name}握手言和，成了朋友`);log(B,`和${A.name}握手言和，成了朋友`);return `${A.name}和${B.name}握手言和，还约好改天一起喝酒。`;}
+          changeRel(A,B,-10);return '两人都不买账，各自气呼呼地走了。';}}
+      ];}
+  },
+  school:{
+    when(){if(S.school||S.treasury<80)return null;const kids=S.people.filter(p=>p.job==='child').length;if(kids<3)return null;
+      const ps=S.people.filter(p=>p.job==='elder'||p.job==='craftsman'),p=ps.length?pick(ps):pick(adults());return p?{p:p.id,kids}:null;},
+    title:()=>'办一间学堂',
+    text:d=>`${nm(d.p)}提议用公库 80 金办一间学堂，让孩子们从小学手艺。溪谷现在有 ${d.kids} 个孩子。`,
+    opts:d=>[
+      {t:'办学堂',h:'公库 −80，孩子们长大后手艺更好',ok:()=>S.treasury>=80,go(){
+        S.treasury-=80;S.school=true;const p=living(d.p);if(p){log(p,'牵头办起了学堂');p.happiness=clamp(p.happiness+10,0,100);}
+        for(const c of S.people)if(c.job==='child')log(c,'进了学堂读书');return '学堂开张了，孩子们的读书声从早响到晚。';}},
+      {t:'暂时不办',h:'把钱留着应急',go:()=>`${nm(d.p)}叹了口气，说那就再等等。`}
+    ]
+  },
+  cave:{
+    when:()=>S.mine&&!S.mineClosed&&S.people.some(p=>p.job==='miner')?{}:null,
+    title:()=>'矿洞的裂缝',
+    text:()=>'矿工们发现主矿洞顶上出现了一道裂缝。停工整修十日会少挣不少钱，继续开采则可能出事。',
+    opts:()=>[
+      {t:'停工整修十日',h:'矿工十日没有收入',go(){S.mineClosed=10;return '矿工们放下镐头，开始加固矿洞。';}},
+      {t:'继续开采',h:'不耽误挣钱，但有风险',go(){
+        const ms=S.people.filter(p=>p.job==='miner');
+        if(ms.length&&Math.random()<0.45){const m=pick(ms);m.health-=rand(50,85);log(m,'在矿洞塌方中受了重伤');for(const q of ms)q.happiness=clamp(q.happiness-10,0,100);return `矿洞塌了一角，${m.name}被压在石头下，受了重伤。`;}
+        return '裂缝没有再扩大，大家松了一口气。';}}
+    ]
+  },
+  sick:{
+    when(){const ps=S.people.filter(q=>q.health<55).sort((a,b)=>a.health-b.health);return ps.length?{p:ps[0].id}:null;},
+    title:()=>'请不请郎中',
+    text:d=>{const p=byId(d.p);return `${p.name}病得很重，健康只剩 ${Math.max(0,Math.round(p.health))}。从岛外请郎中要花公库 30 金。`;},
+    opts:d=>[
+      {t:'请郎中',h:'公库 −30，病情会好转许多',ok:()=>S.treasury>=30,go(){
+        S.treasury-=30;const p=living(d.p);if(!p)return '郎中赶到时，已经晚了。';
+        p.health=Math.min(100,p.health+45);log(p,'公库请来郎中，病好了大半');return `郎中开了几副药，${p.name}的气色一天天好起来。`;}},
+      {t:'让家人照顾',h:'省下这笔钱，听天由命',go(){const p=living(d.p);if(p)log(p,'只能靠家人照料养病');return `家人守在床边。能不能熬过去，就看${nm(d.p)}自己了。`;}}
+    ]
+  },
+  wander:{
+    when(){const ps=S.people.filter(q=>isWorker(q)&&q.age<35*YEAR&&!q.partner&&q.happiness<60);return ps.length?{p:pick(ps).id}:null;},
+    title:()=>'想出去闯闯的年轻人',
+    text:d=>{const p=byId(d.p);return `${p.name}（${ageY(p)}岁，${JOBS[p.job].n}）说岛上的日子一眼望得到头，想去外面闯一闯。`;},
+    opts:d=>{const p=byId(d.p),t=p?ta(p):'他';return [
+      {t:'挽留：公库给 20 金安家',h:`${t}会留下，心里也更踏实`,ok:()=>S.treasury>=20,go(){
+        S.treasury-=20;const q=living(d.p);if(!q)return '';q.wealth+=20;q.happiness=clamp(q.happiness+15,0,100);log(q,'被大家挽留，决定留在溪谷');return `${q.name}收下了安家钱，决定留下来。`;}},
+      {t:'祝一路顺风',h:`${t}会离开溪谷`,go(){const q=living(d.p);if(!q)return '';remove(q,'left','wander');return `${q.name}背上行囊，坐船离开了溪谷。`;}},
+      {t:`让${t}再想想`,h:'也许过阵子就好了，也许不会',go(){const q=living(d.p);if(q){q.happiness=clamp(q.happiness-3,0,100);log(q,'想出去闯荡，被劝再想想');}return `${t}点点头，没再说什么。`;}}
+    ];}
+  }
+};
+function maybeDilemma(){
+  if(!S.dilemmasOn||S.pending||S.day<S.nextDilemma||!S.people.length)return;
+  const c=[];
+  for(const k in DILEMMAS){if(k===S.lastDil)continue;const d=DILEMMAS[k].when();if(d)c.push([k,d,k==='levy'?3:k==='sick'?2:1]);}
+  if(!c.length){S.nextDilemma=S.day+5;return;}
+  let x=Math.random()*c.reduce((t,e)=>t+e[2],0);
+  for(const [k,d,w] of c){if((x-=w)<0){S.pending={k,d,res:null};S.lastDil=k;S.nextDilemma=S.day+randi(28,45);dirty=true;return;}}
+}
+let dlgKey='';
+function renderDilemma(){
+  const box=$('dlg');
+  if(!S.pending){box.hidden=true;dlgKey='';return;}
+  const {k,d,res}=S.pending,D=DILEMMAS[k];
+  if(!D){S.pending=null;box.hidden=true;return;}
+  const key=k+'|'+(res==null?0:1)+'|'+JSON.stringify(d);
+  if(key===dlgKey)return;dlgKey=key;
+  $('dlgT').textContent=D.title(d);
+  if(res==null){
+    $('dlgK').textContent='溪谷需要你做决定';
+    $('dlgX').textContent=D.text(d);
+    $('dlgO').innerHTML=D.opts(d).map((o,i)=>{const ok=!o.ok||o.ok();return `<button class="opt" data-i="${i}"${ok?'':' disabled'}><b>${o.t}</b><span>${ok?o.h:'公库的钱不够'}</span></button>`;}).join('');
+  }else{
+    $('dlgK').textContent='你的决定';
+    $('dlgX').textContent=res;
+    $('dlgO').innerHTML='<button class="btn primary" id="dlgDone">继续</button>';
+  }
+  box.hidden=false;
+  document.querySelector('.dlg').focus({preventScroll:true});
+}
+$('dlgO').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b||!S.pending)return;
+  if(b.id==='dlgDone'){S.pending=null;dirty=true;updateUI();return;}
+  const o=DILEMMAS[S.pending.k].opts(S.pending.d)[+b.dataset.i];if(!o||(o.ok&&!o.ok()))return;
+  const r=o.go()||'就这么定了。';S.pending.res=r;
+  chron(`你的决定：${o.t}。${r}`,'choice');dirty=true;updateUI();
+});
+
+/* ---------------- 伸出援手 ---------------- */
+const HELP={
+  gift:{n:'送了一笔钱',go(p){p.wealth+=30;p.happiness=clamp(p.happiness+6,0,100);return '收到一笔意外之财（30 金）';}},
+  teach:{n:'传授了手艺',go(p){p.skill=Math.min(100,p.skill+25);return p.job==='child'?'得到先生单独指点，学得飞快':'得到高人指点，手艺大进';}},
+  heal:{n:'请郎中调养',go(p){p.health=Math.min(100,p.health+40);p.hungerDays=0;return `有人请来郎中为${ta(p)}调养身体`;}},
+  visit:{n:'登门陪伴',go(p){p.happiness=clamp(p.happiness+20,0,100);p.sadDays=0;return `有人登门，陪${ta(p)}说了一下午的话`;}}
+};
+function spendFavor(p,text,short){
+  S.favor--;p.touched=(p.touched||0)+1;log(p,'✦ '+text);if(!S.watch.includes(p.id))S.watch.push(p.id);
+  chron(`你帮了${p.name}一把：${short}。`,'choice');dirty=true;updateFate();updateChron();
+}
+const canPair=(p,q)=>!p.partner&&!q.partner&&p.gender!==q.gender&&[p,q].every(x=>x.age>=18*YEAR&&x.age<=50*YEAR);
+function introCands(p){
+  const fam=new Set([p.partner,...p.parents,...p.children]),kid=p.job==='child';
+  return S.people.filter(q=>q!==p&&!fam.has(q.id)&&(q.job==='child')===kid&&(p.rel[q.id]||0)<40)
+    .map(q=>({q,single:canPair(p,q)}))
+    .sort((a,b)=>(b.single-a.single)||((b.q.village===p.village)-(a.q.village===p.village))||a.q.id-b.q.id).slice(0,12);
+}
+$('help').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b||b.disabled)return;const p=living(S.sel);if(!p||S.favor<1)return;
+  const k=b.dataset.h;
+  if(k==='intro'){
+    const box=$('intro');if(!box.hidden){box.hidden=true;return;}
+    const c=introCands(p);
+    $('introSel').innerHTML=c.length?c.map(({q,single})=>`<option value="${q.id}">${q.name}，${ageY(q)}岁，${JOBS[q.job].n}，${VN(q.village)}${single?'（单身）':''}</option>`).join(''):'<option value="">没有可以介绍的人</option>';
+    $('introGo').disabled=!c.length;box.dataset.for=p.id;box.hidden=false;return;
+  }
+  spendFavor(p,HELP[k].go(p),HELP[k].n);
+});
+$('introGo').addEventListener('click',()=>{
+  const p=living(S.sel),q=living(+$('introSel').value);if(!p||!q||S.favor<1)return;
+  setRel(p,q,Math.max(p.rel[q.id]||0,canPair(p,q)?62:48));
+  log(q,`经人引荐，认识了${p.name}`);$('intro').hidden=true;
+  spendFavor(p,`经人引荐，认识了${q.name}`,`介绍${ta(p)}认识了${q.name}`);
+});
+
+
+/* ---------------- 建造与搬家 ---------------- */
+const BUILDS={
+  granary:{n:'粮仓',cost:60,d:'让整个溪谷多存 250 担粮食。存粮超出仓容的部分，每天会烂掉一些。'},
+  well:{n:'水井',cost:30,d:'所在村子的人身体恢复更快，疫病流行时也更不容易染病。'},
+  market:{n:'集市',cost:70,d:'所在村子的商人收入更高，村民也更开心。'},
+  teahouse:{n:'茶馆',cost:50,d:'所在村子的人来往更频繁，整个溪谷的凝聚力也会上升。'}
+};
+let bcount={};
+function recountB(){bcount={};for(const b of S.built){bcount[b.v]=bcount[b.v]||{};bcount[b.v][b.b]=(bcount[b.v][b.b]||0)+1;}}
+function BC(v,b){return (bcount[v]&&bcount[v][b])||0;}
+function BT(b){let n=0;for(const v of VKEYS)n+=BC(v,b);return n;}
+function foodCap(){return 450+250*BT('granary');}
+function applyBuilt(){
+  for(const t of MAP.all){t.type=t.orig;t.trees=t.otrees.slice();t.bld=null;t.bv=null;}
+  for(const b of S.built){const t=MAP.at(b.i,b.j);if(!t)continue;t.bld=b.b;t.bv=b.v;t.trees=[];if(t.type==='forest')t.type='grass';}
+  MAP.forest=MAP.all.filter(t=>t.type==='forest');
+  recountB();colorKey='';
+}
+function nearestVillage(fi,fj){let best=null,bd=1e9;for(const k of VKEYS){const c=MAP.V[k].center,d=Math.hypot(c.i-fi,c.j-fj);if(d<bd){bd=d;best=k;}}return {k:best,d:bd};}
+function canPlace(t,b){
+  if(!t)return '这里是海。';
+  if(t.bld)return '这里已经有建筑了。';
+  if(t.slot)return '这是村民盖房子的地方。';
+  if(t.mine)return '这里是矿脉。';
+  if(t.type!=='grass'&&t.type!=='forest')return '这里不能盖房子。';
+  const nv=nearestVillage(t.i,t.j);
+  if(nv.d>4.5)return '离村子太远了，没人会来用。';
+  if(BC(nv.k,b)>=2)return `${VN(nv.k)}已经有两座${BUILDS[b].n}了。`;
+  if(S.treasury<BUILDS[b].cost)return `公库只有 ${Math.floor(S.treasury)} 金，盖${BUILDS[b].n}要 ${BUILDS[b].cost} 金。`;
+  return '';
+}
+function place(t,b){
+  const err=canPlace(t,b);if(err){toast(err,true);return;}
+  const v=nearestVillage(t.i,t.j).k,B=BUILDS[b];
+  S.treasury-=B.cost;S.built.push({i:t.i,j:t.j,b,v});applyBuilt();
+  chron(`${VN(v)}建起了一座${B.n}，花去公库 ${B.cost} 金。`,'choice');
+  toast(`${VN(v)}建起了一座${B.n}`);dirty=true;updateUI();
+}
+function raze(t){
+  if(!t||!t.bld){toast('这里没有你建的建筑。',true);return;}
+  const k=S.built.findIndex(b=>b.i===t.i&&b.j===t.j);if(k<0)return;
+  const b=S.built[k],B=BUILDS[b.b],back=Math.round(B.cost*0.4);
+  S.built.splice(k,1);S.treasury+=back;applyBuilt();
+  chron(`${VN(b.v)}的${B.n}被拆掉了，拆下的木料换回 ${back} 金。`,'choice');
+  toast(`拆掉了${VN(b.v)}的${B.n}，退回 ${back} 金`);dirty=true;updateUI();
+}
+function relocate(p,v){
+  if(!p)return;
+  if(p.village===v){toast(`${p.name}本来就住在${VN(v)}。`,true);return;}
+  const from=p.village,fam=[p];
+  const pt=p.partner&&living(p.partner);if(pt&&pt.village===from)fam.push(pt);
+  for(const id of p.children){const c=living(id);if(c&&c.job==='child'&&c.village===from&&!fam.includes(c))fam.push(c);}
+  if(p.job==='child'){for(const id of p.parents){const q=living(id);if(q&&q.village===from&&!fam.includes(q))fam.push(q);}}
+  const home=freeSlot(v);
+  for(const q of fam){q.village=v;q.home=home;q.happiness=clamp(q.happiness-4,0,100);log(q,`从${VN(from)}搬到了${VN(v)}`);assignTarget(q);const h=homeTile(q);q.tx=h.i+rand(-0.3,0.3);q.ty=h.j+rand(-0.3,0.3);}
+  computeHouses();
+  const who=fam.length>1?`${p.name}一家 ${fam.length} 口`:p.name;
+  chron(`${who}从${VN(from)}搬到了${VN(v)}。`,'choice');toast(`${who}搬去了${VN(v)}`);dirty=true;updateUI();
+}
+let toastT=0;
+function toast(msg,bad){const el=$('toast');el.textContent=msg;el.classList.toggle('bad',!!bad);el.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),2400);}
+
+
+/* ---------------- 挑战 ---------------- */
+const CHALLENGES={
+  drought:{n:'熬过三年大旱',d:'接下来三年，每年夏天都会大旱四十天，粮仓只剩 60 担。三年里不能有一个人饿死，人口也不能少于 26 人。',
+    setup(){S.food=60;S.drought=40;},
+    tick(){if(S.day-S.ch.start<120&&S.day%YEAR===SEASON&&S.drought===0){S.drought=40;chron('又一个旱季来了，溪水一天天变浅。','event');}},
+    check(c,el){
+      if(S.hungerDeaths>c.hd0)return {st:'lose',why:`${S.lastHunger}在饥荒中饿死了。`};
+      if(S.people.length<26)return {st:'lose',why:`溪谷只剩 ${S.people.length} 人，少于 26 人。`};
+      if(el>=120)return {st:'win',why:`三年过去，溪谷没有一个人饿死，最后还有 ${S.people.length} 人。`};
+      return {st:'run',txt:`还剩 ${120-el} 天。饿死 0 人，人口 ${S.people.length}（不少于 26）。`,pct:el/120};}},
+  equal:{n:'均富之岛',d:'几户人家握着溪谷大半的财富，其余的人勉强度日。十年内，让贫富差距低于 0.35、平均幸福不低于 65，并连续保持 30 天。',
+    setup(){
+      const ad=S.people.filter(p=>p.job!=='child').sort(()=>Math.random()-0.5);
+      ad.forEach((p,k)=>{p.wealth=k<4?rand(200,280):rand(2,8);});
+      S.tax=0.08;S.policy='market';},
+    check(c,el){
+      const n=S.people.length||1,h=S.people.reduce((t,p)=>t+p.happiness,0)/n;
+      if(S.gini<0.35&&h>=65)c.hold++;else c.hold=0;
+      if(c.hold>=30)return {st:'win',why:`贫富差距降到 ${S.gini.toFixed(2)}，平均幸福 ${Math.round(h)}，溪谷成了一座均富之岛。`};
+      if(el>=400)return {st:'lose',why:`十年到了。贫富差距 ${S.gini.toFixed(2)}，平均幸福 ${Math.round(h)}。`};
+      return {st:'run',txt:`贫富差距 ${S.gini.toFixed(2)}（要低于 0.35），平均幸福 ${Math.round(h)}（要到 65），已保持 ${c.hold}/30 天，剩 ${Math.ceil((400-el)/YEAR)} 年。`,pct:Math.max(c.hold/30,0.02)};}},
+  grow:{n:'人丁兴旺',d:'十五年内，让溪谷的人口达到 55 人。这次不能招募移民，只能靠一家家人生儿育女。',
+    check(c,el){
+      const n=S.people.length;
+      if(n>=55)return {st:'win',why:`第 ${Math.floor(el/YEAR)+1} 年，溪谷的人口达到了 ${n} 人。`};
+      if(el>=600||!n)return {st:'lose',why:`十五年到了，溪谷有 ${n} 人。`};
+      return {st:'run',txt:`人口 ${n}/55，剩 ${Math.ceil((600-el)/YEAR)} 年。`,pct:n/55};}},
+  stay:{n:'无人离去',d:'税率 30%、自由市场，人心浮动。八年里不能有一个人离开溪谷，到期时凝聚力不能低于 50。',
+    setup(){S.tax=0.3;S.policy='market';S.cohesion=40;S.people.forEach(p=>p.happiness=clamp(p.happiness-12,0,100));},
+    check(c,el){
+      if(S.left>c.left0)return {st:'lose',why:`${S.lastLeft}离开了溪谷。`};
+      if(el>=320)return Math.round(S.cohesion)>=50?{st:'win',why:`八年里没有一个人离开，凝聚力达到 ${Math.round(S.cohesion)}。`}:{st:'lose',why:`八年里没人离开，但凝聚力只有 ${Math.round(S.cohesion)}，不到 50。`};
+      return {st:'run',txt:`还剩 ${Math.ceil((320-el)/YEAR)} 年。离开 0 人，凝聚力 ${Math.round(S.cohesion)}（到期时要到 50）。`,pct:el/320};}}
+};
+function wins(){try{return JSON.parse(localStorage.getItem('hejing-wins')||'{}');}catch(e){return {};}}
+function checkChallenge(){
+  const c=S.ch,C=CHALLENGES[c.id];if(!C)return;
+  const r=C.check(c,S.day-c.start);c.txt=r.txt||'';c.pct=r.pct||0;
+  if(r.st==='run')return;
+  c.result={win:r.st==='win',why:r.why};S.paused=true;
+  chron(r.st==='win'?`挑战成功：${C.n}。${r.why}`:`挑战失败：${C.n}。${r.why}`,'event');
+  if(r.st==='win'){try{const w=wins();w[c.id]=1;localStorage.setItem('hejing-wins',JSON.stringify(w));}catch(e){}}
+  dirty=true;
+}
+function startChallenge(id){
+  try{localStorage.removeItem(SAVE);}catch(err){}
+  init(true);
+  S.ch={id,start:S.day,hd0:S.hungerDeaths,left0:S.left,hold:0,result:null,txt:'',pct:0};
+  const C=CHALLENGES[id];if(C.setup)C.setup();
+  chron(`挑战开始：${C.n}。${C.d}`,'event');
+  checkChallenge();closeModal();syncControls();dirty=true;updateUI();
+}
+let mdlMode='';
+function openModal(mode){
+  mdlMode=mode;const w=wins();
+  if(mode==='list'){
+    $('mdlK').textContent='选一个剧本';$('mdlK').style.color='';$('mdlT').textContent='挑战';
+    $('mdlX').textContent='每个挑战都有一个目标和期限。开始挑战会重新生成一个新的溪谷。';
+    $('mdlO').innerHTML=Object.entries(CHALLENGES).map(([k,C])=>`<button class="opt${w[k]?' done':''}" data-ch="${k}"><b>${C.n}</b><span>${C.d}</span></button>`).join('')
+      +`<button class="opt free" data-ch=""><b>${S.ch?'放弃挑战，继续这个世界':'自由模式'}</b><span>没有目标，随你怎么玩。</span></button>`;
+  }else{
+    const c=S.ch,C=CHALLENGES[c.id];
+    $('mdlK').textContent=c.result.win?'挑战成功':'挑战失败';$('mdlK').style.color=c.result.win?'var(--accent)':'';$('mdlT').textContent=C.n;$('mdlX').textContent=c.result.why;
+    $('mdlO').innerHTML=`<button class="opt" data-ch="${c.id}"><b>再试一次</b><span>从头开始这个挑战。</span></button><button class="opt" data-act="list"><b>换个挑战</b></button><button class="opt free" data-ch=""><b>留在这个世界继续玩</b><span>挑战结束，世界照常运转。</span></button>`;
+  }
+  $('mdl').hidden=false;document.querySelector('#mdl .dlg').focus({preventScroll:true});
+}
+function mdlHidden(){return $('mdl').hidden;}
+function closeModal(){$('mdl').hidden=true;mdlMode='';}
+$('chBtn').addEventListener('click',()=>openModal('list'));
+$('gQuit').addEventListener('click',()=>{if(S.ch){chron(`放弃了挑战：${CHALLENGES[S.ch.id].n}。`,'info');S.ch=null;dirty=true;updateUI();}});
+$('mdl').addEventListener('click',e=>{
+  if(e.target.id==='mdl'&&mdlMode==='list'){closeModal();return;}
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.act==='list'){openModal('list');return;}
+  if(b.dataset.ch===undefined)return;
+  if(b.dataset.ch){startChallenge(b.dataset.ch);return;}
+  if(S.ch){if(!S.ch.result)chron(`放弃了挑战：${CHALLENGES[S.ch.id].n}。`,'info');S.ch=null;S.paused=false;}
+  closeModal();dirty=true;updateUI();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mdlMode==='list')closeModal();});
+function renderGoal(){
+  const c=S.ch;$('goal').hidden=!c;if(!c)return;
+  const C=CHALLENGES[c.id];setT('gName',`挑战：${C.n}`);
+  setT('gTxt',c.result?(c.result.win?'挑战成功！':'挑战失败。')+c.result.why:c.txt);
+  $('gBar').style.width=Math.round(clamp(c.result&&c.result.win?1:c.pct,0,1)*100)+'%';
+  setT('gQuit',c.result?'关闭':'放弃挑战');
+  if(c.result&&!c.shown){c.shown=1;openModal('result');}
+}
+
+/* ---------------- 关注提醒 ---------------- */
+function renderAlert(){
+  const a=S.alerts[0];$('alert').hidden=!a;if(!a)return;
+  setT('aName',a.name);setT('aTxt',a.text);
+  setT('aMore',S.alerts.length>1?`还有 ${S.alerts.length-1} 条提醒`:'');
+}
+$('aOk').addEventListener('click',()=>{S.alerts.shift();dirty=true;updateUI();});
+$('aGo').addEventListener('click',()=>{
+  const a=S.alerts.shift();if(!a)return;S.sel=a.id;S.alerts=[];S.paused=true;
+  updateUI();document.querySelector('.right').scrollIntoView({behavior:'smooth',block:'nearest'});
+});
+$('fWatch').addEventListener('click',()=>{
+  const i=S.watch.indexOf(S.sel);if(i>=0)S.watch.splice(i,1);else S.watch.push(S.sel);updateFate();
+});
+
+/* ---------------- 地图绘制 ---------------- */
+const cv=$('map'),ctx=cv.getContext('2d');
+const view={w:0,h:0,dpr:1,zoom:1,panX:0,panY:0,tw:30,ox:0,oy:0};
+let tool='look',buildSel='granary',hoverPt=null,moveSrc=null,dragGhost=null;
+let theme={label:'#fff',ink:'#263022',line:'#dfe2d2',accent:'#4f7136'};
+let houses=new Set();
+function computeHouses(){
+  const set=new Set();for(const p of S.people)set.add(homeTile(p));
+  for(const k of VKEYS){set.add(MAP.V[k].slots[0]);set.add(MAP.V[k].slots[1]);}
+  houses=set;
+}
+function readTheme(){
+  const cs=getComputedStyle(document.documentElement),g=k=>cs.getPropertyValue(k).trim();
+  theme={label:g('--label')||'#fff',ink:g('--ink')||'#222',line:g('--line')||'#ddd',accent:g('--accent')||'#4f7136'};
+}
+function resize(){
+  const r=$('mapwrap').getBoundingClientRect();if(!r.width)return;
+  view.w=r.width;view.h=r.height;view.dpr=Math.min(2.5,window.devicePixelRatio||1);
+  cv.width=Math.round(r.width*view.dpr);cv.height=Math.round(r.height*view.dpr);layout();
+}
+function layout(){
+  const base=Math.min(view.w*0.92/11.6,view.h*0.86/6.6);
+  view.tw=base*view.zoom;
+  view.panX=clamp(view.panX,-view.w*0.6*view.zoom,view.w*0.6*view.zoom);
+  view.panY=clamp(view.panY,-view.h*0.6*view.zoom,view.h*0.6*view.zoom);
+  view.ox=view.w/2+view.panX;view.oy=view.h/2-(N-1)*view.tw/4+view.tw*0.35+view.panY;
+  cv.style.touchAction=(view.zoom>1.01||tool!=='look')?'none':'pan-y';
+}
+function iso(i,j){return [view.ox+(i-j)*view.tw/2,view.oy+(i+j)*view.tw/4];}
+function hx(c){return [parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];}
+function mix(a,b,t){const A=hx(a),B=hx(b);return '#'+A.map((v,k)=>clamp(Math.round(v+(B[k]-v)*t),0,255).toString(16).padStart(2,'0')).join('');}
+function shade(c,t){return t>0?mix(c,'#ffffff',t):mix(c,'#000000',-t);}
+function poly(fill,...pts){ctx.beginPath();ctx.moveTo(pts[0],pts[1]);for(let k=2;k<pts.length;k+=2)ctx.lineTo(pts[k],pts[k+1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();}
+function rrect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+let colorKey='';const tileCol=new Map();
+function tileColors(){
+  const se=seasonIdx(),dr=S.drought>0,key=se+'|'+dr;if(key===colorKey)return;colorKey=key;
+  const GR=['#a6c46a','#93b65a','#c4b866','#d3d8c4'][se],FI=['#b3cd70','#dcc45c','#e3ad45','#c9c2a2'][se],WA=se===3?'#a6c8d3':'#7db3c7';
+  for(const t of MAP.all){
+    let b={grass:GR,forest:shade(GR,-0.1),field:FI,water:WA,mountain:'#a3a68f',plaza:'#e4d8b8'}[t.type];
+    b=shade(b,(t.v-0.5)*0.1);
+    if(dr&&(t.type==='grass'||t.type==='forest'||t.type==='field'))b=mix(b,'#cbb27a',0.5);
+    tileCol.set(t,b);
+  }
+}
+function drawTree(x,y,s,kind,se){
+  ctx.fillStyle='rgba(30,40,20,.14)';ctx.beginPath();ctx.ellipse(x,y,s*0.3,s*0.12,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#7a5a3a';ctx.fillRect(x-s*0.05,y-s*0.32,s*0.1,s*0.32);
+  if(kind==='pine'){
+    const c=se===3?'#5d7a55':S.drought>0?'#6f8045':'#4c7a44';
+    poly(c,x,y-s*1.25,x-s*0.32,y-s*0.24,x,y-s*0.18);poly(shade(c,-0.18),x,y-s*1.25,x+s*0.32,y-s*0.24,x,y-s*0.18);
+  }else{
+    let c=['#6f9a48','#5f8c3e','#c8963c','#a39e86'][se];if(S.drought>0&&se<2)c=mix(c,'#b9a25a',0.4);
+    ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y-s*0.62,s*0.34,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=shade(c,0.18);ctx.beginPath();ctx.arc(x-s*0.1,y-s*0.72,s*0.15,0,Math.PI*2);ctx.fill();
+  }
+}
+function drawHouse(x,y,s,roof,wall){
+  const hw=s/2,hh=s/4,H=s*0.5;
+  ctx.fillStyle='rgba(30,40,20,.15)';ctx.beginPath();ctx.ellipse(x+s*0.1,y+hh*0.4,s*0.62,s*0.26,0,0,Math.PI*2);ctx.fill();
+  poly(wall||'#efe5cf',x-hw,y,x,y+hh,x,y+hh-H,x-hw,y-H);
+  poly(shade(wall||'#efe5cf',-0.13),x,y+hh,x+hw,y,x+hw,y-H,x,y+hh-H);
+  ctx.fillStyle='#6b5240';ctx.fillRect(x+hw*0.35,y+hh*0.35-H*0.55,hw*0.25,H*0.5);
+  const ay=y-H-s*0.42;
+  poly(roof,x-hw*1.12,y-H+hh*0.05,x,y+hh-H+hh*0.2,x,ay);
+  poly(shade(roof,-0.2),x,y+hh-H+hh*0.2,x+hw*1.12,y-H+hh*0.05,x,ay);
+}
+function drawMountain(x,y,t,tw,se){
+  const s=tw*(0.75+t.v*0.55),ax=x+tw*0.08*(t.v-0.5),ay=y-s,by=y+tw*0.12;
+  poly('#b3b6a3',x-tw*0.48,y+tw*0.05,ax,ay,ax,by);
+  poly('#8a8e7c',ax,ay,x+tw*0.48,y+tw*0.05,ax,by);
+  const f=se===3?0.45:0.24;
+  poly('#f3f2ea',ax,ay,ax+(x-tw*0.48-ax)*f,ay+(y-ay)*f,ax,ay+(by-ay)*f*0.9);
+  poly('#dcdcd2',ax,ay,ax+(x+tw*0.48-ax)*f,ay+(y-ay)*f,ax,ay+(by-ay)*f*0.9);
+}
+function drawMine(x,y,tw){
+  poly('#8b7158',x-tw*0.32,y+tw*0.04,x-tw*0.05,y-tw*0.36,x+tw*0.25,y+tw*0.02);
+  ctx.fillStyle='#2f2924';ctx.beginPath();ctx.ellipse(x-tw*0.04,y-tw*0.02,tw*0.1,tw*0.13,0,Math.PI,0);ctx.fill();
+  ctx.fillStyle='#7a5a3a';ctx.fillRect(x+tw*0.12,y-tw*0.03,tw*0.14,tw*0.07);
+  ctx.fillStyle='#9aa0ad';for(let k=0;k<3;k++){ctx.beginPath();ctx.arc(x+tw*(0.15+k*0.04),y-tw*0.05,tw*0.025,0,Math.PI*2);ctx.fill();}
+}
+
+function drawBuilding(t,x,y,tw){
+  const s=tw*0.42;
+  ctx.fillStyle='rgba(30,40,20,.15)';ctx.beginPath();ctx.ellipse(x+s*0.1,y+s*0.06,s*0.6,s*0.25,0,0,Math.PI*2);ctx.fill();
+  if(t.bld==='granary'){
+    const r=s*0.34,h=s*0.8;
+    const g=ctx.createLinearGradient(x-r,0,x+r,0);g.addColorStop(0,'#f0e3c3');g.addColorStop(1,'#c8b48a');
+    ctx.fillStyle=g;ctx.fillRect(x-r,y-h,r*2,h);ctx.beginPath();ctx.ellipse(x,y,r,r*0.45,0,0,Math.PI);ctx.fill();
+    ctx.fillStyle='#9c6a35';ctx.beginPath();ctx.ellipse(x,y-h,r*1.15,r*0.5,0,0,Math.PI*2);ctx.fill();
+    poly('#b07a40',x-r*1.15,y-h,x,y-h-s*0.55,x,y-h+r*0.5);poly('#8a5a2c',x,y-h-s*0.55,x+r*1.15,y-h,x,y-h+r*0.5);
+    ctx.fillStyle='#6b5240';ctx.fillRect(x-r*0.25,y-h*0.45,r*0.5,h*0.45);
+  }else if(t.bld==='well'){
+    ctx.fillStyle='#8f8a7c';ctx.beginPath();ctx.ellipse(x,y-s*0.08,s*0.3,s*0.15,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#a9a496';ctx.fillRect(x-s*0.3,y-s*0.2,s*0.6,s*0.12);
+    ctx.fillStyle='#3f6f86';ctx.beginPath();ctx.ellipse(x,y-s*0.2,s*0.2,s*0.09,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#6b4a30';ctx.fillRect(x-s*0.26,y-s*0.75,s*0.05,s*0.6);ctx.fillRect(x+s*0.21,y-s*0.75,s*0.05,s*0.6);
+    poly('#8a4b32',x-s*0.38,y-s*0.7,x,y-s*1.02,x+s*0.38,y-s*0.7);
+  }else if(t.bld==='market'){
+    drawHouse(x,y,s*0.95,'#c8503f','#f0dfb8');
+    ctx.fillStyle='#6b4a30';ctx.fillRect(x+s*0.42,y-s*1.25,s*0.04,s*1.0);
+    poly('#e2ad2f',x+s*0.46,y-s*1.25,x+s*0.78,y-s*1.13,x+s*0.46,y-s*1.0);
+  }else if(t.bld==='teahouse'){
+    drawHouse(x,y,s*1.05,'#2f5f4f','#efe6d0');
+    ctx.fillStyle='#d2463a';ctx.beginPath();ctx.ellipse(x,y-s*0.2,s*0.07,s*0.09,0,0,Math.PI*2);ctx.fill();
+  }
+}
+function draw(){
+  const {w,h,dpr,tw}=view;if(!w)return;
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  tileColors();
+  const se=seasonIdx(),hw=tw/2,hh=tw/4,D=tw*0.32,at=MAP.at;
+  for(const t of MAP.all){
+    const [x,y]=iso(t.i,t.j),col=tileCol.get(t),wat=t.type==='water';
+    if(!at(t.i,t.j+1))poly(wat?'#5f93a8':'#b38957',x-hw,y,x,y+hh,x,y+hh+D,x-hw,y+D);
+    if(!at(t.i+1,t.j))poly(wat?'#4f8197':'#957043',x,y+hh,x+hw,y,x+hw,y+D,x,y+hh+D);
+    poly(col,x,y-hh-0.4,x+hw+0.5,y,x,y+hh+0.4,x-hw-0.5,y);
+    if(t.type==='field'){
+      ctx.strokeStyle=shade(col,-0.14);ctx.lineWidth=Math.max(0.6,tw*0.025);ctx.beginPath();
+      for(let k=1;k<4;k++){const f=k/4;ctx.moveTo(x-hw*f,y-hh+hh*f);ctx.lineTo(x+hw-hw*f,y+hh*f);}
+      ctx.stroke();
+      if(S.canal){ctx.strokeStyle='#6aa8c2';ctx.lineWidth=Math.max(1,tw*0.05);ctx.beginPath();ctx.moveTo(x-hw*0.5,y-hh*0.5);ctx.lineTo(x+hw*0.5,y+hh*0.5);ctx.stroke();}
+    }else if(wat){
+      ctx.strokeStyle='rgba(255,255,255,.35)';ctx.lineWidth=Math.max(0.6,tw*0.025);ctx.beginPath();
+      ctx.moveTo(x-hw*0.35,y+hh*0.1);ctx.lineTo(x-hw*0.05,y-hh*0.05);ctx.moveTo(x+hw*0.05,y+hh*0.3);ctx.lineTo(x+hw*0.3,y+hh*0.15);ctx.stroke();
+    }
+  }
+  if(tool==='build'||tool==='raze'){
+    const ht=hoverPt?tileAt(hoverPt):null;
+    for(const t of MAP.all){
+      const ok=tool==='build'?!canPlace(t,buildSel):!!t.bld;
+      if(!ok&&t!==ht)continue;
+      const [x,y]=iso(t.i,t.j);
+      const hot=t===ht;
+      poly(hot?(ok?'rgba(255,255,255,.7)':'rgba(200,80,50,.45)'):(tool==='build'?'rgba(255,255,255,.3)':'rgba(200,80,50,.28)'),x,y-hh*0.86,x+hw*0.86,y,x,y+hh*0.86,x-hw*0.86,y);
+      if(hot&&ok){ctx.strokeStyle=theme.accent;ctx.lineWidth=2;ctx.stroke();}
+    }
+  }
+  for(const t of MAP.all){
+    const [x,y]=iso(t.i,t.j);
+    if(t.bld)drawBuilding(t,x,y,tw);
+    if(t.type==='mountain')drawMountain(x,y,t,tw,se);
+    if(t.mine&&S.mine)drawMine(x,y,tw);
+    if(t.type==='plaza'){
+      ctx.fillStyle='#8f8a7a';ctx.beginPath();ctx.ellipse(x,y,tw*0.09,tw*0.045,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#5a7f95';ctx.beginPath();ctx.ellipse(x,y,tw*0.06,tw*0.028,0,0,Math.PI*2);ctx.fill();
+    }
+    if(t.slot&&houses.has(t)){
+      const vk=VKEYS.find(k=>MAP.V[k].slots.includes(t));
+      drawHouse(x,y,tw*0.36,shade(MAP.V[vk].roof,(t.v-0.5)*0.25));
+    }
+    for(const tr of t.trees)drawTree(x+(tr.dx-tr.dy)*hw,y+(tr.dx+tr.dy)*hh,tw*0.42*tr.s,tr.kind,se);
+  }
+  // 居民
+  const list=[...S.people].sort((a,b)=>(a.x+a.y)-(b.x+b.y));
+  const s0=Math.max(5,tw*0.2);let selP=null;
+  for(const p of list){
+    const [x,y]=iso(p.x,p.y),s=s0*(p.job==='child'?0.72:1);
+    if(p.id===S.sel){
+      selP=[p,x,y,s];
+      ctx.strokeStyle=theme.accent;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(x,y,s*0.75,s*0.32,0,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.fillStyle='rgba(20,30,10,.2)';ctx.beginPath();ctx.ellipse(x,y,s*0.32,s*0.13,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=p.fed<0.7?mix(JOBS[p.job].c,'#888888',0.5):JOBS[p.job].c;
+    rrect(x-s*0.22,y-s*0.95,s*0.44,s*0.86,s*0.14);ctx.fill();
+    ctx.fillStyle=p.skin;ctx.beginPath();ctx.arc(x,y-s*1.13,s*0.21,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=p.age>=55*YEAR?'#d6d2c8':p.hair;ctx.beginPath();ctx.arc(x,y-s*1.17,s*0.21,Math.PI,0);ctx.fill();
+    if(p.touched){const sy=y-s*1.62,r=Math.max(2.2,s*0.17);poly('#e2ad2f',x,sy-r*1.5,x+r*0.6,sy,x,sy+r*0.8,x-r*0.6,sy);}
+  }
+  // 聚落名
+  ctx.font=`600 ${tw<28?10.5:12}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;ctx.textBaseline='middle';
+  for(const k of VKEYS){
+    const V=MAP.V[k],[x,y0]=iso(V.center.i,V.center.j),y=y0-tw*1.15;
+    const cnt=S.people.filter(p=>p.village===k).length,txt=`${V.n} ${cnt}人`;
+    const tw2=ctx.measureText(txt).width,bw=tw2+22,bh=tw<28?18:21;
+    const hl=dragGhost&&dragGhost.v===k;
+    ctx.fillStyle=theme.label;ctx.strokeStyle=hl?theme.accent:theme.line;ctx.lineWidth=hl?2.5:1;rrect(x-bw/2,y-bh/2,bw,bh,bh/2);ctx.fill();ctx.stroke();
+    ctx.fillStyle=V.roof;ctx.beginPath();ctx.arc(x-bw/2+9,y,3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=theme.ink;ctx.textAlign='left';ctx.fillText(txt,x-bw/2+16,y+0.5);
+  }
+  if(selP){
+    const [p,x,y,s]=selP,txt=p.name,tw2=ctx.measureText(txt).width,bw=tw2+14,bh=tw<28?18:20,ly=y-s*1.6-bh/2-2;
+    ctx.fillStyle=theme.accent;rrect(x-bw/2,ly-bh/2,bw,bh,6);ctx.fill();
+    ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent-ink')||'#fff';ctx.textAlign='center';ctx.fillText(txt,x,ly+0.5);
+  }
+  if(dragGhost){
+    const {p,x,y}=dragGhost,s=s0*1.15;ctx.globalAlpha=0.85;
+    ctx.fillStyle=JOBS[p.job].c;rrect(x-s*0.22,y-s*0.95,s*0.44,s*0.86,s*0.14);ctx.fill();
+    ctx.fillStyle=p.skin;ctx.beginPath();ctx.arc(x,y-s*1.13,s*0.21,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+  }
+  if(S.plague>0){ctx.fillStyle='rgba(90,70,110,.07)';ctx.fillRect(0,0,w,h);}
+}
+function movePeople(dt){
+  const sp=1.1*Math.sqrt(TPS[S.speed])*dt*(S.paused?0.3:1);
+  for(const p of S.people){const dx=p.tx-p.x,dy=p.ty-p.y,d=Math.hypot(dx,dy);if(d<0.01)continue;const m=Math.min(d,sp);p.x+=dx/d*m;p.y+=dy/d*m;}
+}
+
+/* ---------------- 界面 ---------------- */
+const STATS=[{k:'pop',n:'居民人口',u:'人'},{k:'food',n:'粮食储备',u:'担'},{k:'wealth',n:'流通财富',u:'金'},{k:'happy',n:'居民幸福',u:'/100'},{k:'coh',n:'社会凝聚力',u:'/100'}];
+function buildStats(){
+  $('stats').innerHTML=STATS.map(s=>`<div class="card stat"><div class="top"><span>${s.n}</span><span id="st-${s.k}-r"></span></div><div class="mid"><div class="val"><span id="st-${s.k}-v"></span><small>${s.u}</small></div><svg viewBox="0 0 72 26" preserveAspectRatio="none" aria-hidden="true"><path id="st-${s.k}-p" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></div><div class="foot" id="st-${s.k}-f"></div></div>`).join('');
+  $('legend').innerHTML=Object.values(JOBS).map(j=>`<span><i style="background:${j.c}"></i>${j.n}</span>`).join('');
+}
+function spark(a){
+  if(a.length<2)return '';let mn=Math.min(...a),mx=Math.max(...a);if(mx-mn<1e-6){mx+=1;mn-=1;}
+  return a.map((v,i)=>`${i?'L':'M'}${(i/(a.length-1)*72).toFixed(1)},${(24-(v-mn)/(mx-mn)*22).toFixed(1)}`).join('');
+}
+const fmt=v=>Math.round(v).toLocaleString('zh-CN');
+const _c={};
+function setT(id,t){if(_c[id]!==t){_c[id]=t;$(id).textContent=t;}}
+function setH(id,h){if(_c[id]!==h){_c[id]=h;$(id).innerHTML=h;}}
+function updateStats(){
+  const P=S.people,n=P.length||1,H=S.hist;
+  const kids=P.filter(p=>p.job==='child').length,elders=P.filter(p=>p.job==='elder').length;
+  const happyAvg=P.reduce((t,p)=>t+p.happiness,0)/n,content=P.filter(p=>p.happiness>=60).length,sad=P.filter(p=>p.happiness<35).length,hungry=P.filter(p=>p.fed<0.7).length;
+  const wealth=P.reduce((t,p)=>t+Math.max(0,p.wealth),0)+S.treasury;
+  const avgF=P.reduce((t,p)=>t+friendCount(p),0)/n,couples=P.filter(p=>p.partner&&p.gender==='女').length;
+  const days=foodDays();
+  const set=(k,v,r,f)=>{setT(`st-${k}-v`,v);setT(`st-${k}-r`,r);setT(`st-${k}-f`,f);$(`st-${k}-p`).setAttribute('d',spark(H[k]));};
+  set('pop',String(P.length),`出生 ${S.births}　离世 ${S.deaths}`,`${kids} 个孩童，${P.length-kids-elders} 个劳力，${elders} 位长者`);
+  const cap=foodCap();
+  set('food',fmt(S.food),S.rot>0.05?`仓满，每天烂掉 ${S.rot.toFixed(1)}`:`仓容 ${fmt(cap)}`,`够吃 ${days>999?'999+':Math.floor(days)} 天，粮价 ${S.price.toFixed(1)}，日产 ${S.foodProd.toFixed(1)}`);
+  set('wealth',fmt(wealth),`贫富差距 ${S.gini.toFixed(2)}`,`今日 ${S.trades} 笔交易，公库 ${fmt(S.treasury)} 金`);
+  set('happy',String(Math.round(happyAvg)),`${content} 人满足`,`${sad} 人愁苦，${hungry} 人挨饿`);
+  set('coh',String(Math.round(S.cohesion)),`${couples} 对伴侣`,`人均 ${avgF.toFixed(1)} 位朋友`);
+}
+function avatarSVG(p){
+  const hair=p.age>=55*YEAR?'#cfcac0':p.hair,long=p.gender==='女'?4.2:2;
+  return `<svg viewBox="0 0 10 10" shape-rendering="crispEdges"><rect width="10" height="10" fill="${shade(JOBS[p.job].c,0.75)}"/><rect x="1" y="7.5" width="8" height="2.5" fill="${JOBS[p.job].c}"/><rect x="4.2" y="6.5" width="1.6" height="1" fill="${p.skin}"/><rect x="2.6" y="2.6" width="4.8" height="4.1" fill="${p.skin}"/><rect x="2.2" y="1.6" width="5.6" height="1.5" fill="${hair}"/><rect x="2.2" y="2.6" width="0.9" height="${long}" fill="${hair}"/><rect x="6.9" y="2.6" width="0.9" height="${long}" fill="${hair}"/><rect x="3.7" y="4.1" width="0.8" height="0.8" fill="#2b2520"/><rect x="5.5" y="4.1" width="0.8" height="0.8" fill="#2b2520"/><rect x="4.4" y="5.6" width="1.2" height="0.4" fill="${p.happiness<35?'#6b4a3a':'#b0705a'}"/></svg>`;
+}
+function updateFate(){
+  let p=byId(S.sel);
+  if(!p){const q=pick(S.people);if(!q)return;S.sel=q.id;p=q;}
+  setH('fAvatar',avatarSVG(p));setT('fName',p.name);
+  const vn=MAP.V[p.village].n;
+  if(p.status==='alive')setT('fMeta',`${ageY(p)}岁，${p.gender}，住在${vn}`);
+  else setT('fMeta',p.status==='dead'?`享年 ${ageY(p)} 岁，生前住在${vn}`:`${ageY(p)}岁时离开了${vn}`);
+  let chips=`<span class="chip job">${JOBS[p.job].n}</span>`+p.traits.map(t=>`<span class="chip">${t}</span>`).join('');
+  if(p.status!=='alive')chips+=`<span class="chip gone">${p.status==='dead'?'已离世':'已远走'}</span>`;
+  else if(p.fed<0.7)chips+='<span class="chip gone">正在挨饿</span>';
+  setH('fChips',chips);
+  setT('fHappy',String(Math.round(p.happiness)));setT('fWealth',String(Math.round(p.wealth)));setT('fHealth',String(Math.max(0,Math.round(p.health))));
+  const fr=friendCount(p);
+  $('bSkill').style.width=Math.round(p.skill)+'%';setT('vSkill',String(Math.round(p.skill)));
+  $('bFed').style.width=Math.round(clamp(p.fed,0,1)*100)+'%';setT('vFed',Math.round(clamp(p.fed,0,1)*100)+'%');
+  $('bFr').style.width=Math.min(100,fr/8*100)+'%';setT('vFr',String(fr));
+  const items=[];
+  const add=(id,label,cls)=>{const q=byId(id);if(!q)return;items.push(`<button class="rel${cls?' '+cls:''}${q.status!=='alive'?' gone':''}" data-id="${q.id}"><em>${label}</em>${q.name}</button>`);};
+  if(p.partner)add(p.partner,'伴侣');
+  p.parents.forEach(id=>{const q=byId(id);if(q)add(id,q.gender==='男'?'父亲':'母亲');});
+  p.children.forEach(id=>add(id,'孩子'));
+  const fam=new Set([p.partner,...p.parents,...p.children]);
+  const rels=Object.entries(p.rel).filter(([k])=>!fam.has(+k)).sort((a,b)=>b[1]-a[1]);
+  rels.filter(([,v])=>v>=40).slice(0,6).forEach(([k,v])=>add(+k,v>=70?'挚友':'朋友'));
+  rels.filter(([,v])=>v<=-30).slice(-2).forEach(([k])=>add(+k,'嫌隙','bad'));
+  setH('fRels',items.length?items.join(''):'<span class="empty">还没有亲近的人。</span>');
+  setT('favor',`恩惠 ${S.favor}/5`);
+  const w=S.watch.includes(p.id);$('fWatch').classList.toggle('on',w);setT('fWatch',w?'已关注':'关注');
+  const alive=p.status==='alive';
+  document.querySelectorAll('#help button').forEach(b=>{b.disabled=!alive||S.favor<1;});
+  if(!$('intro').hidden&&+$('intro').dataset.for!==p.id)$('intro').hidden=true;
+  setH('fLife',p.hist.slice(-14).reverse().map(h=>`<li><time>${dateLabel(h.d)}</time><span>${h.t}</span></li>`).join(''));
+}
+let lastChron=-1;
+function updateChron(){
+  if(S.chronVer===lastChron)return;lastChron=S.chronVer;
+  $('chron').innerHTML=S.chron.slice(-50).reverse().map(c=>`<li class="k-${c.k}"><time>${dateLabel(c.d)}</time><span>${c.t}</span></li>`).join('');
+  setT('chronCount',`共 ${S.chron.length} 条`);
+}
+function updateUI(){
+  const se=seasonIdx();
+  setT('date',`第 ${Math.floor(S.day/YEAR)+1} 年，${SEASONS[se]}，第 ${S.day%SEASON+1} 日`);
+  const w=[`${SEASONS[se]}季`];let warn=false;
+  if(S.drought>0){w.push(`干旱还剩 ${S.drought} 日`);warn=true;}
+  if(S.plague>0){w.push('疫病流行');warn=true;}
+  if(S.festival>0)w.push('丰收节');
+  if(S.caravan>0)w.push('商队在此');
+  setT('weather',w.join('，'));$('weather').classList.toggle('warn',warn);
+  updateStats();
+  for(const s of SEEDS){s.el.disabled=!!s.dis();s.el.classList.toggle('active',!!s.on());s.stEl.textContent=s.st();}
+  updateFate();updateChron();renderDilemma();
+  setT('purse',`公库 ${fmt(S.treasury)} 金`);
+  renderGoal();renderAlert();
+  $('play').textContent=S.paused?'继续':'暂停';
+}
+function syncControls(){
+  $('tax').value=Math.round(S.tax*100);$('taxv').textContent=Math.round(S.tax*100)+'%';
+  $('policy').value=S.policy;$('dilOn').checked=S.dilemmasOn;$('alOn').checked=S.alertsOn;$('policyDesc').textContent=POLICIES[S.policy];
+  document.querySelectorAll('#speed button').forEach(b=>b.classList.toggle('on',+b.dataset.s===S.speed));
+}
+
+/* ---------------- 交互 ---------------- */
+let drag=null;
+function localPt(e){const r=cv.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
+function tileCoords(pt){const u=(pt.x-view.ox)/(view.tw/2),w=(pt.y-view.oy)/(view.tw/4);return {fi:(u+w)/2,fj:(w-u)/2};}
+function tileAt(pt){const c=tileCoords(pt);return MAP.at(Math.round(c.fi),Math.round(c.fj));}
+function hitPerson(pt){
+  const s0=Math.max(5,view.tw*0.2);let best=null,bd=Math.max(18,s0*1.6);
+  for(const p of S.people){const [x,y]=iso(p.x,p.y);const d=Math.hypot(pt.x-x,pt.y-(y-s0*0.7));if(d<bd){bd=d;best=p;}}
+  return best;
+}
+function villageAtPt(pt){const c=tileCoords(pt),nv=nearestVillage(c.fi,c.fj);return nv.d<=4.5?nv.k:null;}
+cv.addEventListener('pointerdown',e=>{
+  const pt=localPt(e);
+  if(tool==='move'){const p=hitPerson(pt);if(p){drag={kind:'person',p,x:e.clientX,y:e.clientY,moved:false};try{cv.setPointerCapture(e.pointerId);}catch(err){}return;}}
+  drag={kind:'pan',x:e.clientX,y:e.clientY,px:view.panX,py:view.panY,moved:false};
+});
+cv.addEventListener('pointermove',e=>{
+  const pt=localPt(e);hoverPt=pt;
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(Math.abs(dx)+Math.abs(dy)>6)drag.moved=true;
+  if(drag.kind==='person'){if(drag.moved)dragGhost={p:drag.p,x:pt.x,y:pt.y,v:villageAtPt(pt)};return;}
+  if(drag.moved&&(view.zoom>1.01||e.pointerType==='mouse'||tool!=='look')){view.panX=drag.px+dx;view.panY=drag.py+dy;layout();}
+});
+cv.addEventListener('pointerup',e=>{
+  const pt=localPt(e),d=drag;drag=null;dragGhost=null;
+  if(!d)return;
+  if(d.kind==='person'){
+    if(d.moved){const v=villageAtPt(pt);if(v)relocate(d.p,v);else toast('把人放到一个村子附近才能搬家。',true);moveSrc=null;}
+    else{moveSrc=d.p.id;S.sel=d.p.id;updateFate();toast(`现在点一个村子，把${d.p.name}搬过去`);}
+    return;
+  }
+  if(!d.moved)tap(pt);
+});
+cv.addEventListener('pointercancel',()=>{drag=null;dragGhost=null;});
+cv.addEventListener('pointerleave',()=>{if(!drag)hoverPt=null;});
+function tap(pt){
+  if(tool==='build'){place(tileAt(pt),buildSel);return;}
+  if(tool==='raze'){raze(tileAt(pt));return;}
+  if(tool==='move'){
+    if(!moveSrc){toast('先按住或点一下要搬家的人。',true);return;}
+    const v=villageAtPt(pt);if(!v){toast('点一个村子附近的地方。',true);return;}
+    relocate(living(moveSrc),v);moveSrc=null;return;
+  }
+  const p=hitPerson(pt);
+  if(p){S.sel=p.id;$('tip').style.opacity='0';updateFate();return;}
+  const t=tileAt(pt);
+  if(t&&t.bld){const B=BUILDS[t.bld];toast(`${VN(t.bv)}的${B.n}：${B.d}`);}
+}
+const HINTS={
+  look:'',
+  build:()=>`点亮起来的空地，花公库 ${BUILDS[buildSel].cost} 金盖一座${BUILDS[buildSel].n}。${BUILDS[buildSel].d}`,
+  move:'按住一个人拖到别的村子，或者先点人、再点村子。伴侣和年幼的孩子会一起搬，搬家会让人有点累。',
+  raze:'点一座你盖的建筑把它拆掉，退回四成造价。'
+};
+function setTool(t){
+  tool=t;moveSrc=null;dragGhost=null;
+  document.querySelectorAll('#tools button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  $('palette').hidden=t!=='build';
+  const h=typeof HINTS[t]==='function'?HINTS[t]():HINTS[t];
+  $('toolhint').textContent=h;$('toolhint').hidden=!h;
+  cv.className=t==='look'?'':t;
+  if(t!=='look')$('tip').style.opacity='0';
+  layout();
+}
+$('tools').addEventListener('click',e=>{const b=e.target.closest('button');if(b)setTool(b.dataset.t);});
+$('palette').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;buildSel=b.dataset.b;document.querySelectorAll('#palette button').forEach(x=>x.classList.toggle('on',x===b));setTool('build');});
+function zoomTo(z){view.zoom=clamp(z,1,2.8);if(view.zoom<=1.01){view.panX=0;view.panY=0;}layout();}
+$('zin').onclick=()=>zoomTo(view.zoom*1.35);
+$('zout').onclick=()=>zoomTo(view.zoom/1.35);
+$('zfit').onclick=()=>{view.panX=0;view.panY=0;zoomTo(1);};
+$('play').onclick=()=>{S.paused=!S.paused;if(!S.people.length)S.paused=true;updateUI();};
+$('speed').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.speed=+b.dataset.s;syncControls();});
+$('reset').onclick=()=>{try{localStorage.removeItem(SAVE);}catch(err){}init(true);};
+$('tax').addEventListener('input',e=>{S.tax=+e.target.value/100;$('taxv').textContent=e.target.value+'%';});
+$('policy').addEventListener('change',e=>{S.policy=e.target.value;$('policyDesc').textContent=POLICIES[S.policy];chron(`溪谷改行“${e.target.selectedOptions[0].textContent}”。`,'info');updateUI();});
+$('alOn').addEventListener('change',e=>{S.alertsOn=e.target.checked;if(!S.alertsOn)S.alerts=[];dirty=true;updateUI();});
+$('dilOn').addEventListener('change',e=>{S.dilemmasOn=e.target.checked;if(S.dilemmasOn)S.nextDilemma=Math.max(S.nextDilemma,S.day+10);});
+$('fRels').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b){S.sel=+b.dataset.id;updateFate();}});
+document.querySelector('.quick').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b||!S.people.length)return;const P=S.people;let p;
+  if(b.dataset.q==='rand')p=pick(P);
+  else if(b.dataset.q==='happy')p=P.reduce((a,c)=>c.happiness>a.happiness?c:a);
+  else p=P.reduce((a,c)=>c.happiness<a.happiness?c:a);
+  S.sel=p.id;updateFate();
+});
+function stepPerson(dir){
+  const P=[...S.people].sort((a,b)=>a.id-b.id);if(!P.length)return;
+  let i=P.findIndex(p=>p.id===S.sel);i=i<0?0:(i+dir+P.length)%P.length;S.sel=P[i].id;updateFate();
+}
+$('pPrev').onclick=()=>stepPerson(-1);$('pNext').onclick=()=>stepPerson(1);
+
+/* ---------------- 主循环 ---------------- */
+const TPS={1:1.3,3:3.9,10:13};
+let dirty=true,last=performance.now(),acc=0,lastUI=0,lastSave=0;
+function frame(now){
+  const dt=Math.min(0.1,(now-last)/1000);last=now;
+  if(!S.paused&&!S.pending&&!S.alerts.length&&mdlHidden()&&S.people.length){acc+=dt*TPS[S.speed];let n=0;while(acc>=1&&n<6){tick();acc-=1;n++;}if(n)dirty=true;}
+  movePeople(dt);draw();
+  if(dirty&&now-lastUI>200){updateUI();lastUI=now;dirty=false;}
+  if(now-lastSave>5000){lastSave=now;try{localStorage.setItem(SAVE,JSON.stringify(S));}catch(err){}}
+  requestAnimationFrame(frame);
+}
+function init(fresh){
+  S=newState();
+  if(!fresh){
+    try{const raw=localStorage.getItem(SAVE);if(raw){const o=JSON.parse(raw);if(o&&o.v===1&&Array.isArray(o.people)&&o.people.length)S=Object.assign(newState(),o);}}catch(err){S=newState();}
+    S.paused=false;
+  }
+  if(!S.people.length){
+    seedPopulation();
+    chron('第1年春。三十个人在溪谷群岛上开始了他们的生活。','info');
+    pushHist();
+  }
+  applyBuilt();
+  colorKey='';lastChron=-1;for(const k in _c)delete _c[k];
+  computeHouses();syncControls();dirty=true;updateUI();
+}
+buildStats();buildSeeds();readTheme();
+init(false);
+if(window.ResizeObserver)new ResizeObserver(resize).observe($('mapwrap'));
+window.addEventListener('resize',resize);
+if(window.matchMedia)window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>setTimeout(readTheme,50));
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
