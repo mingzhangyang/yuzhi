@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents, arrangeTask, recordBacklogSnapshot } from '../src/actions';
+import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents, arrangeTask, recordBacklogSnapshot, rescheduleTask } from '../src/actions';
+import { interruptions, lastProgressAt } from '../src/logic/read-model';
+import { lifeEntries } from '../src/logic/operations';
 import { itemKey, itemsForDay, pendingDays } from '../src/logic/days';
 import { backlog, backlogSeries, condition, granary, progress } from '../src/logic/metrics';
 import { CHORES } from '../src/types';
@@ -27,12 +29,12 @@ describe('晚间结算', () => {
     expect(h.store.task(c.id)).toMatchObject({ scheduledFor: '2026-10-02', postponeCount: 1 });
     expect(h.store.task(e.id)!.status).toBe('dropped');
     expect(h.store.task(f.id)).toMatchObject({ status: 'open', scheduledFor: d });
-    expect(h.store.data.interruptions.map((i) => i.title)).toEqual(['回邮件']);
-    expect(h.store.project(p.id)!.lastProgressAt).toBe(d);
+    expect(interruptions(h.store.data).map((i) => i.title)).toEqual(['回邮件']);
+    expect(lastProgressAt(h.store.data, p.id)).toBe(d);
     expect(text).toContain('推进了 1 件事');
     expect(text).toContain('放下了 1 件不重要的事');
     expect(h.store.data.chronicle.find((c) => c.id === `day|${d}`)!.text).toBe(text);
-    expect(h.store.data.life.filter((l) => l.projectId === p.id).map((l) => l.text)).toContain('「回邮件」没做：被打断');
+    expect(lifeEntries(h.store.data).filter((l) => l.projectId === p.id).map((l) => l.text)).toContain('「回邮件」没做：被打断');
   });
 
   it('没有日期的任务不进结算列表；码头任务不进', () => {
@@ -52,6 +54,56 @@ describe('晚间结算', () => {
     expect(pendingDays(h.store.data, h.today)).toEqual(['2026-10-01', '2026-10-02']);
     settleDay(h.store, '2026-10-01', new Map());
     expect(pendingDays(h.store.data, h.today)).toEqual(['2026-10-02']);
+  });
+
+  it('多次改期后的历史 pending 按任务时间线一次前向重建', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '历史任务');
+    const t = createTask(h.store, { title: '反复改期', projectId: p.id, scheduledFor: '2026-09-02' });
+
+    h.setToday('2026-09-03');
+    rescheduleTask(h.store, t.id, '2026-09-04');
+    h.setToday('2026-09-05');
+    rescheduleTask(h.store, t.id, '2026-09-06');
+    h.setToday('2026-09-07');
+
+    expect(pendingDays(h.store.data, h.today)).toEqual(['2026-09-02', '2026-09-04', '2026-09-06']);
+  });
+
+  it('补录旧结算仍按全局 seq 覆盖较早写入的后续改期', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '补录历史');
+    const t = createTask(h.store, { title: '补录任务', projectId: p.id, scheduledFor: '2026-09-02' });
+
+    h.setToday('2026-09-03');
+    rescheduleTask(h.store, t.id, '2026-09-04');
+
+    // 9/5 才第一次补录 9/2；它拿到更大的 seq，所以权威回放里
+    // 这条旧日期 settlement 应覆盖 9/3 写入的改期。
+    h.setToday('2026-09-05');
+    settleDay(h.store, '2026-09-02', new Map([
+      [itemKey('task', t.id), { outcome: 'skipped', reason: 'no_energy' }],
+    ]));
+
+    expect(h.store.task(t.id)).toMatchObject({ status: 'open', scheduledFor: '2026-09-02' });
+    expect(pendingDays(h.store.data, h.today)).not.toContain('2026-09-04');
+  });
+
+  it('补结算旧日期时保留临时拉入任务的决定', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '补录');
+    const t = createTask(h.store, { title: '额外完成', projectId: p.id, scheduledFor: '2026-09-05' });
+    h.setToday('2026-09-10');
+
+    const item = { key: itemKey('task', t.id), type: 'task' as const, id: t.id, title: t.title, projectId: p.id };
+    const decisions = new Map([[item.key, { outcome: 'done' as const }]]);
+    const text = settleDay(h.store, '2026-09-02', decisions, [item]);
+
+    expect(h.store.data.entries.find((entry) => entry.id === `2026-09-02|task|${t.id}`)).toMatchObject({
+      outcome: 'done',
+      projectId: p.id,
+    });
+    expect(text).toContain('推进了 1 件事');
   });
 
   it('结算之外直接记下做完', () => {
@@ -135,23 +187,23 @@ describe('改判', () => {
     const p = createProject(h.store, '团队');
     const t = createTask(h.store, { title: '写周报', projectId: p.id, scheduledFor: h.today });
     const k = itemKey('task', t.id);
-    const lifeOf = () => h.store.data.life.filter((l) => l.taskId === t.id && ['done', 'partial', 'skip'].includes(l.kind)).map((l) => l.text);
+    const lifeOf = () => lifeEntries(h.store.data).filter((l) => l.taskId === t.id && ['done', 'partial', 'skip'].includes(l.kind)).map((l) => l.text);
 
     settleDay(h.store, h.today, new Map([[k, { outcome: 'skipped', reason: 'interrupted' }]]));
-    expect(h.store.data.interruptions.length).toBe(1);
+    expect(interruptions(h.store.data)).toHaveLength(1);
 
     settleDay(h.store, h.today, new Map([[k, { outcome: 'skipped', reason: 'postponed' }]]));
-    expect(h.store.data.interruptions.length).toBe(0);
+    expect(interruptions(h.store.data)).toHaveLength(0);
     expect(h.store.task(t.id)).toMatchObject({ postponeCount: 1, scheduledFor: '2026-10-02' });
     expect(lifeOf()).toEqual(['「写周报」没做：推到明天']);
 
     settleDay(h.store, h.today, new Map([[k, { outcome: 'done' }]]));
     expect(h.store.task(t.id)).toMatchObject({ status: 'done', postponeCount: 0 });
-    expect(h.store.project(p.id)!.lastProgressAt).toBe(h.today);
+    expect(lastProgressAt(h.store.data, p.id)).toBe(h.today);
     expect(lifeOf()).toEqual(['完成了「写周报」']);
 
     settleDay(h.store, h.today, new Map([[k, { outcome: 'skipped', reason: 'no_energy' }]]));
-    expect(h.store.project(p.id)!.lastProgressAt).toBeUndefined();
+    expect(lastProgressAt(h.store.data, p.id)).toBeUndefined();
     expect(h.store.task(t.id)).toMatchObject({ status: 'open', scheduledFor: h.today });
 
     // 取消决定：记录和后果一起撤掉

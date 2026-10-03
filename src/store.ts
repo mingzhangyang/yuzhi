@@ -1,7 +1,8 @@
 import type { Data, ISODate, Settings } from './types';
 import { COLLECTIONS, type Coll, type Persistence } from './db';
 import { localDate } from './lib/date';
-import { computeAllVillages, type VillageState } from './logic/decay';
+import { computeAllVillages, markDecayDataChanged, type VillageState } from './logic/decay';
+import { taskState, taskStates } from './logic/read-model';
 
 type Item<C extends Coll> = Data[C][number];
 
@@ -32,7 +33,20 @@ export class Store {
     const i = arr.findIndex((x) => x[key] === rec[key]);
     if (i >= 0) arr[i] = rec;
     else arr.push(rec);
-    this.queue(() => this.persist.put(coll, item as object));
+    this.queue(async () => {
+      const authoritativeSeq = await this.persist.put(coll, item as object);
+      if (
+        (coll === 'entries' || coll === 'operations') &&
+        authoritativeSeq !== undefined &&
+        rec.seq !== authoritativeSeq
+      ) {
+        rec.seq = authoritativeSeq;
+        // Persistence may allocate a different cross-tab sequence than the
+        // provisional local value. Invalidate replay caches only after the
+        // authoritative value has been applied to in-memory data.
+        this.changed();
+      }
+    });
     this.changed();
   }
 
@@ -43,7 +57,13 @@ export class Store {
     const i = arr.findIndex((x) => x[key] === oldKey);
     if (i >= 0) arr[i] = rec;
     else arr.push(rec);
-    this.queue(() => this.persist.renameFact(coll, oldKey, item as object));
+    this.queue(async () => {
+      const authoritativeSeq = await this.persist.renameFact(coll, oldKey, item as object);
+      if (rec.seq !== authoritativeSeq) {
+        rec.seq = authoritativeSeq;
+        this.changed();
+      }
+    });
     this.changed();
   }
 
@@ -86,6 +106,7 @@ export class Store {
 
   /** 标记数据已变化，并在本轮任务结束后通知界面 */
   changed(): void {
+    markDecayDataChanged(this.data);
     this.version++;
     if (this.pending) return;
     this.pending = true;
@@ -112,8 +133,20 @@ export class Store {
     return id ? this.data.projects.find((p) => p.id === id) : undefined;
   }
 
-  task(id: string | undefined) {
+  /** Raw entity record. Use only when editing entity-owned fields. */
+  taskRecord(id: string | undefined) {
     return id ? this.data.tasks.find((t) => t.id === id) : undefined;
+  }
+
+  /** Effective task after replaying facts. */
+  task(id: string | undefined) {
+    const raw = this.taskRecord(id);
+    return raw ? taskState(this.data, raw) : undefined;
+  }
+
+  /** Effective task list after replaying facts. */
+  tasks() {
+    return taskStates(this.data);
   }
 
   activeProjects() {

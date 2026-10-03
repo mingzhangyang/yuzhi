@@ -109,7 +109,7 @@ export class SettleSheet {
 
     const tabs = days.map((x) => `<button data-day="${x}" class="${x === this.date ? 'on' : ''} ${x < today ? 'fog' : ''}">${esc(relDay(x, today))}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
-    const extra = s.data.tasks.filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
+    const extra = s.tasks().filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
     const extraSel = extra.length
       ? `<div class="sextra"><select data-pull aria-label="还做了别的事"><option value="">${this.date === today ? '今天' : '这天'}还做了别的事…</option>${extra.map((t) => `<option value="${t.id}">${esc(t.title)} · ${esc(s.project(t.projectId)?.name ?? '')}</option>`).join('')}</select></div>`
       : '';
@@ -280,9 +280,12 @@ export class SettleSheet {
   private commit() {
     const date = this.date;
     const d = this.draft();
-    // 拉进来、并且确实给了决定的任务，到提交时才挪到这一天
+    // Preserve the rendered pulled items before pullIntoDay writes a
+    // today-dated reschedule. Historical itemsForDay(date) intentionally
+    // cannot see that future-semantic operation.
+    const pulledItems = this.items().filter((item) => this.pulled.get(date)?.has(item.id) && d.has(item.key));
     for (const id of this.pulled.get(date) ?? []) if (d.has(`task|${id}`)) A.pullIntoDay(this.store, id, date);
-    const text = A.settleDay(this.store, date, d);
+    const text = A.settleDay(this.store, date, d, pulledItems);
     this.drafts.delete(date);
     this.pulled.delete(date);
     toast(text);

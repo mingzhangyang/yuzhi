@@ -13,6 +13,7 @@ import {
 } from '../src/db';
 import { runMigrationSteps } from '../src/migrations';
 import { lifeEntries } from '../src/logic/operations';
+import { interruptions, taskState } from '../src/logic/read-model';
 import { v1BackupFixture, v1OperationHistoryFixture } from './fixtures/v1-backup';
 
 const dbName = (label: string) => `yuzhi-${label}-${Date.now()}-${Math.random()}`;
@@ -77,7 +78,7 @@ describe('数据迁移基础设施', () => {
 
   it('迁移全部主动 life kind，并保留同日事实顺序', () => {
     const parsed = parseBackup(JSON.stringify(v1OperationHistoryFixture));
-    expect(parsed.operations.map((event) => [event.seq, event.kind])).toEqual([
+    expect(parsed.operations.filter((event) => event.kind !== 'task-state-baseline' && event.kind !== 'migration-boundary').map((event) => [event.seq, event.kind])).toEqual([
       [1, 'project-created'],
       [2, 'legacy-life'],
       [3, 'legacy-life'],
@@ -119,12 +120,12 @@ describe('数据迁移基础设施', () => {
       outcome: 'done',
       title: '并发事件',
     };
-    await Promise.all([
+    const [operationSeq, entrySeq] = await Promise.all([
       left.put('operations', operation),
       right.put('entries', entry),
     ]);
 
-    expect(new Set([operation.seq, entry.seq]).size).toBe(2);
+    expect(new Set([operationSeq, entrySeq]).size).toBe(2);
     const loaded = await new IdbPersistence(name).load();
     expect([...loaded.operations, ...loaded.entries].map((fact) => fact.seq).sort((a, b) => a - b)).toEqual([1, 2]);
   });
@@ -157,7 +158,7 @@ describe('数据迁移基础设施', () => {
     expect(loaded.operations.find((fact) => fact.id === operation.id)?.seq).toBeGreaterThan(originalSeq);
   });
 
-  it('legacyLifeId 没有非空 life 快照时拒绝 v2 备份，避免吞掉兼容历史', () => {
+  it('legacyLifeId 没有非空 life 快照时拒绝当前备份，避免吞掉兼容历史', () => {
     const parsed = parseBackup(JSON.stringify(v1BackupFixture));
     const bad = JSON.parse(exportBackup(parsed)) as {
       operations: Array<Record<string, unknown>>;
@@ -172,7 +173,7 @@ describe('数据迁移基础设施', () => {
     expect(() => parseBackup(JSON.stringify(bad))).toThrow('operations');
   });
 
-  it('v2 备份里 entries 与 operations 的 seq 重复时拒绝', () => {
+  it('当前备份里 entries 与 operations 的 seq 重复时拒绝', () => {
     const parsed = parseBackup(JSON.stringify(v1BackupFixture));
     const bad = JSON.parse(exportBackup(parsed)) as {
       entries: Array<{ seq: number }>;
@@ -190,9 +191,15 @@ describe('数据迁移基础设施', () => {
   it('v1 IndexedDB 原地升级对同日 life 使用稳定 id fallback，不依赖写入顺序', async () => {
     const rows = [...v1OperationHistoryFixture.life];
     const seed = async (name: string, lifeRows: typeof rows) => {
-      await new IdbPersistence(name).load();
-      const raw = await openDB(name, IDB_SCHEMA_VERSION);
-      await raw.delete('meta', 'dataVersion');
+      const raw = await openDB(name, IDB_SCHEMA_VERSION - 1, {
+        upgrade(db) {
+          for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
+            if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
+          }
+          if (!db.objectStoreNames.contains('interruptions')) db.createObjectStore('interruptions', { keyPath: 'id' });
+          if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+        },
+      });
       await raw.put('meta', { ...v1OperationHistoryFixture.settings }, 'settings');
       for (const project of v1OperationHistoryFixture.projects) await raw.put('projects', structuredClone(project));
       for (const task of v1OperationHistoryFixture.tasks) await raw.put('tasks', structuredClone(task));
@@ -210,6 +217,7 @@ describe('数据迁移基础设施', () => {
     const reverse = await seed(dbName('legacy-life-reverse'), [...rows].reverse());
     const order = (data: typeof forward) =>
       data.operations
+        .filter((event) => event.kind !== 'task-state-baseline' && event.kind !== 'migration-boundary')
         .slice()
         .sort((a, b) => a.seq - b.seq)
         .map((event) => [event.seq, event.kind, event.payload?.legacyLifeId]);
@@ -227,14 +235,20 @@ describe('数据迁移基础设施', () => {
     ]);
   });
 
-  it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {
+  it('旧 v1 备份迁到 v3：删掉派生字段并保留有效状态，可 round-trip', () => {
     const parsed = parseBackup(JSON.stringify(v1BackupFixture));
-    expect(parsed.projects[0]).toMatchObject({ id: 'p1', lastStage: 0 });
-    expect(parsed.tasks.find((t) => t.id === 't1')?.postponeCount).toBe(1);
-    expect(parsed.interruptions).toHaveLength(1);
-    expect(parsed.operations).toHaveLength(1);
-    expect(parsed.operations[0]).toMatchObject({ seq: 1, kind: 'project-created', projectId: 'p1' });
+    expect(parsed.projects[0]).toMatchObject({ id: 'p1' });
+    expect('lastStage' in parsed.projects[0]).toBe(false);
+    expect('lastProgressAt' in parsed.projects[0]).toBe(false);
+    const rawTask = parsed.tasks.find((task) => task.id === 't1')!;
+    expect('postponeCount' in rawTask).toBe(false);
+    expect(taskState(parsed, rawTask)).toMatchObject({ scheduledFor: '2026-10-02', postponeCount: 1, status: 'open' });
+    expect(interruptions(parsed)).toHaveLength(1);
+    expect(parsed.operations.filter((event) => event.kind === 'task-state-baseline')).toHaveLength(2);
+    expect(parsed.operations.find((event) => event.kind === 'migration-boundary')).toMatchObject({ date: '2026-10-01' });
+    expect(parsed.operations.find((event) => event.kind === 'project-created')).toMatchObject({ seq: 1, projectId: 'p1' });
     expect(parsed.entries.map((entry) => entry.seq)).toEqual([2, 3]);
+    expect(parsed.life.some((entry) => ['done', 'partial', 'skip', 'stage'].includes(entry.kind))).toBe(false);
     const migratedLife = lifeEntries(parsed);
     expect(migratedLife).toHaveLength(3);
     expect(migratedLife.filter((entry) => entry.text === '立项，村落「团队」在岛上落成')).toHaveLength(1);
@@ -242,6 +256,116 @@ describe('数据迁移基础设施', () => {
     const exported = JSON.parse(exportBackup(parsed)) as { version: number };
     expect(exported.version).toBe(DATA_VERSION);
     expect(parseBackup(JSON.stringify(exported))).toEqual(parsed);
+  });
+
+  it('迁移后的旧 postponed 结算可改判或删除，不保留 baked-in 副作用', () => {
+    const corrected = parseBackup(JSON.stringify(v1BackupFixture));
+    const raw = corrected.tasks.find((task) => task.id === 't1')!;
+    const entry = corrected.entries.find((row) => row.itemType === 'task' && row.itemId === 't1')!;
+    const index = corrected.entries.indexOf(entry);
+    corrected.entries[index] = { ...entry, outcome: 'done', reason: undefined };
+    expect(taskState(corrected, raw)).toMatchObject({
+      status: 'done',
+      closedAt: '2026-10-01',
+      postponeCount: 0,
+    });
+
+    const deleted = parseBackup(JSON.stringify(v1BackupFixture));
+    const rawDeleted = deleted.tasks.find((task) => task.id === 't1')!;
+    deleted.entries = deleted.entries.filter((row) => !(row.itemType === 'task' && row.itemId === 't1'));
+    expect(taskState(deleted, rawDeleted)).toMatchObject({
+      status: 'open',
+      scheduledFor: '2026-10-01',
+      postponeCount: 0,
+    });
+  });
+
+  it('迁移 reconciliation 不把无关项目关闭当成任务状态 override', () => {
+    const legacy = JSON.parse(JSON.stringify(v1BackupFixture)) as any;
+    legacy.projects.push({
+      id: 'p2',
+      name: '无关项目',
+      createdAt: '2026-10-01',
+      status: 'closed',
+      islandSlot: 1,
+      closedAt: '2026-10-01',
+    });
+    legacy.tasks[0] = {
+      ...legacy.tasks[0],
+      status: 'done',
+      closedAt: '2026-10-01',
+      scheduledFor: '2026-10-01',
+      postponeCount: 0,
+    };
+    legacy.entries[0] = { ...legacy.entries[0], outcome: 'done' };
+    delete legacy.entries[0].reason;
+    const taskLifeIndex = legacy.life.findIndex((row: any) => row.id === 'l|2026-10-01|task|t1');
+    legacy.life[taskLifeIndex] = {
+      ...legacy.life[taskLifeIndex],
+      kind: 'done',
+      text: '完成了「写周报」',
+    };
+    delete legacy.life[taskLifeIndex].reason;
+    legacy.life.splice(taskLifeIndex + 1, 0, {
+      id: 'l-close-p2',
+      date: '2026-10-01',
+      projectId: 'p2',
+      text: '正式关闭：无关项目',
+      kind: 'close',
+    });
+
+    const migrated = parseBackup(JSON.stringify(legacy));
+    const raw = migrated.tasks.find((task) => task.id === 't1')!;
+    migrated.entries = migrated.entries.filter((entry) => !(entry.itemType === 'task' && entry.itemId === 't1'));
+
+    expect(taskState(migrated, raw)).toMatchObject({
+      status: 'open',
+      closedAt: undefined,
+      scheduledFor: '2026-10-01',
+    });
+  });
+
+  it('改判旧结算后按新状态顺序重放后续 restart/close', () => {
+    const legacy = JSON.parse(JSON.stringify(v1BackupFixture)) as any;
+    legacy.projects[0] = {
+      ...legacy.projects[0],
+      status: 'closed',
+      closedAt: '2026-10-01',
+    };
+    legacy.tasks[0] = {
+      ...legacy.tasks[0],
+      status: 'done',
+      closedAt: '2026-10-01',
+      scheduledFor: '2026-10-01',
+      postponeCount: 3,
+    };
+    legacy.entries[0] = { ...legacy.entries[0], outcome: 'done' };
+    delete legacy.entries[0].reason;
+    const taskLifeIndex = legacy.life.findIndex((row: any) => row.id === 'l|2026-10-01|task|t1');
+    legacy.life[taskLifeIndex] = {
+      ...legacy.life[taskLifeIndex],
+      kind: 'done',
+      text: '完成了「写周报」',
+    };
+    delete legacy.life[taskLifeIndex].reason;
+    legacy.life.splice(
+      taskLifeIndex + 1,
+      0,
+      { id: 'l-restart-after-done', date: '2026-10-01', projectId: 'p1', text: '重新启动', kind: 'restart' },
+      { id: 'l-close-after-done', date: '2026-10-01', projectId: 'p1', text: '正式关闭', kind: 'close' },
+    );
+
+    const migrated = parseBackup(JSON.stringify(legacy));
+    const raw = migrated.tasks.find((task) => task.id === 't1')!;
+    expect(taskState(migrated, raw)).toMatchObject({ status: 'done', postponeCount: 3 });
+
+    migrated.entries = migrated.entries.filter((entry) => !(entry.itemType === 'task' && entry.itemId === 't1'));
+    expect(taskState(migrated, raw)).toMatchObject({
+      status: 'dropped',
+      closedAt: '2026-10-01',
+      postponeCount: 0,
+      scheduledFor: '2026-10-01',
+    });
   });
 
   it('没有 meta.dataVersion 的现有数据库按 v1 接管，并写入当前数据版本', async () => {
@@ -261,6 +385,7 @@ describe('数据迁移基础设施', () => {
     const inspect = await openDB(name, IDB_SCHEMA_VERSION);
     expect(await inspect.get('meta', 'dataVersion')).toBe(DATA_VERSION);
     for (const c of Object.keys(COLLECTIONS)) expect(inspect.objectStoreNames.contains(c)).toBe(true);
+    expect(inspect.objectStoreNames.contains('interruptions')).toBe(false);
     inspect.close();
   });
 

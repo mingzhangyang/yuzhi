@@ -277,7 +277,7 @@ export function seedDemo(store: Store) {
   };
   const doneOn = (pid: string, title: string, date: ISODate) => {
     const t = A.createTask(store, { title, projectId: pid, scheduledFor: date });
-    store.put('tasks', { ...store.task(t.id)!, createdAt: date });
+    store.put('tasks', { ...store.taskRecord(t.id)!, createdAt: date });
     for (const op of store.data.operations) if (op.taskId === t.id && op.kind === 'task-created') store.put('operations', { ...op, date });
     return t;
   };

@@ -7,8 +7,6 @@ export interface Project {
   id: string;
   name: string;
   createdAt: ISODate;
-  /** 最近一次确认「做了」或「做了一部分」的日期 */
-  lastProgressAt?: ISODate;
   status: ProjectStatus;
   /** 在岛上的位置（村落槽位） */
   islandSlot: number;
@@ -18,8 +16,6 @@ export interface Project {
   resets?: { date: ISODate; neglect: number; kind: 'restart' | 'trim' }[];
   /** 「搬离」询问被暂缓到这一天 */
   promptSnoozeUntil?: ISODate;
-  /** 上一次记录在一生之书里的阶段，用于发现阶段变化 */
-  lastStage?: number;
   /** 落成（完成）的日期 */
   doneAt?: ISODate;
   /** 完成后的去处：海岸上的地标，或山顶灯塔里的档案馆 */
@@ -34,7 +30,6 @@ export interface Task {
   projectId?: string;
   title: string;
   scheduledFor?: ISODate;
-  postponeCount: number;
   status: 'open' | 'done' | 'dropped';
   createdAt: ISODate;
   closedAt?: ISODate;
@@ -123,6 +118,8 @@ export type OperationKind =
   | 'task-rescheduled'
   | 'task-moved'
   | 'task-dropped'
+  | 'task-state-baseline'
+  | 'migration-boundary'
   | 'legacy-life';
 
 export interface OperationLifeSnapshot {
@@ -164,8 +161,6 @@ export interface LifeEntry {
   text: string;
   kind: LifeKind;
   reason?: SkipReason;
-  /** 结算带来的阶段变化：结算前的阶段，重新结算时据此判断净变化 */
-  fromStage?: number;
 }
 
 /** 码头上的「打断记录」 */
@@ -205,7 +200,6 @@ export interface Data {
   operations: OperationEvent[];
   chronicle: ChronicleLine[];
   life: LifeEntry[];
-  interruptions: Interruption[];
   snapshots: BacklogSnapshot[];
   settings: Settings;
 }

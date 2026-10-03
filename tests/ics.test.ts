@@ -4,6 +4,8 @@ import { makeStore } from './helpers';
 import { classifyEvents, createProject, mergeEvents, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
 import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
+import { interruptions } from '../src/logic/read-model';
+import { lifeEntries } from '../src/logic/operations';
 
 const ICS = `BEGIN:VCALENDAR
 VERSION:2.0
@@ -124,8 +126,8 @@ describe('日历合并', () => {
     const en = h.store.data.entries.filter((e) => e.itemType === 'event');
     expect(en.map((e) => e.itemId)).toEqual(['src|single-1']);
     expect(en[0].seq).toBe(originalSeq);
-    expect(h.store.data.interruptions.map((i) => i.itemId)).toEqual(['src|single-1']);
-    expect(h.store.data.life.some((l) => l.id === `l|${en[0].id}`)).toBe(true);
+    expect(interruptions(h.store.data).map((i) => i.itemId)).toEqual(['src|single-1']);
+    expect(lifeEntries(h.store.data).some((l) => l.id === `l|${en[0].id}`)).toBe(true);
     // 重复事件里没改期的那几次，id 本来就一样
     expect(h.store.data.events.filter((e) => e.uid === 'weekly-1')).toHaveLength(4);
   });

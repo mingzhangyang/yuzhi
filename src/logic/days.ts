@@ -1,6 +1,7 @@
 import type { CalendarEvent, Data, ISODate, SettlementEntry, Task } from '../types';
-import { dateOfStamp, diffDays } from '../lib/date';
+import { addDays, dateOfStamp, diffDays } from '../lib/date';
 import { ARCHIVE_AFTER_DAYS } from './config';
+import { taskStates, taskStatesForDates } from './read-model';
 
 export interface SettleItem {
   key: string;
@@ -32,25 +33,28 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   for (const e of data.entries) if (e.date === date) entries.set(itemKey(e.itemType, e.itemId), e);
   const out: SettleItem[] = [];
   const seen = new Set<string>();
-  const taskById = new Map<string, Task>(data.tasks.map((t) => [t.id, t]));
+  const tasks = taskStates(data, date);
+  const taskById = new Map<string, Task>(tasks.map((t) => [t.id, t]));
 
   for (const ev of eventsOn(data.events, date)) {
     const key = itemKey('event', ev.id);
     seen.add(key);
-    out.push({ key, type: 'event', id: ev.id, title: ev.title, projectId: ev.projectId, start: ev.start, end: ev.end, entry: entries.get(key) });
+    const entry = entries.get(key);
+    out.push({ key, type: 'event', id: ev.id, title: entry?.title ?? ev.title, projectId: entry ? entry.projectId : ev.projectId, start: ev.start, end: ev.end, entry });
   }
-  for (const t of data.tasks) {
+  for (const t of tasks) {
     const key = itemKey('task', t.id);
     if (t.status === 'open' && t.scheduledFor === date && t.projectId) {
       seen.add(key);
-      out.push({ key, type: 'task', id: t.id, title: t.title, projectId: t.projectId, entry: entries.get(key) });
+      const entry = entries.get(key);
+      out.push({ key, type: 'task', id: t.id, title: entry?.title ?? t.title, projectId: entry ? entry.projectId : t.projectId, entry });
     }
   }
   // 已结算过、但任务已经改期或完成的条目，也保留在这一天
   for (const [key, e] of entries) {
     if (seen.has(key)) continue;
     const t = e.itemType === 'task' ? taskById.get(e.itemId) : undefined;
-    out.push({ key, type: e.itemType, id: e.itemId, title: t?.title ?? e.title, projectId: t?.projectId ?? e.projectId, entry: e });
+    out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: e.projectId, entry: e });
   }
   return out;
 }
@@ -63,11 +67,56 @@ export function pendingDays(data: Data, today: ISODate): ISODate[] {
   const recorded = new Set(data.days.map((d) => d.date));
   const first = data.settings.firstDay;
   const found = new Set<ISODate>();
-  const consider = (d: ISODate | undefined) => {
-    if (d && d >= first && d < today && !recorded.has(d)) found.add(d);
+  const candidateDatesByTask = new Map<string, Set<ISODate>>();
+  const addTaskCandidate = (date: ISODate | undefined, taskId: string) => {
+    if (!date) return;
+    let dates = candidateDatesByTask.get(taskId);
+    if (!dates) candidateDatesByTask.set(taskId, (dates = new Set()));
+    dates.add(date);
   };
-  for (const t of data.tasks) if (t.status === 'open' && t.projectId) consider(t.scheduledFor);
-  for (const e of data.events) if (!e.allDay) consider(dateOfStamp(e.start));
+
+  // Reconstruct every date a task could historically have been pending.
+  // Looking only at today's effective task state loses overdue dates after a
+  // later drop/move/reschedule and makes current village replay disagree with
+  // the stage timeline.
+  for (const task of data.tasks) addTaskCandidate(task.scheduledFor, task.id);
+  for (const event of data.operations) {
+    if (!event.taskId) continue;
+    if (event.kind === 'task-created' || event.kind === 'task-arranged' || event.kind === 'task-state-baseline') {
+      const scheduledFor = event.payload?.scheduledFor;
+      if (typeof scheduledFor === 'string') addTaskCandidate(scheduledFor, event.taskId);
+    } else if (event.kind === 'task-rescheduled') {
+      const toDate = event.payload?.toDate;
+      if (typeof toDate === 'string') addTaskCandidate(toDate, event.taskId);
+    }
+  }
+  for (const entry of data.entries) {
+    if (entry.itemType !== 'task') continue;
+    if (entry.outcome === 'partial' || entry.reason === 'postponed') addTaskCandidate(addDays(entry.date, 1), entry.itemId);
+    else if (entry.outcome === 'skipped' && entry.reason !== 'not_important') addTaskCandidate(entry.date, entry.itemId);
+  }
+
+  const taskById = new Map(data.tasks.map((task) => [task.id, task] as const));
+  for (const [taskId, dates] of candidateDatesByTask) {
+    const task = taskById.get(taskId);
+    if (!task) continue;
+    const candidates = [...dates]
+      .filter((date) => date >= first && date < today && !recorded.has(date) && task.createdAt <= date)
+      .sort();
+    if (!candidates.length) continue;
+
+    const states = taskStatesForDates(data, task, candidates);
+    for (const date of candidates) {
+      const state = states.get(date);
+      if (state?.status === 'open' && state.projectId && state.scheduledFor === date) found.add(date);
+    }
+  }
+
+  for (const event of data.events) {
+    if (event.allDay) continue;
+    const date = dateOfStamp(event.start);
+    if (date >= first && date < today && !recorded.has(date)) found.add(date);
+  }
   return [...found].sort();
 }
 
