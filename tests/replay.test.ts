@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { closeProject, completeProject, createProject, createTask, moveTask, rescheduleTask, restartProject, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
-import { taskStates } from '../src/logic/read-model';
+import { taskState, taskStates, taskStatesForDates } from '../src/logic/read-model';
 import { makeStore } from './helpers';
 
 describe('Phase 2 fact replay', () => {
@@ -98,6 +98,25 @@ describe('Phase 2 fact replay', () => {
     // stage. The project was active on that date even though it is closed now.
     settleDay(h.store, '2026-09-08', new Map([[itemKey('task', t.id), { outcome: 'partial' }]]));
     expect(h.store.data.chronicle.find((line) => line.id === 'day|2026-09-08')).toBeTruthy();
+  });
+
+  it('批量历史快照与逐日权威 taskState 完全一致', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '一致性');
+    const t = createTask(h.store, { title: '双轴事实', projectId: p.id, scheduledFor: '2026-09-02' });
+
+    h.setToday('2026-09-03');
+    rescheduleTask(h.store, t.id, '2026-09-04');
+    h.setToday('2026-09-05');
+    settleDay(h.store, '2026-09-02', new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+    h.setToday('2026-09-06');
+    restartProject(h.store, p.id);
+
+    const dates = ['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06'];
+    const batched = taskStatesForDates(h.store.data, h.store.taskRecord(t.id)!, dates);
+    for (const date of dates) {
+      expect(batched.get(date)).toEqual(taskState(h.store.data, h.store.taskRecord(t.id)!, date));
+    }
   });
 
   it('项目关闭后改判更早的 done 为 partial，任务仍在关闭事实处被放下', () => {

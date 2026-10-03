@@ -245,14 +245,6 @@ const HEAVY_TASK_KINDS = new Set([
   'task-state-baseline',
 ]);
 
-interface HeavyMembershipChange {
-  date: ISODate;
-  taskId: string;
-  fromProjectId?: string;
-  toProjectId?: string;
-  factSeq?: number;
-}
-
 interface HeavyProjectChange {
   heavy: boolean;
   factSeq?: number;
@@ -265,57 +257,48 @@ interface HeavyProjectChange {
  * restart/close, so each relevant fact cut is replayed independently.
  */
 function buildHeavyTimeline(data: Data, today: ISODate): Map<string, Map<ISODate, HeavyProjectChange[]>> {
-  const taskById = new Map(data.tasks.map((task) => [task.id, task] as const));
-  const relevantFacts = new Map<string, Map<ISODate, number[]>>();
-
+  const cutsByTask = new Map<string, Array<{ date: ISODate; seq: number }>>();
   const addCut = (taskId: string, date: ISODate, seq: number) => {
-    const task = taskById.get(taskId);
+    const task = data.tasks.find((row) => row.id === taskId);
     if (!task || date < task.createdAt || date > today) return;
-    let byDate = relevantFacts.get(taskId);
-    if (!byDate) relevantFacts.set(taskId, (byDate = new Map()));
-    let seqs = byDate.get(date);
-    if (!seqs) byDate.set(date, (seqs = []));
-    seqs.push(seq);
+    let cuts = cutsByTask.get(taskId);
+    if (!cuts) cutsByTask.set(taskId, (cuts = []));
+    cuts.push({ date, seq });
   };
 
   for (const entry of data.entries) {
     if (entry.itemType === 'task') addCut(entry.itemId, entry.date, entry.seq);
   }
+  const lifecycle = data.operations.filter((event) => HEAVY_PROJECT_KINDS.has(event.kind) && event.projectId);
   for (const event of data.operations) {
     if (event.taskId && HEAVY_TASK_KINDS.has(event.kind)) addCut(event.taskId, event.date, event.seq);
-    if (HEAVY_PROJECT_KINDS.has(event.kind) && event.projectId) {
-      for (const task of data.tasks) if (task.createdAt <= event.date) addCut(task.id, event.date, event.seq);
-    }
+  }
+  for (const event of lifecycle) {
+    for (const task of data.tasks) if (task.createdAt <= event.date) addCut(task.id, event.date, event.seq);
   }
 
   const membershipChanges: Array<{ date: ISODate; seq: number; taskId: string; fromProjectId?: string; toProjectId?: string }> = [];
   for (const task of data.tasks) {
     if (task.createdAt > today) continue;
-    const ownEntries = data.entries.filter((entry) => entry.itemType === 'task' && entry.itemId === task.id);
-    const ownOperations = data.operations.filter(
-      (event) => event.taskId === task.id || HEAVY_PROJECT_KINDS.has(event.kind),
-    );
+    const cuts = cutsByTask.get(task.id) ?? [];
+    if (!cuts.length) continue;
+    const orderedCuts = [...new Map(cuts.map((cut) => [`${cut.date}|${cut.seq}`, cut] as const)).values()]
+      .sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq);
+    const states = taskStatesAtCuts(data, task, orderedCuts);
     let previousProject: string | undefined;
-
-    const cuts = relevantFacts.get(task.id) ?? new Map();
-    for (const date of [...cuts.keys()].sort()) {
-      const seqs = [...new Set(cuts.get(date)!)].sort((a, b) => a - b);
-      for (const seq of seqs) {
-        const taskData: Data = {
-          ...data,
-          tasks: [task],
-          entries: ownEntries.filter((entry) => entry.date < date || (entry.date === date && entry.seq <= seq)),
-          operations: ownOperations.filter((event) => event.date < date || (event.date === date && event.seq <= seq)),
-        };
-        const current = taskState(taskData, task, date);
-        const currentProject = current.status === 'open' && current.projectId && current.postponeCount >= POSTPONE_PENALTY_AT
-          ? current.projectId
-          : undefined;
-        if (currentProject !== previousProject) {
-          membershipChanges.push({ date, seq, taskId: task.id, fromProjectId: previousProject, toProjectId: currentProject });
-          previousProject = currentProject;
-        }
-      }
+    for (let i = 0; i < orderedCuts.length; i++) {
+      const current = states[i];
+      const currentProject = current.status === 'open' && current.projectId && current.postponeCount >= POSTPONE_PENALTY_AT
+        ? current.projectId
+        : undefined;
+      if (currentProject === previousProject) continue;
+      membershipChanges.push({
+        ...orderedCuts[i],
+        taskId: task.id,
+        fromProjectId: previousProject,
+        toProjectId: currentProject,
+      });
+      previousProject = currentProject;
     }
   }
 
@@ -347,7 +330,10 @@ function buildHeavyTimeline(data: Data, today: ISODate): Map<string, Map<ISODate
       if (before !== (set.size > 0)) touched.add(change.toProjectId);
     }
     for (const projectId of touched) {
-      push(projectId, change.date, { heavy: (members.get(projectId)?.size ?? 0) > 0, factSeq: change.seq });
+      push(projectId, change.date, {
+        heavy: (members.get(projectId)?.size ?? 0) > 0,
+        factSeq: change.seq,
+      });
     }
   }
   return timeline;
@@ -415,8 +401,10 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
       const heavyChanges = heavyTimeline.get(project.id)?.get(date) ?? [];
       let heavyIndex = 0;
 
-      const applyHeavyThrough = (seq: number) => {
-        while (heavyIndex < heavyChanges.length && (heavyChanges[heavyIndex].factSeq ?? Number.MAX_SAFE_INTEGER) <= seq) {
+      const applyHeavyUntil = (seq: number, inclusive: boolean) => {
+        while (heavyIndex < heavyChanges.length) {
+          const changeSeq = heavyChanges[heavyIndex].factSeq ?? Number.MAX_SAFE_INTEGER;
+          if (inclusive ? changeSeq > seq : changeSeq >= seq) break;
           const change = heavyChanges[heavyIndex++];
           const beforeHeavy = heavy;
           heavy = change.heavy;
@@ -427,6 +415,7 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
           }
         }
       };
+      const applyHeavyThrough = (seq: number) => applyHeavyUntil(seq, true);
 
       const captureBeforeDeactivate = () => {
         if (!active || factBaseline === undefined) return;
@@ -445,15 +434,20 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
       };
 
       for (const fact of dayFacts) {
-        applyHeavyThrough(fact.seq);
         const event = fact.operation;
+        if (event?.kind === 'project-closed' || event?.kind === 'project-completed') {
+          applyHeavyUntil(fact.seq, false);
+          captureBeforeDeactivate();
+          applyHeavyThrough(fact.seq);
+          active = false;
+          visibleStage = undefined;
+          factBaseline = undefined;
+          continue;
+        }
+
+        applyHeavyThrough(fact.seq);
         if (event) {
-          if (event.kind === 'project-closed' || event.kind === 'project-completed') {
-            captureBeforeDeactivate();
-            active = false;
-            visibleStage = undefined;
-            factBaseline = undefined;
-          } else if (event.kind === 'project-restarted') {
+          if (event.kind === 'project-restarted') {
             active = true;
             neglect = 0;
             heavy = false;

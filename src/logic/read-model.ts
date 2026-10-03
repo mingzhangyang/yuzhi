@@ -235,50 +235,79 @@ function reconcileLegacyEntries(
   if (state.postponeCount === oldFinal.postponeCount) state.postponeCount = newFinal.postponeCount;
 }
 
-/**
- * Replays effective task state from operation + settlement facts. The v3
- * compatibility baseline contains the exact v2 state plus original settlement
- * snapshots; if an old settlement is corrected/deleted, only its baked-in
- * effect is reconciled, while later manual facts keep precedence.
- */
-export function taskState(data: Data, task: Task, throughDate?: ISODate): TaskView {
-  const eligible = (event: OperationEvent) => event.taskId === task.id && beforeOrOn(event.date, throughDate);
-  const baselines = data.operations
-    .filter((event) => event.kind === 'task-state-baseline' && eligible(event))
-    .sort((a, b) => b.seq - a.seq);
-  const created = data.operations
-    .filter((event) => event.kind === 'task-created' && eligible(event))
-    .sort((a, b) => a.seq - b.seq)[0];
+type TaskReplayFact = {
+  date: ISODate;
+  seq: number;
+  operation?: OperationEvent;
+  entry?: SettlementEntry;
+};
 
-  let state = defaultState(task);
-  let baseSeq = 0;
-  if (baselines[0]) {
-    state = baselineFrom(baselines[0], task);
-    reconcileLegacyEntries(state, data, task.id, baselines[0]);
-    baseSeq = baselines[0].seq;
-  } else if (created) {
-    state = createdFrom(created);
-    baseSeq = created.seq;
-  }
+interface TaskReplayFrame {
+  state: MutableTaskState;
+  hasBaseline: boolean;
+  createdSeen: boolean;
+}
 
-  const facts: Array<{ seq: number; operation?: OperationEvent; entry?: SettlementEntry }> = [];
+export interface TaskReplayCut {
+  date: ISODate;
+  /** Include same-day facts through this seq. Omit to include the whole day. */
+  seq?: number;
+}
+
+function cloneMutableState(state: MutableTaskState): MutableTaskState {
+  return { ...state };
+}
+
+function cloneFrame(frame: TaskReplayFrame): TaskReplayFrame {
+  return {
+    state: cloneMutableState(frame.state),
+    hasBaseline: frame.hasBaseline,
+    createdSeen: frame.createdSeen,
+  };
+}
+
+function taskReplayFacts(data: Data, task: Task): TaskReplayFact[] {
+  const facts: TaskReplayFact[] = [];
   for (const event of data.operations) {
-    if (event.seq <= baseSeq || !beforeOrOn(event.date, throughDate)) continue;
     if (event.taskId === task.id || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)) {
-      facts.push({ seq: event.seq, operation: event });
+      facts.push({ date: event.date, seq: event.seq, operation: event });
     }
   }
   for (const entry of data.entries) {
-    if (entry.seq <= baseSeq || entry.itemType !== 'task' || entry.itemId !== task.id || !beforeOrOn(entry.date, throughDate)) continue;
-    facts.push({ seq: entry.seq, entry });
+    if (entry.itemType === 'task' && entry.itemId === task.id) {
+      facts.push({ date: entry.date, seq: entry.seq, entry });
+    }
   }
-  facts.sort((a, b) => a.seq - b.seq);
+  return facts.sort((a, b) => a.seq - b.seq);
+}
 
-  for (const fact of facts) {
-    if (fact.operation) applyOperation(state, task.id, fact.operation);
-    else if (fact.entry) applySettlement(state, fact.entry);
+function applyReplayFact(frame: TaskReplayFrame, data: Data, task: Task, fact: TaskReplayFact): TaskReplayFrame {
+  const next = cloneFrame(frame);
+  const event = fact.operation;
+  if (event) {
+    if (event.kind === 'task-state-baseline' && event.taskId === task.id) {
+      next.state = baselineFrom(event, task);
+      reconcileLegacyEntries(next.state, data, task.id, event);
+      next.hasBaseline = true;
+      return next;
+    }
+    if (event.kind === 'task-created' && event.taskId === task.id) {
+      // taskState historically chooses the first create fact only when there is
+      // no compatibility baseline. Preserve exactly that rule here.
+      if (!next.hasBaseline && !next.createdSeen) {
+        next.state = createdFrom(event);
+        next.createdSeen = true;
+      }
+      return next;
+    }
+    applyOperation(next.state, task.id, event);
+    return next;
   }
+  if (fact.entry) applySettlement(next.state, fact.entry);
+  return next;
+}
 
+function taskView(task: Task, state: MutableTaskState): TaskView {
   return {
     ...task,
     projectId: state.projectId,
@@ -289,35 +318,98 @@ export function taskState(data: Data, task: Task, throughDate?: ISODate): TaskVi
   };
 }
 
+function factEligible(fact: TaskReplayFact, cut: TaskReplayCut): boolean {
+  if (fact.date < cut.date) return true;
+  if (fact.date > cut.date) return false;
+  return cut.seq === undefined || fact.seq <= cut.seq;
+}
+
 /**
- * Replays one task at multiple historical dates from a task-local fact slice.
- * Each snapshot delegates precedence to taskState(): semantic date decides
- * eligibility, while the shared monotonic seq remains the authoritative order.
- * This avoids rescanning unrelated tasks/projects for every candidate date.
+ * Canonical task replay index.
+ *
+ * Facts have two independent axes: semantic date controls whether a fact is
+ * visible in a historical snapshot, while global seq controls precedence among
+ * visible facts. We keep one seq-ordered task-local slice, activate facts as
+ * cuts advance by date/seq, and only recompute the suffix whose eligibility
+ * changed. Normal chronological histories advance linearly; backfilled facts
+ * invalidate only the affected seq suffix instead of rescanning unrelated data.
  */
+export function taskStatesAtCuts(data: Data, task: Task, cuts: TaskReplayCut[]): TaskView[] {
+  if (!cuts.length) return [];
+  const facts = taskReplayFacts(data, task);
+  const indexedCuts = cuts
+    .map((cut, index) => ({ cut, index }))
+    .sort((a, b) =>
+      a.cut.date.localeCompare(b.cut.date) ||
+      (a.cut.seq ?? Number.MAX_SAFE_INTEGER) - (b.cut.seq ?? Number.MAX_SAFE_INTEGER) ||
+      a.index - b.index,
+    );
+  const result = new Array<TaskView>(cuts.length);
+  const active = new Array<boolean>(facts.length).fill(false);
+  const after = new Array<TaskReplayFrame>(facts.length);
+  const activationOrder = facts
+    .map((fact, index) => ({ fact, index }))
+    .sort((a, b) => a.fact.date.localeCompare(b.fact.date) || a.fact.seq - b.fact.seq);
+
+  let activationIndex = 0;
+  let initialized = false;
+  const initialFrame = (): TaskReplayFrame => ({
+    state: defaultState(task),
+    hasBaseline: false,
+    createdSeen: false,
+  });
+
+  for (const { cut, index: outputIndex } of indexedCuts) {
+    let earliestChanged = facts.length;
+    while (activationIndex < activationOrder.length && factEligible(activationOrder[activationIndex].fact, cut)) {
+      const factIndex = activationOrder[activationIndex++].index;
+      if (!active[factIndex]) {
+        active[factIndex] = true;
+        earliestChanged = Math.min(earliestChanged, factIndex);
+      }
+    }
+
+    if (!initialized) {
+      earliestChanged = 0;
+      initialized = true;
+    }
+
+    if (earliestChanged < facts.length) {
+      let frame = earliestChanged === 0 ? initialFrame() : cloneFrame(after[earliestChanged - 1]);
+      for (let i = earliestChanged; i < facts.length; i++) {
+        if (active[i]) frame = applyReplayFact(frame, data, task, facts[i]);
+        after[i] = cloneFrame(frame);
+      }
+    }
+
+    const finalFrame = facts.length ? after[facts.length - 1] ?? initialFrame() : initialFrame();
+    result[outputIndex] = taskView(task, finalFrame.state);
+  }
+  return result;
+}
+
+/**
+ * Replays effective task state from operation + settlement facts. Semantic date
+ * controls visibility; global seq remains the only precedence order.
+ */
+export function taskState(data: Data, task: Task, throughDate?: ISODate): TaskView {
+  if (throughDate) return taskStatesAtCuts(data, task, [{ date: throughDate }])[0];
+
+  let frame: TaskReplayFrame = {
+    state: defaultState(task),
+    hasBaseline: false,
+    createdSeen: false,
+  };
+  for (const fact of taskReplayFacts(data, task)) frame = applyReplayFact(frame, data, task, fact);
+  return taskView(task, frame.state);
+}
+
 export function taskStatesForDates(data: Data, task: Task, dates: ISODate[]): Map<ISODate, TaskView> {
   const orderedDates = [...new Set(dates)]
     .filter((date) => date >= task.createdAt)
     .sort();
-  const out = new Map<ISODate, TaskView>();
-  if (!orderedDates.length) return out;
-
-  const lastDate = orderedDates[orderedDates.length - 1];
-  const taskData: Data = {
-    ...data,
-    tasks: [task],
-    entries: data.entries.filter(
-      (entry) => entry.itemType === 'task' && entry.itemId === task.id && entry.date <= lastDate,
-    ),
-    operations: data.operations.filter(
-      (event) =>
-        event.date <= lastDate &&
-        (event.taskId === task.id || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)),
-    ),
-  };
-
-  for (const date of orderedDates) out.set(date, taskState(taskData, task, date));
-  return out;
+  const states = taskStatesAtCuts(data, task, orderedDates.map((date) => ({ date })));
+  return new Map(orderedDates.map((date, index) => [date, states[index]] as const));
 }
 
 export function taskStates(data: Data, throughDate?: ISODate): TaskView[] {
