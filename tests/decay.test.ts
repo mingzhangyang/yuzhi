@@ -3,6 +3,7 @@ import { makeStore } from './helpers';
 import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, reopenProject, markTaskDone } from '../src/actions';
 import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
+import { lifeEntries } from '../src/logic/operations';
 
 describe('阶段换算', () => {
   it('天数对应阶段', () => {
@@ -221,6 +222,31 @@ describe('阶段历史重放', () => {
       (row) => row.source === 'facts' && row.projectId === p.id && row.date === h.today,
     );
     expect(transition).toMatchObject({ from: 2, to: 1 });
+  });
+
+  it('事实触发的阶段行继承 settlement seq，并保持同日因果顺序', () => {
+    const h = makeStore('2026-09-20', '2026-09-01');
+    const p = createProject(h.store, '顺序村落');
+    expect(h.store.villages().get(p.id)!.stage).toBe(2);
+
+    const t = createTask(h.store, { title: '推进', projectId: p.id, scheduledFor: h.today });
+    settleDay(h.store, h.today, new Map([[itemKey('task', t.id), { outcome: 'done' }]]));
+    const settlement = h.store.data.entries.find((entry) => entry.itemId === t.id)!;
+    closeProject(h.store, p.id, '当天收尾');
+
+    const derived = stageLifeEntries(h.store.data, h.today);
+    const stage = derived.find((entry) => entry.id === `stage|${h.today}|${p.id}`)!;
+    expect(stage.factSeq).toBe(settlement.seq);
+
+    const ordered = lifeEntries(h.store.data, derived).filter(
+      (entry) => entry.date === h.today && entry.projectId === p.id,
+    );
+    const doneIndex = ordered.findIndex((entry) => entry.id === `l|${settlement.id}`);
+    const stageIndex = ordered.findIndex((entry) => entry.id === stage.id);
+    const closeIndex = ordered.findIndex((entry) => entry.kind === 'close');
+    expect(doneIndex).toBeGreaterThanOrEqual(0);
+    expect(stageIndex).toBeGreaterThan(doneIndex);
+    expect(closeIndex).toBeGreaterThan(stageIndex);
   });
 
   it('同日 trim 与 settlement 按 seq 决定最终衰败状态', () => {
