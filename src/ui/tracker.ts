@@ -14,6 +14,7 @@ import { addDays, dateOfStamp, diffDays, fmtDay, relDay, startOfLocalDay } from 
 import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
 import { summarize } from '../logic/summary';
+import { lifeEntries } from '../logic/operations';
 import { summaryHTML } from './ceremony';
 
 export type View =
@@ -243,7 +244,7 @@ export class Tracker {
         return `<div class="task"><div class="tt" data-act="task" data-id="${t.id}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${t.id}" title="今天做完了" aria-label="今天做完了">✓</button><button class="iconbtn" data-act="resched" data-id="${t.id}" title="改日期" aria-label="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${t.id}" title="不重要了" aria-label="不重要了">✕</button></div>` : ''}</div>`;
       })
       .join('');
-    const life = s.data.life.filter((l) => l.projectId === p.id);
+    const life = lifeEntries(s.data).filter((l) => l.projectId === p.id);
     const html = `
       ${this.back$()}
       <div class="who"><div class="emblem">${emblem(roofOf(p.islandSlot), active ? stage : 2)}</div><div><div class="fname">${esc(p.name)}</div><div class="fmeta">${fmtDay(p.createdAt)}立项 · 已 ${diffDays(p.createdAt, today)} 天${p.closedAt ? ` · ${fmtDay(p.closedAt)}关闭` : ''}${p.doneAt ? ` · ${fmtDay(p.doneAt)}落成` : ''}</div></div></div>
@@ -280,7 +281,7 @@ export class Tracker {
     const late = t.status === 'open' && t.scheduledFor && t.scheduledFor < today;
     const statusChip = t.status === 'open' ? `<span class="chip ok">进行中</span>` : t.status === 'done' ? `<span class="chip ok">已完成</span>` : `<span class="chip">已放下</span>`;
     const entries = s.data.entries.filter((e) => e.itemType === 'task' && e.itemId === t.id);
-    const life = s.data.life.filter((l) => l.taskId === t.id);
+    const life = lifeEntries(s.data).filter((l) => l.taskId === t.id);
     const projOpts = s.activeProjects().map((x) => `<option value="${x.id}"${x.id === t.projectId ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
     const html = `
       ${this.back$(p ? p.name : '码头')}
@@ -626,7 +627,7 @@ export class Tracker {
 export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
   const v = store.villages().get(p.id);
   const open = store.data.tasks.filter((t) => t.projectId === p.id && t.status === 'open');
-  const reasons = store.data.life.filter((l) => l.projectId === p.id && l.kind === 'skip' && l.reason);
+  const reasons = lifeEntries(store.data).filter((l) => l.projectId === p.id && l.kind === 'skip' && l.reason);
   const counts = new Map<string, number>();
   for (const r of reasons) counts.set(A.REASON_TEXT[r.reason!], (counts.get(A.REASON_TEXT[r.reason!]) ?? 0) + 1);
   const why = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n} 次`).join('、');

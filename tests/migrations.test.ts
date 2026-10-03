@@ -12,6 +12,7 @@ import {
   parseBackup,
 } from '../src/db';
 import { runMigrationSteps } from '../src/migrations';
+import { lifeEntries } from '../src/logic/operations';
 import { v1BackupFixture } from './fixtures/v1-backup';
 
 const dbName = (label: string) => `yuzhi-${label}-${Date.now()}-${Math.random()}`;
@@ -79,6 +80,11 @@ describe('数据迁移基础设施', () => {
     expect(parsed.projects[0]).toMatchObject({ id: 'p1', lastStage: 0 });
     expect(parsed.tasks.find((t) => t.id === 't1')?.postponeCount).toBe(1);
     expect(parsed.interruptions).toHaveLength(1);
+    expect(parsed.operations).toHaveLength(1);
+    expect(parsed.operations[0]).toMatchObject({ seq: 1, kind: 'project-created', projectId: 'p1' });
+    const migratedLife = lifeEntries(parsed);
+    expect(migratedLife).toHaveLength(3);
+    expect(migratedLife.filter((entry) => entry.text === '立项，村落「团队」在岛上落成')).toHaveLength(1);
 
     const exported = JSON.parse(exportBackup(parsed)) as { version: number };
     expect(exported.version).toBe(DATA_VERSION);

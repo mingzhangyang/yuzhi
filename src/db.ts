@@ -14,6 +14,7 @@ export const COLLECTIONS = {
   rules: 'id',
   entries: 'id',
   days: 'date',
+  operations: 'id',
   chronicle: 'id',
   life: 'id',
   interruptions: 'id',
@@ -23,8 +24,8 @@ export type Coll = keyof typeof COLLECTIONS;
 export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
-export const IDB_SCHEMA_VERSION = 2;
-export const DATA_VERSION = 1;
+export const IDB_SCHEMA_VERSION = 3;
+export const DATA_VERSION = 2;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -65,6 +66,7 @@ export function emptyData(): Data {
     rules: [],
     entries: [],
     days: [],
+    operations: [],
     chronicle: [],
     life: [],
     interruptions: [],
@@ -76,7 +78,60 @@ export function emptyData(): Data {
 type RawData = Record<string, unknown> & { settings: unknown };
 
 /** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
-const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [];
+const ACTIVE_LIFE_KINDS = new Set(['start', 'task', 'close', 'restart', 'trim', 'drop', 'event', 'complete']);
+const LEGACY_KIND_MAP: Record<string, string> = {
+  start: 'project-created',
+  close: 'project-closed',
+  restart: 'project-restarted',
+  trim: 'project-trimmed',
+  drop: 'task-dropped',
+  complete: 'project-completed',
+};
+
+const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
+  {
+    to: 2,
+    run(data) {
+      const life = Array.isArray(data.life) ? data.life : [];
+      const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
+      let seq = operations.reduce((max, value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return max;
+        const n = (value as Record<string, unknown>).seq;
+        return Number.isInteger(n) && (n as number) > max ? n as number : max;
+      }, 0);
+      const candidates = life
+        .map((value, index) => ({ value, index }))
+        .filter(({ value }) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+          const kind = (value as Record<string, unknown>).kind;
+          return typeof kind === 'string' && ACTIVE_LIFE_KINDS.has(kind);
+        })
+        .sort((a, b) => {
+          const ad = (a.value as Record<string, unknown>).date;
+          const bd = (b.value as Record<string, unknown>).date;
+          return String(ad ?? '').localeCompare(String(bd ?? '')) || a.index - b.index;
+        });
+      for (const { value } of candidates) {
+        const row = value as Record<string, unknown>;
+        if (typeof row.id !== 'string' || typeof row.date !== 'string' || typeof row.text !== 'string' || typeof row.kind !== 'string') continue;
+        const lifeSnapshot: Record<string, unknown> = { kind: row.kind, text: row.text };
+        if (typeof row.projectId === 'string') lifeSnapshot.projectId = row.projectId;
+        if (typeof row.taskId === 'string') lifeSnapshot.taskId = row.taskId;
+        if (typeof row.reason === 'string') lifeSnapshot.reason = row.reason;
+        operations.push({
+          id: `op|legacy-life|${row.id}`,
+          seq: ++seq,
+          date: row.date,
+          kind: LEGACY_KIND_MAP[row.kind] ?? 'legacy-life',
+          ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
+          ...(typeof row.taskId === 'string' ? { taskId: row.taskId } : {}),
+          payload: { legacyLifeId: row.id, legacyKind: row.kind, life: [lifeSnapshot] },
+        });
+      }
+      data.operations = operations;
+    },
+  },
+];
 
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
@@ -249,6 +304,21 @@ type Shape = Record<string, Check>;
 const OUTCOME = oneOf('done', 'partial', 'skipped');
 const REASON = oneOf('interrupted', 'no_energy', 'not_important', 'postponed');
 const ITEM_TYPE = oneOf('task', 'event');
+const OPERATION_KIND = oneOf(
+  'project-created', 'project-renamed', 'project-restarted', 'project-trimmed', 'project-closed',
+  'project-completed', 'project-resting-changed', 'task-created', 'task-arranged', 'task-rescheduled',
+  'task-moved', 'task-dropped', 'legacy-life',
+);
+const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete');
+const OPERATION_PAYLOAD: Check = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (o.legacyLifeId !== undefined && typeof o.legacyLifeId !== 'string') return false;
+  if (o.life !== undefined && !arrayOf({
+    'projectId?': isText, 'taskId?': isText, text: isStr, kind: LIFE_KIND, 'reason?': REASON,
+  })(o.life)) return false;
+  return true;
+};
 
 const SHAPES: Record<Coll, Shape> = {
   projects: {
@@ -273,6 +343,10 @@ const SHAPES: Record<Coll, Shape> = {
     'projectId?': isText, title: isStr,
   },
   days: { date: isDate, status: oneOf('settled', 'unrecorded') },
+  operations: {
+    id: isText, seq: intIn(1), date: isDate, kind: OPERATION_KIND,
+    'projectId?': isText, 'taskId?': isText, 'payload?': OPERATION_PAYLOAD,
+  },
   chronicle: { id: isText, date: isDate, text: isStr, kind: oneOf('day', 'event', 'quiet', 'recover', 'landmark') },
   life: {
     id: isText, date: isDate, 'projectId?': isText, 'taskId?': isText, text: isStr,

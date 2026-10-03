@@ -1,7 +1,7 @@
 /**
  * 所有改动数据的操作。界面只调用这里，不直接改 store.data。
  */
-import type { CalendarEvent, ChronicleKind, ISODate, LifeEntry, LifeKind, Outcome, Project, SettlementEntry, SkipReason, Task } from './types';
+import type { CalendarEvent, ChronicleKind, ISODate, LifeEntry, LifeKind, OperationEvent, OperationKind, OperationLifeSnapshot, Outcome, Project, SettlementEntry, SkipReason, Task } from './types';
 import { CHORES } from './types';
 import type { Store } from './store';
 import { uid } from './lib/id';
@@ -11,6 +11,7 @@ import { daysToArchive, entryId, itemsForDay, type SettleItem } from './logic/da
 import { dayLine, stageChangeText, type StageChange } from './logic/chronicle';
 import { applyRules, matchRule } from './logic/classify';
 import { backlog } from './logic/metrics';
+import { nextOperationSeq } from './logic/operations';
 import { ringOfLandmark, totalLandmarkCapacity } from './island/map';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
@@ -33,6 +34,30 @@ function chronicle(store: Store, date: ISODate, text: string, kind: ChronicleKin
   store.put('chronicle', { id, date, text, kind });
 }
 
+function operation(
+  store: Store,
+  o: {
+    date?: ISODate;
+    kind: OperationKind;
+    projectId?: string;
+    taskId?: string;
+    payload?: OperationEvent['payload'];
+    life?: OperationLifeSnapshot[];
+  },
+) {
+  const payload = o.life?.length ? { ...(o.payload ?? {}), life: o.life } : o.payload;
+  const event: OperationEvent = {
+    id: uid('o'),
+    seq: nextOperationSeq(store.data),
+    date: o.date ?? store.today(),
+    kind: o.kind,
+    projectId: o.projectId,
+    taskId: o.taskId,
+    payload,
+  };
+  store.put('operations', event);
+}
+
 /* ---------------- 项目 ---------------- */
 
 export function createProject(store: Store, name: string): Project {
@@ -45,7 +70,13 @@ export function createProject(store: Store, name: string): Project {
   const today = store.today();
   const p: Project = { id: uid('p'), name: n, createdAt: today, status: 'active', islandSlot: slot, lastStage: 0 };
   store.put('projects', p);
-  life(store, { date: today, kind: 'start', projectId: p.id, text: `立项，村落${q(n)}在岛上落成` });
+  operation(store, {
+    date: today,
+    kind: 'project-created',
+    projectId: p.id,
+    payload: { name: n, islandSlot: slot },
+    life: [{ kind: 'start', projectId: p.id, text: `立项，村落${q(n)}在岛上落成` }],
+  });
   chronicle(store, today, `岛上立起了新村落${q(n)}。`, 'event');
   return p;
 }
@@ -54,7 +85,12 @@ export function renameProject(store: Store, id: string, name: string) {
   const p = store.project(id);
   const n = name.trim();
   if (!p || !n || n === p.name) return;
-  life(store, { date: store.today(), kind: 'event', projectId: id, text: `改名：${q(p.name)} → ${q(n)}` });
+  operation(store, {
+    kind: 'project-renamed',
+    projectId: id,
+    payload: { fromName: p.name, toName: n },
+    life: [{ kind: 'event', projectId: id, text: `改名：${q(p.name)} → ${q(n)}` }],
+  });
   store.put('projects', { ...p, name: n });
 }
 
@@ -69,7 +105,13 @@ export function restartProject(store: Store, id: string) {
   const today = store.today();
   resetPostpones(store, id);
   store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }], promptSnoozeUntil: undefined, lastStage: 0 });
-  life(store, { date: today, kind: 'restart', projectId: id, text: '重新启动，村落重新热闹起来' });
+  operation(store, {
+    date: today,
+    kind: 'project-restarted',
+    projectId: id,
+    payload: { source: 'manual' },
+    life: [{ kind: 'restart', projectId: id, text: '重新启动，村落重新热闹起来' }],
+  });
   chronicle(store, today, `${q(p.name)}重新启动了。`, 'recover');
 }
 
@@ -81,7 +123,13 @@ export function trimProject(store: Store, id: string, dropTaskIds: string[]) {
   for (const tid of dropTaskIds) dropTask(store, tid, '缩小规模时放下');
   resetPostpones(store, id);
   store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: TRIM_TO_NEGLECT, kind: 'trim' }], promptSnoozeUntil: undefined, lastStage: 1 });
-  life(store, { date: today, kind: 'trim', projectId: id, text: dropTaskIds.length ? `缩小规模，放下了 ${dropTaskIds.length} 件事` : '缩小规模，轻装继续' });
+  operation(store, {
+    date: today,
+    kind: 'project-trimmed',
+    projectId: id,
+    payload: { droppedTaskIds: [...dropTaskIds] },
+    life: [{ kind: 'trim', projectId: id, text: dropTaskIds.length ? `缩小规模，放下了 ${dropTaskIds.length} 件事` : '缩小规模，轻装继续' }],
+  });
   chronicle(store, today, `${q(p.name)}缩小了规模，轻装继续。`, 'recover');
 }
 
@@ -90,10 +138,17 @@ export function closeProject(store: Store, id: string, reason: string) {
   const p = store.project(id);
   if (!p || p.status !== 'active') return;
   const today = store.today();
+  const droppedTaskIds = store.data.tasks.filter((t) => t.projectId === id && t.status === 'open').map((t) => t.id);
   for (const t of store.data.tasks) if (t.projectId === id && t.status === 'open') store.put('tasks', { ...t, status: 'dropped', closedAt: today });
   const r = reason.trim();
   store.put('projects', { ...p, status: 'closed', closedAt: today, closeReason: r || undefined });
-  life(store, { date: today, kind: 'close', projectId: id, text: r ? `正式关闭：${r}` : '正式关闭' });
+  operation(store, {
+    date: today,
+    kind: 'project-closed',
+    projectId: id,
+    payload: { reason: r || undefined, droppedTaskIds },
+    life: [{ kind: 'close', projectId: id, text: r ? `正式关闭：${r}` : '正式关闭' }],
+  });
   chronicle(store, today, `${q(p.name)}正式关闭，放进了「未竟之书」。`, 'quiet');
 }
 
@@ -107,7 +162,13 @@ export function reopenProject(store: Store, id: string) {
   if (slot < 0) throw new ActionError('岛上暂时没有空地了');
   const today = store.today();
   store.put('projects', { ...p, status: 'active', islandSlot: slot, closedAt: undefined, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }], lastStage: 0 });
-  life(store, { date: today, kind: 'restart', projectId: id, text: '从「未竟之书」里重新立起' });
+  operation(store, {
+    date: today,
+    kind: 'project-restarted',
+    projectId: id,
+    payload: { source: 'reopen', islandSlot: slot },
+    life: [{ kind: 'restart', projectId: id, text: '从「未竟之书」里重新立起' }],
+  });
   chronicle(store, today, `${q(p.name)}被重新立起。`, 'recover');
 }
 
@@ -134,7 +195,14 @@ export function createTask(store: Store, o: { title: string; projectId?: string;
   // 停在码头的任务也可以先带着日期，安排时沿用
   if (!projectId && o.scheduledFor) t.scheduledFor = o.scheduledFor;
   store.put('tasks', t);
-  if (projectId) life(store, { date: today, kind: 'task', projectId, taskId: t.id, text: `新任务${q(title)}住进村落` });
+  operation(store, {
+    date: today,
+    kind: 'task-created',
+    projectId,
+    taskId: t.id,
+    payload: { title, scheduledFor: t.scheduledFor },
+    life: projectId ? [{ kind: 'task', projectId, taskId: t.id, text: `新任务${q(title)}住进村落` }] : undefined,
+  });
   return t;
 }
 
@@ -145,30 +213,57 @@ export function arrangeTask(store: Store, taskId: string, projectId: string, dat
   if (!t || !p || p.status !== 'active') return;
   const today = store.today();
   store.put('tasks', { ...t, projectId, scheduledFor: date });
-  life(store, { date: today, kind: 'task', projectId, taskId, text: `${q(t.title)}从码头上岸，住进村落${date ? `，排在${fmtDay(date)}` : ''}` });
+  operation(store, {
+    date: today,
+    kind: 'task-arranged',
+    projectId,
+    taskId,
+    payload: { fromProjectId: t.projectId, toProjectId: projectId, scheduledFor: date },
+    life: [{ kind: 'task', projectId, taskId, text: `${q(t.title)}从码头上岸，住进村落${date ? `，排在${fmtDay(date)}` : ''}` }],
+  });
 }
 
 /** 码头：婉拒 */
 export function declineTask(store: Store, taskId: string) {
   const t = store.task(taskId);
   if (!t) return;
-  store.put('tasks', { ...t, status: 'dropped', closedAt: store.today() });
+  const today = store.today();
+  store.put('tasks', { ...t, status: 'dropped', closedAt: today });
+  operation(store, { date: today, kind: 'task-dropped', projectId: t.projectId, taskId, payload: { source: 'decline' } });
 }
 
 export function rescheduleTask(store: Store, taskId: string, date: ISODate | undefined) {
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
+  const today = store.today();
   store.put('tasks', { ...t, scheduledFor: date });
-  if (t.projectId) life(store, { date: store.today(), kind: 'event', projectId: t.projectId, taskId, text: date ? `${q(t.title)}改到${fmtDay(date)}` : `${q(t.title)}暂不定日期` });
+  operation(store, {
+    date: today,
+    kind: 'task-rescheduled',
+    projectId: t.projectId,
+    taskId,
+    payload: { fromDate: t.scheduledFor, toDate: date },
+    life: t.projectId ? [{ kind: 'event', projectId: t.projectId, taskId, text: date ? `${q(t.title)}改到${fmtDay(date)}` : `${q(t.title)}暂不定日期` }] : undefined,
+  });
 }
 
 export function moveTask(store: Store, taskId: string, projectId: string | undefined) {
   const t = store.task(taskId);
   if (!t || t.projectId === projectId) return;
   const today = store.today();
-  if (t.projectId) life(store, { date: today, kind: 'event', projectId: t.projectId, taskId, text: `${q(t.title)}搬去了别的村落` });
+  const fromProjectId = t.projectId;
   store.put('tasks', { ...t, projectId, scheduledFor: projectId ? t.scheduledFor : undefined });
-  if (projectId) life(store, { date: today, kind: 'task', projectId, taskId, text: `${q(t.title)}搬进村落` });
+  operation(store, {
+    date: today,
+    kind: 'task-moved',
+    projectId,
+    taskId,
+    payload: { fromProjectId, toProjectId: projectId },
+    life: [
+      ...(fromProjectId ? [{ kind: 'event' as const, projectId: fromProjectId, taskId, text: `${q(t.title)}搬去了别的村落` }] : []),
+      ...(projectId ? [{ kind: 'task' as const, projectId, taskId, text: `${q(t.title)}搬进村落` }] : []),
+    ],
+  });
 }
 
 export function renameTask(store: Store, taskId: string, title: string) {
@@ -183,7 +278,14 @@ export function dropTask(store: Store, taskId: string, note = '不重要了，�
   if (!t || t.status !== 'open') return;
   const today = store.today();
   store.put('tasks', { ...t, status: 'dropped', closedAt: today });
-  if (t.projectId) life(store, { date: today, kind: 'drop', projectId: t.projectId, taskId, text: `${q(t.title)}${note}`, reason: 'not_important' });
+  operation(store, {
+    date: today,
+    kind: 'task-dropped',
+    projectId: t.projectId,
+    taskId,
+    payload: { source: 'manual', note },
+    life: t.projectId ? [{ kind: 'drop', projectId: t.projectId, taskId, text: `${q(t.title)}${note}`, reason: 'not_important' }] : undefined,
+  });
 }
 
 /** 在结算之外直接记下「今天做完了」（例如没有日期的任务） */
@@ -451,7 +553,16 @@ export function removeSource(store: Store, sourceId: string) {
 /** 结算时把一件别的任务拉进这一天（「今天还做了…」），不算改期 */
 export function pullIntoDay(store: Store, taskId: string, date: ISODate) {
   const t = store.task(taskId);
-  if (t && t.status === 'open' && t.projectId) store.put('tasks', { ...t, scheduledFor: date });
+  if (t && t.status === 'open' && t.projectId && t.scheduledFor !== date) {
+    store.put('tasks', { ...t, scheduledFor: date });
+    operation(store, {
+      date: store.today(),
+      kind: 'task-rescheduled',
+      projectId: t.projectId,
+      taskId,
+      payload: { fromDate: t.scheduledFor, toDate: date, source: 'pull-into-day' },
+    });
+  }
 }
 
 /* ---------------- 落成 ---------------- */
@@ -483,7 +594,14 @@ export function completeProject(store: Store, id: string, resting: 'landmark' | 
   for (const t of store.data.tasks) {
     if (t.projectId !== id || t.status !== 'open') continue;
     store.put('tasks', { ...t, status: 'dropped', closedAt: today });
-    life(store, { date: today, kind: 'drop', projectId: id, taskId: t.id, text: `${q(t.title)}随项目完成一起放下` });
+    operation(store, {
+      date: today,
+      kind: 'task-dropped',
+      projectId: id,
+      taskId: t.id,
+      payload: { source: 'project-completed' },
+      life: [{ kind: 'drop', projectId: id, taskId: t.id, text: `${q(t.title)}随项目完成一起放下` }],
+    });
   }
   let where = resting;
   let idx: number | undefined;
@@ -493,7 +611,13 @@ export function completeProject(store: Store, id: string, resting: 'landmark' | 
     else idx = k;
   }
   store.put('projects', { ...p, status: 'done', doneAt: today, resting: where, landmarkIndex: idx, promptSnoozeUntil: undefined });
-  life(store, { date: today, kind: 'complete', projectId: id, text: where === 'landmark' ? '落成，立为海岸上的地标' : '完成，收进山顶灯塔里的档案馆' });
+  operation(store, {
+    date: today,
+    kind: 'project-completed',
+    projectId: id,
+    payload: { resting: where, landmarkIndex: idx },
+    life: [{ kind: 'complete', projectId: id, text: where === 'landmark' ? '落成，立为海岸上的地标' : '完成，收进山顶灯塔里的档案馆' }],
+  });
   chronicle(store, today, where === 'landmark' ? `${q(p.name)}落成了，村落合成一座地标，立在海岸上。` : `${q(p.name)}完成了，收进了山顶的灯塔。`, 'landmark');
   return where;
 }
@@ -507,11 +631,23 @@ export function setResting(store: Store, id: string, resting: 'landmark' | 'arch
     const k = freeLandmarkIndex(store, id);
     if (k < 0) throw new ActionError('海岸上已经没有空地了');
     store.put('projects', { ...p, resting, landmarkIndex: k });
-    life(store, { date: today, kind: 'event', projectId: id, text: '从档案馆里取出，重新立为地标' });
+    operation(store, {
+      date: today,
+      kind: 'project-resting-changed',
+      projectId: id,
+      payload: { from: p.resting, to: resting, landmarkIndex: k },
+      life: [{ kind: 'event', projectId: id, text: '从档案馆里取出，重新立为地标' }],
+    });
     chronicle(store, today, `${q(p.name)}重新立在了海岸上。`, 'landmark');
   } else {
     store.put('projects', { ...p, resting, landmarkIndex: undefined });
-    life(store, { date: today, kind: 'event', projectId: id, text: '地标收进了山顶的档案馆' });
+    operation(store, {
+      date: today,
+      kind: 'project-resting-changed',
+      projectId: id,
+      payload: { from: p.resting, to: resting },
+      life: [{ kind: 'event', projectId: id, text: '地标收进了山顶的档案馆' }],
+    });
     chronicle(store, today, `${q(p.name)}的地标收进了山顶的灯塔。`, 'quiet');
   }
 }

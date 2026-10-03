@@ -108,6 +108,47 @@ export interface ChronicleLine {
   kind: ChronicleKind;
 }
 
+export type OperationKind =
+  | 'project-created'
+  | 'project-renamed'
+  | 'project-restarted'
+  | 'project-trimmed'
+  | 'project-closed'
+  | 'project-completed'
+  | 'project-resting-changed'
+  | 'task-created'
+  | 'task-arranged'
+  | 'task-rescheduled'
+  | 'task-moved'
+  | 'task-dropped'
+  | 'legacy-life';
+
+export interface OperationLifeSnapshot {
+  projectId?: string;
+  taskId?: string;
+  text: string;
+  kind: LifeKind;
+  reason?: SkipReason;
+}
+
+export interface OperationPayload extends Record<string, unknown> {
+  /** 一生之书 read model 所需的当时叙述快照；不再另写一份 life 业务事实。 */
+  life?: OperationLifeSnapshot[];
+  /** v1 迁移来源；用于让兼容 life 行与 operation read model 去重。 */
+  legacyLifeId?: string;
+}
+
+/** 用户主动操作事实；seq 在本地数据内单调递增，用来确定同一天内先后顺序。 */
+export interface OperationEvent {
+  id: string;
+  seq: number;
+  date: ISODate;
+  kind: OperationKind;
+  projectId?: string;
+  taskId?: string;
+  payload?: OperationPayload;
+}
+
 export type LifeKind = 'start' | 'task' | 'done' | 'partial' | 'skip' | 'stage' | 'close' | 'restart' | 'trim' | 'drop' | 'event' | 'complete';
 
 /** 一生之书里的一行 */
@@ -157,6 +198,7 @@ export interface Data {
   rules: ClassifyRule[];
   entries: SettlementEntry[];
   days: DayRecord[];
+  operations: OperationEvent[];
   chronicle: ChronicleLine[];
   life: LifeEntry[];
   interruptions: Interruption[];
