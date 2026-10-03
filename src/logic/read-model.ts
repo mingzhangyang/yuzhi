@@ -78,6 +78,10 @@ function applyOperation(state: MutableTaskState, taskId: string, event: Operatio
       return;
     case 'task-dropped':
       if (event.taskId !== taskId) return;
+      // Project completion emits per-task drop facts for tasks that were open
+      // at that moment. If an earlier settlement is later rejudged to done,
+      // this stale compatibility fact must not override the corrected state.
+      if (event.payload?.source === 'project-completed' && state.status !== 'open') return;
       state.status = 'dropped';
       state.closedAt = event.date;
       return;
