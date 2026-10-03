@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt } from '../src/actions';
+import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages } from '../src/actions';
 import { recoverOne, stageOfNeglect } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
 
@@ -43,6 +43,32 @@ describe('衰败与恢复', () => {
     // 第三天结算后，今天（新的一天）还没过完
     h.advance(-1);
     expect(h.store.villages().get(p.id)!.stage).toBe(0);
+  });
+
+  it('重新结算只留下这一天的净阶段变化', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '团队');
+    h.setToday('2026-09-09');
+    refreshStages(h.store);
+    expect(h.store.project(p.id)!.lastStage).toBe(1);
+    const t = createTask(h.store, { title: '写周报', projectId: p.id, scheduledFor: h.today });
+    const stageLines = () => h.store.data.life.filter((l) => l.kind === 'stage' && l.id.startsWith('stage|')).map((l) => l.text);
+    const settle = (d: Parameters<typeof settleDay>[2] extends Map<string, infer V> ? V : never) => settleDay(h.store, h.today, new Map([[itemKey('task', t.id), d]]));
+
+    settle({ outcome: 'done' });
+    expect(h.store.villages().get(p.id)!.stage).toBe(0);
+    expect(stageLines()).toHaveLength(1);
+
+    // 改成没精力：这一天不再有阶段变化，上一条撤掉
+    settle({ outcome: 'skipped', reason: 'no_energy' });
+    expect(h.store.villages().get(p.id)!.stage).toBe(1);
+    expect(stageLines()).toEqual([]);
+    expect(h.store.project(p.id)!.lastStage).toBe(1);
+
+    // 再改回做了：仍然只有一条
+    settle({ outcome: 'done' });
+    expect(stageLines()).toHaveLength(1);
+    expect(h.store.data.chronicle.find((c) => c.id === `day|${h.today}`)!.kind).toBe('recover');
   });
 
   it('没精力不伤害村落，未结算的日子不产生后果', () => {

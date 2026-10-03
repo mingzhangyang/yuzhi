@@ -63,9 +63,14 @@ export class Store {
     return this.writes;
   }
 
-  private queue(fn: () => Promise<void>): Promise<unknown> {
-    this.writes = this.writes.then(fn).catch((e) => this.onError(e));
-    return this.writes;
+  /**
+   * 串行写入。队列本身吞掉错误（交给 onError），后续写入照常进行；
+   * 返回的是这一次写入本身，失败时会 reject，等待它的调用方能知道。
+   */
+  private queue(fn: () => Promise<void>): Promise<void> {
+    const op = this.writes.then(fn);
+    this.writes = op.catch((e) => this.onError(e));
+    return op;
   }
 
   /** 标记数据已变化，并在本轮任务结束后通知界面 */

@@ -1,6 +1,8 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { Data, Settings } from './types';
+import { CHORES } from './types';
 import { localDate } from './lib/date';
+import { MAX_VILLAGES, STAGE_NAMES } from './logic/config';
 
 /** 数据集合名 → 主键字段 */
 export const COLLECTIONS = {
@@ -132,6 +134,97 @@ export function parseSettings(v: unknown): Settings {
   return s;
 }
 
+/* ---------------- 备份记录校验 ---------------- */
+
+/** 一个字段的检查：返回 true 表示合格 */
+type Check = (v: unknown) => boolean;
+const isStr: Check = (v) => typeof v === 'string';
+const isText: Check = (v) => typeof v === 'string' && v.trim() !== '';
+const isDate: Check = (v) => typeof v === 'string' && YMD.test(v);
+const isStamp: Check = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+const isBool: Check = (v) => typeof v === 'boolean';
+const intIn = (min: number, max = Infinity): Check => (v) => Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
+const oneOf = (...xs: string[]): Check => (v) => typeof v === 'string' && xs.includes(v);
+const arrayOf = (shape: Shape): Check => (v) => Array.isArray(v) && v.every((x) => badField(x, shape) === null);
+
+/** 字段名 → 检查；名字以 ? 结尾的字段可以没有 */
+type Shape = Record<string, Check>;
+
+const OUTCOME = oneOf('done', 'partial', 'skipped');
+const REASON = oneOf('interrupted', 'no_energy', 'not_important', 'postponed');
+const ITEM_TYPE = oneOf('task', 'event');
+
+const SHAPES: Record<Coll, Shape> = {
+  projects: {
+    id: isText, name: isText, createdAt: isDate, 'lastProgressAt?': isDate, status: oneOf('active', 'closed', 'done'),
+    islandSlot: intIn(0, MAX_VILLAGES - 1), 'closedAt?': isDate, 'closeReason?': isStr,
+    'resets?': arrayOf({ date: isDate, neglect: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0, kind: oneOf('restart', 'trim') }),
+    'promptSnoozeUntil?': isDate, 'lastStage?': intIn(0, STAGE_NAMES.length - 1), 'doneAt?': isDate,
+    'resting?': oneOf('landmark', 'archive'), 'landmarkIndex?': intIn(0),
+  },
+  tasks: {
+    id: isText, 'projectId?': isText, title: isText, 'scheduledFor?': isDate, postponeCount: intIn(0),
+    status: oneOf('open', 'done', 'dropped'), createdAt: isDate, 'closedAt?': isDate,
+  },
+  sources: { id: isText, name: isStr, 'icsUrl?': isStr, 'lastFetchedAt?': isStamp, 'lastError?': isStr },
+  events: {
+    id: isText, sourceId: isText, uid: isText, title: isStr, start: isStamp, end: isStamp, allDay: isBool,
+    'projectId?': isText, classified: isBool,
+  },
+  rules: { id: isText, contains: isText, projectId: isText },
+  entries: {
+    id: isText, date: isDate, itemType: ITEM_TYPE, itemId: isText, outcome: OUTCOME, 'reason?': REASON,
+    'projectId?': isText, title: isStr,
+  },
+  days: { date: isDate, status: oneOf('settled', 'unrecorded') },
+  chronicle: { id: isText, date: isDate, text: isStr, kind: oneOf('day', 'event', 'quiet', 'recover', 'landmark') },
+  life: {
+    id: isText, date: isDate, 'projectId?': isText, 'taskId?': isText, text: isStr,
+    kind: oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete'),
+    'reason?': REASON, 'fromStage?': intIn(0, STAGE_NAMES.length - 1),
+  },
+  interruptions: { id: isText, date: isDate, itemType: ITEM_TYPE, itemId: isText, title: isStr, 'projectId?': isText },
+  snapshots: { date: isDate, backlog: intIn(0) },
+};
+
+/** 不合格时返回出问题的字段名；合格返回 null */
+function badField(x: unknown, shape: Shape): string | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return '(整条记录)';
+  const o = x as Record<string, unknown>;
+  for (const [k, check] of Object.entries(shape)) {
+    const optional = k.endsWith('?');
+    const name = optional ? k.slice(0, -1) : k;
+    if (optional && o[name] === undefined) continue;
+    if (!check(o[name])) return name;
+  }
+  return null;
+}
+
+/** 记录之间的引用：任务、事件归属、规则指向的项目要存在；活跃村落的位置不能重叠 */
+function checkRelations(d: Data) {
+  const projects = new Set(d.projects.map((p) => p.id));
+  const fail = (what: string) => {
+    throw new Error(`备份里的数据对不上：${what}`);
+  };
+  for (const c of COLL_NAMES) {
+    const key = COLLECTIONS[c];
+    const seen = new Set<string>();
+    for (const x of d[c] as unknown as Record<string, string>[]) {
+      if (seen.has(x[key])) fail(`${c} 里有重复的记录`);
+      seen.add(x[key]);
+    }
+  }
+  for (const t of d.tasks) if (t.projectId !== undefined && !projects.has(t.projectId)) fail(`任务「${t.title}」所属的项目不存在`);
+  for (const e of d.events) if (e.projectId !== undefined && e.projectId !== CHORES && !projects.has(e.projectId)) fail(`事件「${e.title}」所属的项目不存在`);
+  for (const r of d.rules) if (r.projectId !== CHORES && !projects.has(r.projectId)) fail(`归类规则「${r.contains}」指向的项目不存在`);
+  const slots = new Set<number>();
+  for (const p of d.projects) {
+    if (p.status !== 'active') continue;
+    if (slots.has(p.islandSlot)) fail('两座村落占了同一个位置');
+    slots.add(p.islandSlot);
+  }
+}
+
 export function exportBackup(d: Data): string {
   const out: Record<string, unknown> = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), settings: d.settings };
   for (const c of COLL_NAMES) out[c] = (d as unknown as Record<Coll, unknown[]>)[c];
@@ -153,10 +246,13 @@ export function parseBackup(text: string): Data {
     const v = o[c];
     if (v == null) continue;
     if (!Array.isArray(v)) throw new Error(`备份里的 ${c} 格式不对`);
-    const key = COLLECTIONS[c];
-    if (v.some((x) => !x || typeof x !== 'object' || typeof (x as Record<string, unknown>)[key] !== 'string')) throw new Error(`备份里的 ${c} 有损坏的记录`);
+    v.forEach((x, i) => {
+      const bad = badField(x, SHAPES[c]);
+      if (bad) throw new Error(`备份里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
+    });
     (d as unknown as Record<Coll, unknown[]>)[c] = v;
   }
   if (o.settings != null) d.settings = parseSettings(o.settings);
+  checkRelations(d);
   return d;
 }

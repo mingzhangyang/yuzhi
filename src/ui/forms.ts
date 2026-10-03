@@ -11,6 +11,7 @@ import { addFileSource, addUrlSource, syncSource } from '../calendar';
 import { suggestKeyword, unclassifiedGroups } from '../logic/classify';
 import { addDays, dateOfStamp, relDay } from '../lib/date';
 import { roofOf } from './scene';
+import { MAX_VILLAGES } from '../logic/config';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -257,8 +258,15 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
   });
 }
 
-/** 示例数据：几座处在不同阶段的村落 */
+/** 示例数据：几座处在不同阶段的村落。要么全部放好，要么一点不动 */
 export function seedDemo(store: Store) {
+  // 四座活跃村落，加上一座随后落成为地标的，同时最多占 5 个位置
+  const free = MAX_VILLAGES - store.activeProjects().length;
+  if (free < 5) {
+    toast(`放示例需要 5 个空位，岛上现在只空着 ${Math.max(0, free)} 个。先关闭几个村落吧。`, true);
+    return;
+  }
+  const before = structuredClone(store.data);
   const today = store.today();
   const back = (pid: string, days: number) => {
     const p = store.project(pid)!;
@@ -324,6 +332,8 @@ export function seedDemo(store: Store) {
     A.refreshStages(store);
     toast('放好了四座示例村落');
   } catch (e) {
+    // 中途失败：回到放示例之前，不留半套数据
+    void store.replaceAll(before).catch((err) => store.onError(err));
     if (e instanceof A.ActionError) toast(e.message, true);
     else throw e;
   }

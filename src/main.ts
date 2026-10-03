@@ -198,6 +198,8 @@ async function boot() {
   $('fogGo').onclick = () => settle.open();
   $('newBtn').onclick = () => openNew(store, 'task');
   const afterImport = () => {
+    // 导入可能带来早于归档期限的事件日子，马上归档，不要等到明天
+    daily();
     if (unclassifiedGroups(store.data.events).length) setTimeout(() => openClassify(store), 400);
   };
   $('calBtn').onclick = () => openCalendar(store, afterImport);
@@ -259,7 +261,9 @@ async function boot() {
 
   // 后台刷新日历订阅
   autoRefresh(store).then((n) => {
-    if (n && !isModalOpen() && !settle.isOpen()) afterImport();
+    if (!n) return;
+    if (!isModalOpen() && !settle.isOpen()) afterImport();
+    else daily();
   });
 
   // 方便调试

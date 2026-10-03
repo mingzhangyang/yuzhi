@@ -24,7 +24,7 @@ export class ActionError extends Error {}
 
 const q = (s: string) => `「${s}」`;
 
-function life(store: Store, o: { date: ISODate; kind: LifeKind; text: string; projectId?: string; taskId?: string; reason?: SkipReason }, id = uid('l')) {
+function life(store: Store, o: { date: ISODate; kind: LifeKind; text: string; projectId?: string; taskId?: string; reason?: SkipReason; fromStage?: number }, id = uid('l')) {
   const e: LifeEntry = { id, ...o };
   store.put('life', e);
 }
@@ -204,6 +204,8 @@ export interface Decision {
 /** 结算记录派生出的一生之书条目、打断记录用固定 id，改判时能找到并撤销 */
 const lifeIdOf = (entryId: string) => `l|${entryId}`;
 const interruptionIdOf = (entryId: string) => `i|${entryId}`;
+/** 结算带来的阶段变化：每个村落每天一条，重新结算时替换或撤掉 */
+const stageLifeIdOf = (date: ISODate, projectId: string) => `stage|${date}|${projectId}`;
 
 /** 项目的「最近一次真实推进」由结算记录重新算出 */
 function recomputeLastProgress(store: Store, projectId: string | undefined) {
@@ -287,7 +289,12 @@ function stagesNow(store: Store): Map<string, Stage> {
  * 没有给出决定的条目不写记录（相当于这一条没记）。
  */
 export function settleDay(store: Store, date: ISODate, decisions: Map<string, Decision>): string {
+  // 这一天结算之前的阶段。重新结算时，以第一次结算前的阶段为准，而不是上一次结算后的
   const before = stagesNow(store);
+  for (const [id] of before) {
+    const rec = store.data.life.find((l) => l.id === stageLifeIdOf(date, id));
+    if (rec?.fromStage != null) before.set(id, rec.fromStage as Stage);
+  }
   const items = itemsForDay(store.data, date);
   for (const it of items) {
     const d = decisions.get(it.key);
@@ -301,11 +308,15 @@ export function settleDay(store: Store, date: ISODate, decisions: Map<string, De
   for (const [id, to] of after) {
     const p = store.project(id)!;
     const from = before.get(id) ?? (p.lastStage as Stage | undefined) ?? 0;
-    if (from !== to) changes.push({ project: p, from, to });
-    if (p.lastStage !== to) {
-      if ((p.lastStage ?? 0) !== to) life(store, { date, kind: 'stage', projectId: id, text: `村落进入「${STAGE_NAMES[to]}」阶段` });
-      store.put('projects', { ...store.project(id)!, lastStage: to });
+    const lid = stageLifeIdOf(date, id);
+    if (from !== to) {
+      changes.push({ project: p, from, to });
+      life(store, { date, kind: 'stage', projectId: id, fromStage: from, text: `村落进入「${STAGE_NAMES[to]}」阶段` }, lid);
+    } else if (store.data.life.some((l) => l.id === lid)) {
+      // 改判后这一天对这个村落不再有阶段变化
+      store.del('life', lid);
     }
+    if (p.lastStage !== to) store.put('projects', { ...p, lastStage: to });
   }
   const projects = new Map(store.data.projects.map((p) => [p.id, p] as const));
   const dayEntries = store.data.entries.filter((e) => e.date === date);
@@ -383,6 +394,14 @@ export function mergeEvents(store: Store, sourceId: string, incoming: CalendarEv
   const rules = store.data.rules;
   for (const e of incoming) {
     keep.add(e.id);
+    // 旧版本的 id 是「UID + 实际开始时间」：认出来就改成新 id，归类和结算记录跟着走
+    const legacy = `${e.sourceId}|${e.uid}|${e.start}`;
+    if (!old.has(e.id) && legacy !== e.id && old.has(legacy)) {
+      renameEvent(store, old.get(legacy)!, e.id);
+      old.set(e.id, store.data.events.find((x) => x.id === e.id)!);
+      old.delete(legacy);
+      if (settled.delete(legacy)) settled.add(e.id);
+    }
     const prev = old.get(e.id);
     const next: CalendarEvent = prev ? { ...e, projectId: prev.projectId, classified: prev.classified } : { ...e };
     if (!next.classified) {
@@ -399,6 +418,27 @@ export function mergeEvents(store: Store, sourceId: string, incoming: CalendarEv
     // 窗口之前的旧事件保留，避免历史消失
     if (e.start < windowStart) continue;
     store.del('events', id);
+  }
+}
+
+/** 给事件换 id，并把结算记录、一生之书、打断记录里的引用一并改过去 */
+function renameEvent(store: Store, ev: CalendarEvent, newId: string) {
+  store.put('events', { ...ev, id: newId });
+  store.del('events', ev.id);
+  for (const en of store.data.entries.filter((x) => x.itemType === 'event' && x.itemId === ev.id)) {
+    const nid = entryId(en.date, 'event', newId);
+    store.put('entries', { ...en, id: nid, itemId: newId });
+    store.del('entries', en.id);
+    const l = store.data.life.find((x) => x.id === lifeIdOf(en.id));
+    if (l) {
+      store.put('life', { ...l, id: lifeIdOf(nid) });
+      store.del('life', l.id);
+    }
+    const i = store.data.interruptions.find((x) => x.id === interruptionIdOf(en.id));
+    if (i) {
+      store.put('interruptions', { ...i, id: interruptionIdOf(nid), itemId: newId });
+      store.del('interruptions', i.id);
+    }
   }
 }
 

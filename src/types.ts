@@ -50,7 +50,7 @@ export interface CalendarSource {
 }
 
 export interface CalendarEvent {
-  /** 来源 id + 事件 UID + 开始时间，保证重复事件每次唯一 */
+  /** 来源 id + 事件 UID（重复事件再加原本的开始时间），改期后不变；见 ics.ts 的 eventId */
   id: string;
   sourceId: string;
   uid: string;
@@ -119,6 +119,8 @@ export interface LifeEntry {
   text: string;
   kind: LifeKind;
   reason?: SkipReason;
+  /** 结算带来的阶段变化：结算前的阶段，重新结算时据此判断净变化 */
+  fromStage?: number;
 }
 
 /** 码头上的「打断记录」 */

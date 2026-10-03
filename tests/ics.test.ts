@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseIcs } from '../src/ics';
+import { makeStore } from './helpers';
+import { classifyEvents, createProject, mergeEvents, settleDay } from '../src/actions';
+import { itemKey } from '../src/logic/days';
 import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
 
 const ICS = `BEGIN:VCALENDAR
@@ -70,6 +73,14 @@ describe('ics 解析', () => {
     expect(weekly[1].title).toBe('团队周会（改到下午）');
     expect(new Set(weekly.map((e) => e.id)).size).toBe(4);
     expect(weekly[0].id).toBe('src|weekly-1|2026-09-07T02:00:00.000Z');
+    // 改期的那一次仍然按原本的时间识别
+    expect(weekly[1].id).toBe('src|weekly-1|2026-09-21T02:00:00.000Z');
+    expect(r.events.find((e) => e.uid === 'single-1')!.id).toBe('src|single-1');
+  });
+  it('不同事件共用一个 UID 时不会互相覆盖', () => {
+    const dup = ICS.replace('UID:allday-1', 'UID:single-1');
+    const ids = parseIcs(dup, 'src', new Date('2026-09-01T00:00:00Z'), new Date('2026-11-01T00:00:00Z')).events.filter((e) => e.uid === 'single-1').map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
   });
   it('UTC、全天、缺少 VTIMEZONE 的时区、取消的事件', () => {
     expect(r.calendarName).toBe('工作');
@@ -77,6 +88,44 @@ describe('ics 解析', () => {
     expect(r.events.find((e) => e.uid === 'allday-1')!.allDay).toBe(true);
     expect(r.events.find((e) => e.uid === 'nyc-1')!.start).toBe('2026-09-11T13:00:00.000Z');
     expect(r.events.find((e) => e.uid === 'cancel-1')).toBeUndefined();
+  });
+});
+
+describe('日历合并', () => {
+  const from = new Date('2026-09-01T00:00:00Z');
+  const to = new Date('2026-11-01T00:00:00Z');
+  const moved = ICS.replace('DTSTART;TZID=Asia/Shanghai:20260921T150000', 'DTSTART;TZID=Asia/Shanghai:20260921T170000').replace('DTEND;TZID=Asia/Shanghai:20260921T160000', 'DTEND;TZID=Asia/Shanghai:20260921T180000');
+
+  it('导入后某一次再被改期：还是同一条事件，归类保留，不会多出一条', () => {
+    const h = makeStore('2026-09-21');
+    const p = createProject(h.store, '团队');
+    mergeEvents(h.store, 'src', parseIcs(ICS, 'src', from, to).events, from.toISOString());
+    classifyEvents(h.store, '团队周会（改到下午）', p.id);
+    mergeEvents(h.store, 'src', parseIcs(moved, 'src', from, to).events, from.toISOString());
+    const ev = h.store.data.events.filter((e) => e.uid === 'weekly-1' && e.start.startsWith('2026-09-21'));
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ start: '2026-09-21T09:00:00.000Z', projectId: p.id, classified: true });
+  });
+
+  it('旧版本按实际开始时间存的 id 会被迁移，结算记录跟着走', () => {
+    const h = makeStore('2026-09-10');
+    const p = createProject(h.store, '团队');
+    // 模拟旧版本存下的数据
+    const legacy = parseIcs(ICS, 'src', from, to).events.map((e) => ({ ...e, id: `src|${e.uid}|${e.start}` }));
+    for (const e of legacy) h.store.put('events', e);
+    classifyEvents(h.store, '牙医', p.id);
+    const oldId = 'src|single-1|2026-09-10T01:30:00.000Z';
+    settleDay(h.store, '2026-09-10', new Map([[itemKey('event', oldId), { outcome: 'skipped', reason: 'interrupted' }]]));
+
+    mergeEvents(h.store, 'src', parseIcs(ICS, 'src', from, to).events, from.toISOString());
+    expect(h.store.data.events.filter((e) => e.uid === 'single-1').map((e) => e.id)).toEqual(['src|single-1']);
+    expect(h.store.data.events.find((e) => e.uid === 'single-1')).toMatchObject({ projectId: p.id, classified: true });
+    const en = h.store.data.entries.filter((e) => e.itemType === 'event');
+    expect(en.map((e) => e.itemId)).toEqual(['src|single-1']);
+    expect(h.store.data.interruptions.map((i) => i.itemId)).toEqual(['src|single-1']);
+    expect(h.store.data.life.some((l) => l.id === `l|${en[0].id}`)).toBe(true);
+    // 重复事件里没改期的那几次，id 本来就一样
+    expect(h.store.data.events.filter((e) => e.uid === 'weekly-1')).toHaveLength(4);
   });
 });
 

@@ -42,8 +42,16 @@ export interface ParseResult {
 }
 
 /**
+ * 事件的稳定 id：来源 id + UID，重复事件再加上这一次「原本」的开始时间（RECURRENCE-ID）。
+ * 某一次被改期后，实际开始时间变了，id 不变，归类和结算记录都还对得上。
+ */
+export function eventId(sourceId: string, uid: string, occurrence?: string): string {
+  return occurrence ? `${sourceId}|${uid}|${occurrence}` : `${sourceId}|${uid}`;
+}
+
+/**
  * 解析 .ics 文本，把窗口 [from, to) 内的事件（含重复事件的每一次）展开。
- * 每次发生的 id = 来源 id + UID + 开始时间。
+ * id 见 eventId。
  */
 export function parseIcs(text: string, sourceId: string, from: Date, to: Date): ParseResult {
   const root = new ICAL.Component(ICAL.parse(text));
@@ -74,9 +82,10 @@ export function parseIcs(text: string, sourceId: string, from: Date, to: Date): 
   }
 
   const out: CalendarEvent[] = [];
+  const seen = new Set<string>();
   const fromMs = from.getTime();
   const toMs = to.getTime();
-  const push = (ev: InstanceType<typeof ICAL.Event>, start: Time, end: Time | null) => {
+  const push = (ev: InstanceType<typeof ICAL.Event>, start: Time, end: Time | null, occurrence: string | undefined) => {
     const comp = ev.component;
     if (String(comp.getFirstPropertyValue('status') ?? '').toUpperCase() === 'CANCELLED') return;
     const allDay = start.isDate;
@@ -88,17 +97,24 @@ export function parseIcs(text: string, sourceId: string, from: Date, to: Date): 
     if (em < fromMs && sm < fromMs) return;
     if (sm >= toMs) return;
     const title = (ev.summary || '（无标题）').trim();
-    out.push({ id: `${sourceId}|${ev.uid}|${s}`, sourceId, uid: ev.uid, title, start: s, end: e, allDay, classified: false });
+    // 不守规矩的日历会给不同事件用同一个 UID：撞了就退回用实际开始时间区分
+    let id = eventId(sourceId, ev.uid, occurrence);
+    if (seen.has(id)) id = `${id}|${s}`;
+    seen.add(id);
+    out.push({ id, sourceId, uid: ev.uid, title, start: s, end: e, allDay, classified: false });
   };
 
-  for (const ev of singles) push(ev, ev.startDate, ev.endDate);
+  // 找不到主事件的例外仍然按它的 RECURRENCE-ID 识别
+  for (const ev of singles) push(ev, ev.startDate, ev.endDate, ev.recurrenceId ? toIso(ev.recurrenceId, tzidOf(ev.component, 'recurrence-id') ?? tzidOf(ev.component, 'dtstart')) : undefined);
   for (const ev of masters.values()) {
     const it = ev.iterator();
+    const masterTz = tzidOf(ev.component, 'dtstart');
     let n = 0;
     for (let next = it.next(); next && n < 5000; next = it.next(), n++) {
       if (next.toJSDate().getTime() >= toMs + 86400000) break;
       const det = ev.getOccurrenceDetails(next);
-      push(det.item, det.startDate, det.endDate);
+      const recTz = det.item === ev ? masterTz : (tzidOf(det.item.component, 'recurrence-id') ?? masterTz);
+      push(det.item, det.startDate, det.endDate, toIso(det.recurrenceId, recTz));
     }
   }
   out.sort((a, b) => a.start.localeCompare(b.start));
