@@ -14,11 +14,27 @@ npm test           # 规则层单元测试（vitest）
 npm run build      # 类型检查 + 打包到 dist/
 ```
 
-## 部署（Cloudflare Pages）
+## 部署到 Cloudflare
 
-- 构建命令 `npm run build`，输出目录 `dist`（见 `wrangler.toml`）。
-- `functions/api/ics.ts` 是 Pages Function：替浏览器读取 .ics 订阅链接（跨域），只转发、不保存；拒绝内网地址，限制 5MB，只放行日历内容。
-- 本地预览带 Function：`npx wrangler pages dev dist`。
+两种方式都可以，代码共用同一份 `.ics` 代理（`shared/icsProxy.ts`：只转发、不保存；拒绝内网地址、限制 5MB、只放行日历内容）。第一次部署前先 `npx wrangler login`。
+
+### 方式一：Worker + 静态资源（推荐）
+
+```bash
+npm run deploy           # 构建后 wrangler deploy，发布到 https://yuzhi.<你的子域>.workers.dev
+npm run preview:worker   # 本地预览（wrangler dev）
+```
+
+配置在 `wrangler.toml`：`dist/` 作为静态资源，`/api/ics` 由 `worker/index.ts` 处理。
+
+### 方式二：Pages
+
+```bash
+npm run deploy:pages     # 构建后 wrangler pages deploy dist（第一次会创建 yuzhi 项目）
+npm run preview:pages    # 本地预览（wrangler pages dev）
+```
+
+`/api/ics` 由 `functions/api/ics.ts`（Pages Function）提供。也可以在 Cloudflare 后台把 GitHub 仓库连到 Pages：构建命令 `npm run build`，输出目录 `dist`。
 
 ## 目录
 
@@ -39,7 +55,8 @@ src/
   calendar.ts         订阅链接 / 上传文件 / 自动刷新
   island/             小岛：地形生成（map.ts）与 Canvas 绘制、交互（render.ts）
   ui/                 指标卡、追踪栏、晚间结算、对话框
-shared/icsProxy.ts    .ics 代理核心，Pages Function 与 Vite 开发服务器共用
+shared/icsProxy.ts    .ics 代理核心，Worker、Pages Function 与 Vite 开发服务器共用
+worker/index.ts       Cloudflare Worker 入口（静态资源 + /api/ics）
 functions/api/ics.ts  Cloudflare Pages Function
 tests/                单元测试
 ```

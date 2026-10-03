@@ -1,4 +1,13 @@
-# Cloudflare Pages 配置：静态资源来自 dist，/api/ics 由 functions/api/ics.ts 提供
+# 默认部署方式：Cloudflare Worker + 静态资源（npm run deploy）
+#   - dist/ 里的页面作为静态资源
+#   - /api/ics 由 worker/index.ts 处理（只转发 .ics，不保存任何数据）
+# 也可以部署成 Cloudflare Pages（npm run deploy:pages），那时 /api/ics 由 functions/api/ics.ts 提供，
+# 本文件会被 Pages 忽略。
 name = "yuzhi"
-pages_build_output_dir = "dist"
+main = "worker/index.ts"
 compatibility_date = "2026-09-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
