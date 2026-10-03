@@ -76,7 +76,11 @@ export function emptyData(): Data {
   };
 }
 
-type RawData = Record<string, unknown> & { settings: unknown };
+type RawData = Record<string, unknown> & {
+  settings: unknown;
+  /** v1 backup arrays preserve export order; IndexedDB getAll only preserves primary-key order. */
+  __legacyLifeOrder?: 'array' | 'id';
+};
 
 /** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
 const ACTIVE_LIFE_KINDS = new Set(['start', 'task', 'close', 'restart', 'trim', 'drop', 'event', 'complete']);
@@ -113,12 +117,21 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
         if (typeof row.id === 'string') entryById.set(row.id, row);
       }
 
+      const idbFallback = data.__legacyLifeOrder === 'id';
       const orderedLife = life
         .map((value, index) => ({ value, index }))
         .sort((a, b) => {
-          const ad = a.value && typeof a.value === 'object' && !Array.isArray(a.value) ? (a.value as Record<string, unknown>).date : '';
-          const bd = b.value && typeof b.value === 'object' && !Array.isArray(b.value) ? (b.value as Record<string, unknown>).date : '';
-          return String(ad ?? '').localeCompare(String(bd ?? '')) || a.index - b.index;
+          const ar = a.value && typeof a.value === 'object' && !Array.isArray(a.value) ? a.value as Record<string, unknown> : {};
+          const br = b.value && typeof b.value === 'object' && !Array.isArray(b.value) ? b.value as Record<string, unknown> : {};
+          const byDate = String(ar.date ?? '').localeCompare(String(br.date ?? ''));
+          if (byDate) return byDate;
+          // Backups retain their serialized array order. IndexedDB v1 upgrades
+          // cannot recover legacy write order because getAll() returns key
+          // order, so use an explicit stable id fallback rather than pretending
+          // the incoming index is occurrence order.
+          return idbFallback
+            ? String(ar.id ?? '').localeCompare(String(br.id ?? '')) || a.index - b.index
+            : a.index - b.index;
         });
 
       for (const { value } of orderedLife) {
@@ -158,6 +171,7 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
 
       data.entries = entries;
       data.operations = operations;
+      delete data.__legacyLifeOrder;
     },
   },
 ];
@@ -225,6 +239,7 @@ export class IdbPersistence implements Persistence {
       throw error;
     }
     raw.settings = storedSettings ?? defaultSettings();
+    raw.__legacyLifeOrder = 'id';
 
     const storedVersion = parseStoredDataVersion(storedVersionValue);
     const fromVersion = storedVersion ?? LEGACY_DATA_VERSION;
@@ -419,13 +434,17 @@ const OPERATION_KIND = oneOf(
   'task-moved', 'task-dropped', 'legacy-life',
 );
 const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete');
+const OPERATION_LIFE = arrayOf({
+  'projectId?': isText, 'taskId?': isText, text: isStr, kind: LIFE_KIND, 'reason?': REASON,
+});
 const OPERATION_PAYLOAD: Check = (v) => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
   const o = v as Record<string, unknown>;
-  if (o.legacyLifeId !== undefined && typeof o.legacyLifeId !== 'string') return false;
-  if (o.life !== undefined && !arrayOf({
-    'projectId?': isText, 'taskId?': isText, text: isStr, kind: LIFE_KIND, 'reason?': REASON,
-  })(o.life)) return false;
+  if (o.legacyLifeId !== undefined && (typeof o.legacyLifeId !== 'string' || !o.legacyLifeId.trim())) return false;
+  if (o.life !== undefined && !OPERATION_LIFE(o.life)) return false;
+  // A migrated legacy row suppresses the original life record. Never accept
+  // that suppression marker unless the replacement snapshot is present.
+  if (o.legacyLifeId !== undefined && (!Array.isArray(o.life) || o.life.length === 0)) return false;
   return true;
 };
 
@@ -496,6 +515,11 @@ function checkRelations(d: Data, source: string) {
   for (const t of d.tasks) if (t.projectId !== undefined && !projects.has(t.projectId)) fail(`任务「${t.title}」所属的项目不存在`);
   for (const e of d.events) if (e.projectId !== undefined && e.projectId !== CHORES && !projects.has(e.projectId)) fail(`事件「${e.title}」所属的项目不存在`);
   for (const r of d.rules) if (r.projectId !== CHORES && !projects.has(r.projectId)) fail(`归类规则「${r.contains}」指向的项目不存在`);
+  const factSeqs = new Set<number>();
+  for (const fact of [...d.entries, ...d.operations]) {
+    if (factSeqs.has(fact.seq)) fail(`事实序号 ${fact.seq} 重复`);
+    factSeqs.add(fact.seq);
+  }
   const slots = new Set<number>();
   for (const p of d.projects) {
     if (p.status !== 'active') continue;
@@ -529,6 +553,7 @@ function rawBackupData(o: Record<string, unknown>): RawData {
     raw[key] = value;
   }
   ensureCurrentCollections(raw);
+  raw.__legacyLifeOrder = 'array';
   for (const c of COLL_NAMES) if (!Array.isArray(raw[c])) throw new Error(`备份里的 ${c} 格式不对`);
   return raw;
 }

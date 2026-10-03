@@ -157,6 +157,76 @@ describe('数据迁移基础设施', () => {
     expect(loaded.operations.find((fact) => fact.id === operation.id)?.seq).toBeGreaterThan(originalSeq);
   });
 
+  it('legacyLifeId 没有非空 life 快照时拒绝 v2 备份，避免吞掉兼容历史', () => {
+    const parsed = parseBackup(JSON.stringify(v1BackupFixture));
+    const bad = JSON.parse(exportBackup(parsed)) as {
+      operations: Array<Record<string, unknown>>;
+    };
+    bad.operations.push({
+      id: 'o-bad-legacy',
+      seq: 99,
+      date: '2026-10-01',
+      kind: 'legacy-life',
+      payload: { legacyLifeId: 'l-start' },
+    });
+    expect(() => parseBackup(JSON.stringify(bad))).toThrow('operations');
+  });
+
+  it('v2 备份里 entries 与 operations 的 seq 重复时拒绝', () => {
+    const parsed = parseBackup(JSON.stringify(v1BackupFixture));
+    const bad = JSON.parse(exportBackup(parsed)) as {
+      entries: Array<{ seq: number }>;
+      operations: Array<Record<string, unknown>>;
+    };
+    bad.operations.push({
+      id: 'o-duplicate-seq',
+      seq: bad.entries[0].seq,
+      date: '2026-10-01',
+      kind: 'legacy-life',
+    });
+    expect(() => parseBackup(JSON.stringify(bad))).toThrow('事实序号');
+  });
+
+  it('v1 IndexedDB 原地升级对同日 life 使用稳定 id fallback，不依赖写入顺序', async () => {
+    const rows = [...v1OperationHistoryFixture.life];
+    const seed = async (name: string, lifeRows: typeof rows) => {
+      await new IdbPersistence(name).load();
+      const raw = await openDB(name, IDB_SCHEMA_VERSION);
+      await raw.delete('meta', 'dataVersion');
+      await raw.put('meta', { ...v1OperationHistoryFixture.settings }, 'settings');
+      for (const project of v1OperationHistoryFixture.projects) await raw.put('projects', structuredClone(project));
+      for (const task of v1OperationHistoryFixture.tasks) await raw.put('tasks', structuredClone(task));
+      for (const entry of v1OperationHistoryFixture.entries) await raw.put('entries', structuredClone(entry));
+      for (const day of v1OperationHistoryFixture.days) await raw.put('days', structuredClone(day));
+      for (const line of v1OperationHistoryFixture.chronicle) await raw.put('chronicle', structuredClone(line));
+      for (const row of lifeRows) await raw.put('life', structuredClone(row));
+      for (const interruption of v1OperationHistoryFixture.interruptions) await raw.put('interruptions', structuredClone(interruption));
+      for (const snapshot of v1OperationHistoryFixture.snapshots) await raw.put('snapshots', structuredClone(snapshot));
+      raw.close();
+      return new IdbPersistence(name).load();
+    };
+
+    const forward = await seed(dbName('legacy-life-forward'), rows);
+    const reverse = await seed(dbName('legacy-life-reverse'), [...rows].reverse());
+    const order = (data: typeof forward) =>
+      data.operations
+        .slice()
+        .sort((a, b) => a.seq - b.seq)
+        .map((event) => [event.seq, event.kind, event.payload?.legacyLifeId]);
+
+    expect(order(forward)).toEqual(order(reverse));
+    expect(order(forward).map((row) => row[2])).toEqual([
+      'l-close',
+      'l-complete',
+      'l-drop',
+      'l-event',
+      'l-restart',
+      'l-start',
+      'l-task',
+      'l-trim',
+    ]);
+  });
+
   it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {
     const parsed = parseBackup(JSON.stringify(v1BackupFixture));
     expect(parsed.projects[0]).toMatchObject({ id: 'p1', lastStage: 0 });
