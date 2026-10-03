@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closeProject, createProject, createTask, moveTask, rescheduleTask, restartProject, settleDay } from '../src/actions';
+import { closeProject, completeProject, createProject, createTask, moveTask, rescheduleTask, restartProject, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
 import { taskStates } from '../src/logic/read-model';
 import { makeStore } from './helpers';
@@ -96,6 +96,26 @@ describe('Phase 2 fact replay', () => {
 
     settleDay(h.store, '2026-10-01', new Map([[key, { outcome: 'partial' }]]));
     expect(h.store.task(t.id)).toMatchObject({ status: 'dropped', closedAt: '2026-10-02' });
+  });
+
+  it('改判为已完成后忽略项目完成时遗留的 task-dropped 事实', () => {
+    const h = makeStore('2026-10-01');
+    const p = createProject(h.store, '完成项目');
+    const t = createTask(h.store, { title: '最后一件事', projectId: p.id, scheduledFor: h.today });
+    const key = itemKey('task', t.id);
+
+    settleDay(h.store, h.today, new Map([[key, { outcome: 'partial' }]]));
+    expect(h.store.task(t.id)!.status).toBe('open');
+
+    h.setToday('2026-10-02');
+    completeProject(h.store, p.id, 'archive');
+    expect(h.store.task(t.id)!.status).toBe('dropped');
+    expect(h.store.data.operations.some(
+      (event) => event.kind === 'task-dropped' && event.taskId === t.id && event.payload?.source === 'project-completed',
+    )).toBe(true);
+
+    settleDay(h.store, '2026-10-01', new Map([[key, { outcome: 'done' }]]));
+    expect(h.store.task(t.id)).toMatchObject({ status: 'done', closedAt: '2026-10-01' });
   });
 
   it('同日先推迟后重启时，重启按 seq 清零；之后改判也不改变顺序', () => {
