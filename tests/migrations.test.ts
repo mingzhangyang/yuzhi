@@ -40,6 +40,13 @@ describe('数据迁移基础设施', () => {
 
   it('共享校验器保留备份语境，不把本地数据错误误报成备份问题', async () => {
     expect(() => parseBackup(JSON.stringify({ format: 'yuzhi-backup', version: 1, settings: { workStart: 1 } }))).toThrow('备份里的工作开始时间');
+    expect(() =>
+      parseBackup(JSON.stringify({
+        format: 'yuzhi-backup',
+        version: 1,
+        projects: [{ id: 'p1' }],
+      })),
+    ).toThrow('备份里的 projects 第 1 条记录损坏');
 
     const name = dbName('bad-local');
     const per = new IdbPersistence(name);
@@ -49,6 +56,15 @@ describe('数据迁移基础设施', () => {
     raw.close();
 
     await expect(new IdbPersistence(name).load()).rejects.toThrow('本地数据里的工作开始时间');
+
+    const badRecordName = dbName('bad-local-record');
+    const seeded = new IdbPersistence(badRecordName);
+    await seeded.load();
+    const badRaw = await openDB(badRecordName, IDB_SCHEMA_VERSION);
+    await badRaw.put('projects', { id: 'p1' });
+    badRaw.close();
+
+    await expect(new IdbPersistence(badRecordName).load()).rejects.toThrow('本地数据里的 projects 第 1 条记录损坏');
   });
 
   it('旧 v1 备份先走迁移入口，再按当前结构校验并可 round-trip', () => {

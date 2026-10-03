@@ -321,10 +321,10 @@ function validateCurrentData(raw: RawData, source: string): Data {
   const d = emptyData();
   for (const c of COLL_NAMES) {
     const v = raw[c];
-    if (!Array.isArray(v)) throw new Error(`数据里的 ${c} 格式不对`);
+    if (!Array.isArray(v)) throw new Error(`${source}里的 ${c} 格式不对`);
     v.forEach((x, i) => {
       const bad = badField(x, SHAPES[c]);
-      if (bad) throw new Error(`数据里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
+      if (bad) throw new Error(`${source}里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
     });
     (d as unknown as Record<Coll, unknown[]>)[c] = v;
   }
