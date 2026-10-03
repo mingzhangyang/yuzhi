@@ -40,21 +40,21 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
     const key = itemKey('event', ev.id);
     seen.add(key);
     const entry = entries.get(key);
-    out.push({ key, type: 'event', id: ev.id, title: entry?.title ?? ev.title, projectId: entry?.projectId ?? ev.projectId, start: ev.start, end: ev.end, entry });
+    out.push({ key, type: 'event', id: ev.id, title: entry?.title ?? ev.title, projectId: entry ? entry.projectId : ev.projectId, start: ev.start, end: ev.end, entry });
   }
   for (const t of tasks) {
     const key = itemKey('task', t.id);
     if (t.status === 'open' && t.scheduledFor === date && t.projectId) {
       seen.add(key);
       const entry = entries.get(key);
-      out.push({ key, type: 'task', id: t.id, title: entry?.title ?? t.title, projectId: entry?.projectId ?? t.projectId, entry });
+      out.push({ key, type: 'task', id: t.id, title: entry?.title ?? t.title, projectId: entry ? entry.projectId : t.projectId, entry });
     }
   }
   // 已结算过、但任务已经改期或完成的条目，也保留在这一天
   for (const [key, e] of entries) {
     if (seen.has(key)) continue;
     const t = e.itemType === 'task' ? taskById.get(e.itemId) : undefined;
-    out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: e.projectId ?? t?.projectId, entry: e });
+    out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: e.projectId, entry: e });
   }
   return out;
 }

@@ -209,6 +209,7 @@ describe('阶段历史重放', () => {
     const h = makeStore('2026-09-01', '2026-09-01');
     const p = createProject(h.store, '顺序项目');
     h.setToday('2026-09-20');
+    expect(h.store.villages().get(p.id)!.stage).toBe(2);
     const t = createTask(h.store, { title: '收尾推进', projectId: p.id, scheduledFor: h.today });
     settleDay(h.store, h.today, new Map([[itemKey('task', t.id), { outcome: 'done' }]]));
     const settlementSeq = h.store.data.entries.find((entry) => entry.itemId === t.id)!.seq;

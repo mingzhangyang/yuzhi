@@ -34,6 +34,28 @@ describe('Phase 2 fact replay', () => {
     expect(corrected.seq).toBe(original.seq);
   });
 
+  it('已有 settlement 的空 projectId 也是历史快照，不被后来搬村补回', () => {
+    const h = makeStore('2026-10-01');
+    const p = createProject(h.store, '后来项目');
+    const t = createTask(h.store, { title: '码头任务', scheduledFor: h.today });
+    const key = itemKey('task', t.id);
+
+    h.store.data.entries.push({
+      id: `2026-10-01|task|${t.id}`,
+      seq: Math.max(0, ...h.store.data.operations.map((event) => event.seq)) + 1,
+      date: h.today,
+      itemType: 'task',
+      itemId: t.id,
+      outcome: 'skipped',
+      reason: 'no_energy',
+      title: t.title,
+    });
+    moveTask(h.store, t.id, p.id);
+
+    settleDay(h.store, h.today, new Map([[key, { outcome: 'done' }]]));
+    expect(h.store.data.entries.find((entry) => entry.itemId === t.id)?.projectId).toBeUndefined();
+  });
+
   it('改判旧结算不会覆盖后来手动改期', () => {
     const h = makeStore('2026-10-01');
     const p = createProject(h.store, '团队');
