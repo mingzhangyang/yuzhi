@@ -50,14 +50,19 @@ export function emptyData(): Data {
   };
 }
 
-type RawData = { [C in Coll]: unknown[] } & { settings: unknown };
+type RawData = Record<string, unknown> & { settings: unknown };
 
 /** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
 const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [];
 
 function emptyRawData(): RawData {
-  const collections = Object.fromEntries(COLL_NAMES.map((c) => [c, []])) as { [C in Coll]: unknown[] };
-  return { ...collections, settings: defaultSettings() };
+  return { ...Object.fromEntries(COLL_NAMES.map((c) => [c, []])), settings: defaultSettings() };
+}
+
+function ensureCurrentCollections(raw: RawData): RawData {
+  for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
+  if (raw.settings === undefined) raw.settings = defaultSettings();
+  return raw;
 }
 
 function migrateRawData(raw: RawData, fromVersion: number) {
@@ -94,8 +99,14 @@ export class IdbPersistence implements Persistence {
   }
   async load(): Promise<Data> {
     const db = await this.dbp;
-    const raw = emptyRawData();
-    for (const c of COLL_NAMES) raw[c] = await db.getAll(c);
+    // Read every persisted collection, including legacy stores that are no
+    // longer part of the current Data type. A skipped-version upgrade may
+    // still need them as migration input.
+    const raw: RawData = { settings: defaultSettings() };
+    for (const name of Array.from(db.objectStoreNames)) {
+      if (name !== 'meta') raw[name] = await db.getAll(name);
+    }
+    ensureCurrentCollections(raw);
     const storedSettings = await db.get('meta', 'settings');
     raw.settings = storedSettings ?? defaultSettings();
 
@@ -286,14 +297,15 @@ function validateCurrentData(raw: RawData): Data {
 }
 
 function rawBackupData(o: Record<string, unknown>): RawData {
-  const raw = emptyRawData();
-  for (const c of COLL_NAMES) {
-    const v = o[c];
-    if (v == null) continue;
-    if (!Array.isArray(v)) throw new Error(`备份里的 ${c} 格式不对`);
-    raw[c] = v;
+  // Preserve unknown legacy fields so future migrations can consume them
+  // before current-schema validation discards them from the Data read model.
+  const raw: RawData = { settings: o.settings ?? defaultSettings() };
+  for (const [key, value] of Object.entries(o)) {
+    if (key === 'format' || key === 'version' || key === 'exportedAt' || key === 'settings') continue;
+    raw[key] = value;
   }
-  raw.settings = o.settings ?? defaultSettings();
+  ensureCurrentCollections(raw);
+  for (const c of COLL_NAMES) if (!Array.isArray(raw[c])) throw new Error(`备份里的 ${c} 格式不对`);
   return raw;
 }
 
