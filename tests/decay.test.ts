@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, reopenProject, markTaskDone } from '../src/actions';
+import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, reopenProject, markTaskDone, dropTask } from '../src/actions';
 import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
 import { lifeEntries } from '../src/logic/operations';
@@ -273,6 +273,43 @@ describe('阶段历史重放', () => {
     markTaskDone(h.store, t.id);
 
     expect(stageLifeEntries(h.store.data, h.today).filter((entry) => entry.id === `stage|2026-09-09|${p.id}`)).toEqual([]);
+  });
+
+  it('后来放下逾期任务后，当前村落仍按历史 pending 冻结旧日期', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '历史 pending');
+    const t = createTask(h.store, { title: '旧任务', projectId: p.id, scheduledFor: '2026-09-02' });
+    h.setToday('2026-09-09');
+    dropTask(h.store, t.id);
+
+    // 9/2 当时有未结算任务，应冻结；只累计 9/3..9/8 六个空白日。
+    expect(h.store.villages().get(p.id)!.neglect).toBe(6);
+    expect(stageTransitions(h.store.data, h.today).filter(
+      (row) => row.projectId === p.id && row.source === 'time',
+    )).toEqual([]);
+  });
+
+  it('第三次推迟触发的阶段行使用该 settlement seq，而不是后续无关事实', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '因果顺序');
+    const t = createTask(h.store, { title: '难事', projectId: p.id, scheduledFor: h.today });
+    let thirdSeq = 0;
+    for (let k = 0; k < 3; k++) {
+      const date = h.store.task(t.id)!.scheduledFor!;
+      h.setToday(date);
+      settleDay(h.store, date, new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+      if (k === 2) thirdSeq = h.store.data.entries.find((entry) => entry.itemId === t.id && entry.date === date)!.seq;
+    }
+    const unrelated = createTask(h.store, { title: '无关新任务', projectId: p.id, scheduledFor: h.today });
+    const unrelatedSeq = h.store.data.operations.find(
+      (event) => event.kind === 'task-created' && event.taskId === unrelated.id,
+    )!.seq;
+    expect(thirdSeq).toBeLessThan(unrelatedSeq);
+
+    const transition = stageTransitions(h.store.data, h.today).find(
+      (row) => row.projectId === p.id && row.date === h.today && row.source === 'facts',
+    );
+    expect(transition).toMatchObject({ from: 0, to: 1, factSeq: thirdSeq });
   });
 
   it('未结算日直接完成会立即移除推迟惩罚并生成恢复阶段史', () => {
