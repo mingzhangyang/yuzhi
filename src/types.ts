@@ -131,6 +131,13 @@ export interface Interruption {
   projectId?: string;
 }
 
+/** 每天积压数的快照，用来画真正的历史走势（当天最后一次的值） */
+export interface BacklogSnapshot {
+  date: ISODate;
+  /** 码头上未安排 + 过期未完成 */
+  backlog: number;
+}
+
 export interface Settings {
   /** 工作时段，HH:MM */
   workStart: string;
@@ -151,5 +158,6 @@ export interface Data {
   chronicle: ChronicleLine[];
   life: LifeEntry[];
   interruptions: Interruption[];
+  snapshots: BacklogSnapshot[];
   settings: Settings;
 }

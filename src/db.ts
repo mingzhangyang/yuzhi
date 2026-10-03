@@ -14,12 +14,13 @@ export const COLLECTIONS = {
   chronicle: 'id',
   life: 'id',
   interruptions: 'id',
+  snapshots: 'date',
 } as const;
 export type Coll = keyof typeof COLLECTIONS;
 export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = 1;
 
@@ -39,6 +40,7 @@ export function emptyData(): Data {
     chronicle: [],
     life: [],
     interruptions: [],
+    snapshots: [],
     settings: defaultSettings(),
   };
 }
@@ -106,6 +108,30 @@ export class MemoryPersistence implements Persistence {
   }
 }
 
+const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/** 校验备份里的设置：类型、格式、取值范围都对才接受，否则整份备份拒绝 */
+export function parseSettings(v: unknown): Settings {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('备份里的设置格式不对');
+  const o = v as Record<string, unknown>;
+  const s = defaultSettings();
+  const str = (k: string, re: RegExp, label: string) => {
+    if (o[k] === undefined) return undefined;
+    if (typeof o[k] !== 'string' || !re.test(o[k] as string)) throw new Error(`备份里的${label}格式不对`);
+    return o[k] as string;
+  };
+  s.workStart = str('workStart', HM, '工作开始时间') ?? s.workStart;
+  s.workEnd = str('workEnd', HM, '工作结束时间') ?? s.workEnd;
+  s.firstDay = str('firstDay', YMD, '起始日期') ?? s.firstDay;
+  if (s.workEnd <= s.workStart) throw new Error('备份里的工作时段不对：结束要晚于开始');
+  if (o.theme !== undefined) {
+    if (o.theme !== 'auto' && o.theme !== 'light' && o.theme !== 'dark') throw new Error('备份里的外观设置不对');
+    s.theme = o.theme;
+  }
+  return s;
+}
+
 export function exportBackup(d: Data): string {
   const out: Record<string, unknown> = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), settings: d.settings };
   for (const c of COLL_NAMES) out[c] = (d as unknown as Record<Coll, unknown[]>)[c];
@@ -131,6 +157,6 @@ export function parseBackup(text: string): Data {
     if (v.some((x) => !x || typeof x !== 'object' || typeof (x as Record<string, unknown>)[key] !== 'string')) throw new Error(`备份里的 ${c} 有损坏的记录`);
     (d as unknown as Record<Coll, unknown[]>)[c] = v;
   }
-  if (o.settings && typeof o.settings === 'object') d.settings = { ...defaultSettings(), ...(o.settings as Partial<Settings>) };
+  if (o.settings != null) d.settings = parseSettings(o.settings);
   return d;
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents } from '../src/actions';
+import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents, arrangeTask, recordBacklogSnapshot } from '../src/actions';
 import { itemKey, itemsForDay, pendingDays } from '../src/logic/days';
-import { backlog, condition, granary, progress } from '../src/logic/metrics';
+import { backlog, backlogSeries, condition, granary, progress } from '../src/logic/metrics';
 import { CHORES } from '../src/types';
 
 describe('晚间结算', () => {
@@ -126,5 +126,57 @@ describe('日历归类', () => {
     expect(h.store.data.events.find((e) => e.id === '2')).toMatchObject({ projectId: CHORES, classified: true });
     mergeEvents(h.store, 's', [ev('1', '产品周会'), ev('2', '牙医'), ev('3', '设计周会')], '2026-09-01');
     expect(h.store.data.events.find((e) => e.id === '3')).toMatchObject({ projectId: p.id, classified: true });
+  });
+});
+
+describe('改判', () => {
+  it('重新结算时撤销上一次的后果：打断记录、推迟次数、一生之书、最近推进日', () => {
+    const h = makeStore('2026-10-01');
+    const p = createProject(h.store, '团队');
+    const t = createTask(h.store, { title: '写周报', projectId: p.id, scheduledFor: h.today });
+    const k = itemKey('task', t.id);
+    const lifeOf = () => h.store.data.life.filter((l) => l.taskId === t.id && ['done', 'partial', 'skip'].includes(l.kind)).map((l) => l.text);
+
+    settleDay(h.store, h.today, new Map([[k, { outcome: 'skipped', reason: 'interrupted' }]]));
+    expect(h.store.data.interruptions.length).toBe(1);
+
+    settleDay(h.store, h.today, new Map([[k, { outcome: 'skipped', reason: 'postponed' }]]));
+    expect(h.store.data.interruptions.length).toBe(0);
+    expect(h.store.task(t.id)).toMatchObject({ postponeCount: 1, scheduledFor: '2026-10-02' });
+    expect(lifeOf()).toEqual(['「写周报」没做：推到明天']);
+
+    settleDay(h.store, h.today, new Map([[k, { outcome: 'done' }]]));
+    expect(h.store.task(t.id)).toMatchObject({ status: 'done', postponeCount: 0 });
+    expect(h.store.project(p.id)!.lastProgressAt).toBe(h.today);
+    expect(lifeOf()).toEqual(['完成了「写周报」']);
+
+    settleDay(h.store, h.today, new Map([[k, { outcome: 'skipped', reason: 'no_energy' }]]));
+    expect(h.store.project(p.id)!.lastProgressAt).toBeUndefined();
+    expect(h.store.task(t.id)).toMatchObject({ status: 'open', scheduledFor: h.today });
+
+    // 取消决定：记录和后果一起撤掉
+    settleDay(h.store, h.today, new Map());
+    expect(h.store.data.entries).toEqual([]);
+    expect(lifeOf()).toEqual([]);
+    expect(h.store.task(t.id)).toMatchObject({ status: 'open', scheduledFor: h.today, postponeCount: 0 });
+  });
+});
+
+describe('积压走势', () => {
+  it('来自每天的快照：今天安排了码头的船，不会改写过去几天的点', () => {
+    const h = makeStore('2026-10-01');
+    const p = createProject(h.store, 'P');
+    const ships = [createTask(h.store, { title: 'a' }), createTask(h.store, { title: 'b' }), createTask(h.store, { title: 'c' })];
+    recordBacklogSnapshot(h.store);
+    h.advance();
+    recordBacklogSnapshot(h.store);
+    h.advance();
+    for (const t of ships) arrangeTask(h.store, t.id, p.id);
+    recordBacklogSnapshot(h.store);
+    expect(backlogSeries(h.store.data, h.today)).toEqual([3, 3, 0]);
+    // 中间缺了快照的日子沿用前一天
+    h.advance(2);
+    createTask(h.store, { title: 'd' });
+    expect(backlogSeries(h.store.data, h.today)).toEqual([3, 3, 0, 0, 1]);
   });
 });

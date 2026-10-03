@@ -82,18 +82,22 @@ export function backlog(data: Data, today: ISODate): { dock: number; overdue: nu
   return { dock, overdue, total: dock + overdue };
 }
 
-/** 积压的历史走势：用任务的创建与结束日期回推 */
+/**
+ * 积压的历史走势：来自每天记下的快照（今天用实时值）。
+ * 没有快照的日子沿用前一天的值；最早一次快照之前的日子不画。
+ */
 export function backlogSeries(data: Data, today: ISODate, days = 14): number[] {
+  const snap = new Map(data.snapshots.map((x) => [x.date, x.backlog] as const));
+  // 窗口开始前最近的一次快照，作为起点
+  const before = data.snapshots.filter((x) => x.date < addDays(today, -(days - 1))).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+  let last: number | undefined = before?.backlog;
   const out: number[] = [];
   for (let k = days - 1; k >= 0; k--) {
     const d = addDays(today, -k);
-    let n = 0;
-    for (const t of data.tasks) {
-      if (t.createdAt > d) continue;
-      if (t.closedAt && t.closedAt <= d) continue;
-      if (!t.projectId || (t.scheduledFor && t.scheduledFor < d)) n++;
-    }
-    out.push(n);
+    const v = d === today ? backlog(data, today).total : snap.get(d) ?? last;
+    if (v === undefined) continue;
+    last = v;
+    out.push(v);
   }
   return out;
 }

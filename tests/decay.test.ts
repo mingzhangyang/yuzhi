@@ -103,3 +103,17 @@ describe('衰败与恢复', () => {
     expect(h.store.villages().get(p.id)!.stage).toBe(1);
   });
 });
+
+describe('离开很久再回来', () => {
+  it('超过两个月前的未结算日子也会被找到、归档，并且不产生后果', () => {
+    const h = makeStore('2026-06-01', '2026-06-01');
+    const p = createProject(h.store, '老项目');
+    createTask(h.store, { title: '那天的事', projectId: p.id, scheduledFor: '2026-06-02' });
+    h.setToday('2026-09-15');
+    expect(archiveOldDays(h.store)).toEqual(['2026-06-02']);
+    expect(h.store.data.days).toEqual([{ date: '2026-06-02', status: 'unrecorded' }]);
+    const v = h.store.villages().get(p.id)!;
+    // 6/2 冻结；6/3 到 9/14 共 104 天空白
+    expect(v.neglect).toBe(104);
+  });
+});

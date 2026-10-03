@@ -26,3 +26,19 @@ describe('IndexedDB 与备份', () => {
     expect(() => parseBackup('oops')).toThrow('JSON');
   });
 });
+
+describe('备份里的设置', () => {
+  const wrap = (settings: unknown) => JSON.stringify({ format: 'yuzhi-backup', version: 1, settings });
+  it('类型或格式不对的设置会被拒绝', () => {
+    expect(() => parseBackup(wrap({ workStart: 1 }))).toThrow('工作开始时间');
+    expect(() => parseBackup(wrap({ workEnd: '25:00' }))).toThrow('工作结束时间');
+    expect(() => parseBackup(wrap({ firstDay: '2026/10/01' }))).toThrow('起始日期');
+    expect(() => parseBackup(wrap({ theme: 'neon' }))).toThrow('外观');
+    expect(() => parseBackup(wrap({ workStart: '18:00', workEnd: '09:00' }))).toThrow('工作时段');
+    expect(() => parseBackup(wrap('oops'))).toThrow('设置');
+  });
+  it('合法的设置原样保留，缺的字段用默认值', () => {
+    const d = parseBackup(wrap({ workStart: '08:30', theme: 'dark' }));
+    expect(d.settings).toMatchObject({ workStart: '08:30', workEnd: '18:00', theme: 'dark' });
+  });
+});

@@ -1,5 +1,5 @@
 import type { CalendarEvent, Data, ISODate, SettlementEntry, Task } from '../types';
-import { addDays, dateOfStamp, diffDays } from '../lib/date';
+import { dateOfStamp, diffDays } from '../lib/date';
 import { ARCHIVE_AFTER_DAYS } from './config';
 
 export interface SettleItem {
@@ -55,23 +55,20 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   return out;
 }
 
-export function hasItems(data: Data, date: ISODate): boolean {
-  if (data.tasks.some((t) => t.status === 'open' && t.scheduledFor === date && t.projectId)) return true;
-  return data.events.some((e) => !e.allDay && dateOfStamp(e.start) === date);
-}
-
-/** 往回最多看这么多天 */
-const SCAN_BACK = 60;
-
-/** 今天之前、有条目却还没结算也没归档的日子（最早的在前） */
+/**
+ * 今天之前、有条目却还没结算也没归档的日子（最早的在前）。
+ * 直接从条目本身收集日期，不设回看上限：离开很久再回来，旧日子也会被找到并归档。
+ */
 export function pendingDays(data: Data, today: ISODate): ISODate[] {
   const recorded = new Set(data.days.map((d) => d.date));
-  const from = maxDate(data.settings.firstDay, addDays(today, -SCAN_BACK));
-  const out: ISODate[] = [];
-  for (let d = from; d < today; d = addDays(d, 1)) {
-    if (!recorded.has(d) && hasItems(data, d)) out.push(d);
-  }
-  return out;
+  const first = data.settings.firstDay;
+  const found = new Set<ISODate>();
+  const consider = (d: ISODate | undefined) => {
+    if (d && d >= first && d < today && !recorded.has(d)) found.add(d);
+  };
+  for (const t of data.tasks) if (t.status === 'open' && t.projectId) consider(t.scheduledFor);
+  for (const e of data.events) if (!e.allDay) consider(dateOfStamp(e.start));
+  return [...found].sort();
 }
 
 /** 需要自动归档为「未记录」的日子：未结算超过 3 天 */
@@ -86,8 +83,4 @@ export function dayStatusFn(data: Data, today: ISODate): (d: ISODate) => DayStat
   const rec = new Map(data.days.map((d) => [d.date, d.status] as const));
   const pending = new Set(pendingDays(data, today));
   return (d) => rec.get(d) ?? (pending.has(d) ? 'pending' : 'empty');
-}
-
-export function maxDate(a: ISODate, b: ISODate): ISODate {
-  return a > b ? a : b;
 }

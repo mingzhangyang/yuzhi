@@ -656,7 +656,7 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
           } else if (c === 'trim') {
             openModal({
               title: `缩小「${p.name}」的规模`,
-              body: `<p>勾掉的任务会被放下（不算惩罚）。</p><div class="checklist">${open.map((t) => `<label><input type="checkbox" value="${t.id}" checked> ${esc(t.title)}</label>`).join('') || '<p class="empty">村里没有未完成的任务。</p>'}</div><div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>就这样</button></div>`,
+              body: `<p>勾选的任务留下；取消勾选的任务会被放下（不算惩罚）。</p><div class="checklist">${open.map((t) => `<label><input type="checkbox" value="${t.id}" checked> ${esc(t.title)}</label>`).join('') || '<p class="empty">村里没有未完成的任务。</p>'}</div><div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>就这样</button></div>`,
               mount(b2) {
                 b2.querySelector('[data-ok]')!.addEventListener('click', () => {
                   const drop = [...b2.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].filter((x) => !x.checked).map((x) => x.value);

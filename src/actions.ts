@@ -10,6 +10,7 @@ import { MAX_VILLAGES, PROMPT_SNOOZE_DAYS, STAGE_NAMES, TRIM_TO_NEGLECT, type St
 import { daysToArchive, entryId, itemsForDay, type SettleItem } from './logic/days';
 import { dayLine, stageChangeText, type StageChange } from './logic/chronicle';
 import { applyRules, matchRule } from './logic/classify';
+import { backlog } from './logic/metrics';
 import { ringOfLandmark, totalLandmarkCapacity } from './island/map';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
@@ -23,8 +24,8 @@ export class ActionError extends Error {}
 
 const q = (s: string) => `「${s}」`;
 
-function life(store: Store, o: { date: ISODate; kind: LifeKind; text: string; projectId?: string; taskId?: string; reason?: SkipReason }) {
-  const e: LifeEntry = { id: uid('l'), ...o };
+function life(store: Store, o: { date: ISODate; kind: LifeKind; text: string; projectId?: string; taskId?: string; reason?: SkipReason }, id = uid('l')) {
+  const e: LifeEntry = { id, ...o };
   store.put('life', e);
 }
 
@@ -200,36 +201,78 @@ export interface Decision {
   reason?: SkipReason;
 }
 
-/** 写一条结算记录，并让任务、一生之书、打断记录随之变化 */
+/** 结算记录派生出的一生之书条目、打断记录用固定 id，改判时能找到并撤销 */
+const lifeIdOf = (entryId: string) => `l|${entryId}`;
+const interruptionIdOf = (entryId: string) => `i|${entryId}`;
+
+/** 项目的「最近一次真实推进」由结算记录重新算出 */
+function recomputeLastProgress(store: Store, projectId: string | undefined) {
+  const p = store.project(projectId);
+  if (!p) return;
+  let last: ISODate | undefined;
+  for (const e of store.data.entries) if (e.projectId === projectId && e.outcome !== 'skipped' && (!last || e.date > last)) last = e.date;
+  if (p.lastProgressAt !== last) store.put('projects', { ...p, lastProgressAt: last });
+}
+
+/** 撤销一条结算记录留下的所有后果：一生之书、打断记录、任务状态与推迟次数 */
+function revertEntry(store: Store, prev: SettlementEntry) {
+  store.del('life', lifeIdOf(prev.id));
+  store.del('interruptions', interruptionIdOf(prev.id));
+  if (prev.itemType !== 'task') return;
+  const t = store.task(prev.itemId);
+  if (!t) return;
+  const later = store.data.entries.some((e) => e.itemType === 'task' && e.itemId === t.id && e.date > prev.date);
+  if (later) {
+    // 之后的日子已经接着结算过这件事，只撤销推迟次数
+    if (prev.reason === 'postponed') store.put('tasks', { ...t, postponeCount: Math.max(0, t.postponeCount - 1) });
+    return;
+  }
+  // 回到结算前的样子：还开着，排在那一天
+  store.put('tasks', {
+    ...t,
+    status: 'open',
+    closedAt: undefined,
+    scheduledFor: prev.date,
+    postponeCount: prev.reason === 'postponed' ? Math.max(0, t.postponeCount - 1) : t.postponeCount,
+  });
+}
+
+/** 写一条结算记录，并让任务、一生之书、打断记录随之变化。改判时先撤销上一次的后果 */
 function recordEntry(store: Store, date: ISODate, item: SettleItem, outcome: Outcome, reason?: SkipReason) {
   const id = entryId(date, item.type, item.id);
   const prev = store.data.entries.find((e) => e.id === id);
   if (prev && prev.outcome === outcome && prev.reason === reason) return;
+  if (prev) revertEntry(store, prev);
   const projectId = item.projectId && item.projectId !== CHORES ? item.projectId : undefined;
   const entry: SettlementEntry = { id, date, itemType: item.type, itemId: item.id, outcome, reason, projectId, title: item.title };
   store.put('entries', entry);
 
   const title = q(item.title);
   const lifeBase = { date, projectId, taskId: item.type === 'task' ? item.id : undefined };
-  if (outcome === 'done') life(store, { ...lifeBase, kind: 'done', text: item.type === 'task' ? `完成了${title}` : `${title}做了` });
-  else if (outcome === 'partial') life(store, { ...lifeBase, kind: 'partial', text: `${title}做了一部分` });
-  else life(store, { ...lifeBase, kind: 'skip', reason, text: `${title}没做${reason ? `：${REASON_TEXT[reason]}` : ''}` });
+  const lid = lifeIdOf(id);
+  if (outcome === 'done') life(store, { ...lifeBase, kind: 'done', text: item.type === 'task' ? `完成了${title}` : `${title}做了` }, lid);
+  else if (outcome === 'partial') life(store, { ...lifeBase, kind: 'partial', text: `${title}做了一部分` }, lid);
+  else life(store, { ...lifeBase, kind: 'skip', reason, text: `${title}没做${reason ? `：${REASON_TEXT[reason]}` : ''}` }, lid);
 
-  if (outcome !== 'skipped' && projectId) {
-    const p = store.project(projectId);
-    if (p && (!p.lastProgressAt || p.lastProgressAt < date)) store.put('projects', { ...p, lastProgressAt: date });
-  }
-  if (reason === 'interrupted') store.put('interruptions', { id: uid('i'), date, itemType: item.type, itemId: item.id, title: item.title, projectId });
+  recomputeLastProgress(store, projectId);
+  if (prev?.projectId !== projectId) recomputeLastProgress(store, prev?.projectId);
+  if (reason === 'interrupted') store.put('interruptions', { id: interruptionIdOf(id), date, itemType: item.type, itemId: item.id, title: item.title, projectId });
 
   if (item.type !== 'task') return;
   const t = store.task(item.id);
   if (!t) return;
-  // 只在第一次结算这条任务时移动它；改判时尽量回到原样
   if (outcome === 'done') store.put('tasks', { ...t, status: 'done', closedAt: date });
   else if (outcome === 'partial') store.put('tasks', { ...t, status: 'open', closedAt: undefined, scheduledFor: addDays(date, 1) });
   else if (reason === 'postponed') store.put('tasks', { ...t, status: 'open', closedAt: undefined, scheduledFor: addDays(date, 1), postponeCount: t.postponeCount + 1 });
   else if (reason === 'not_important') store.put('tasks', { ...t, status: 'dropped', closedAt: date });
   else store.put('tasks', { ...t, status: 'open', closedAt: undefined, scheduledFor: date });
+}
+
+/** 撤掉一条结算记录（重新结算时取消了这一条的决定） */
+function removeEntry(store: Store, prev: SettlementEntry) {
+  revertEntry(store, prev);
+  store.del('entries', prev.id);
+  recomputeLastProgress(store, prev.projectId);
 }
 
 /** 当前每个活跃项目的阶段 */
@@ -249,6 +292,7 @@ export function settleDay(store: Store, date: ISODate, decisions: Map<string, De
   for (const it of items) {
     const d = decisions.get(it.key);
     if (d) recordEntry(store, date, it, d.outcome, d.outcome === 'skipped' ? d.reason : undefined);
+    else if (it.entry) removeEntry(store, it.entry);
   }
   store.put('days', { date, status: 'settled' });
 
@@ -430,4 +474,12 @@ export function setResting(store: Store, id: string, resting: 'landmark' | 'arch
     life(store, { date: today, kind: 'event', projectId: id, text: '地标收进了山顶的档案馆' });
     chronicle(store, today, `${q(p.name)}的地标收进了山顶的灯塔。`, 'quiet');
   }
+}
+
+/** 记下今天的积压数（当天最后一次的值），供积压走势使用 */
+export function recordBacklogSnapshot(store: Store) {
+  const today = store.today();
+  const n = backlog(store.data, today).total;
+  const cur = store.data.snapshots.find((x) => x.date === today);
+  if (cur?.backlog !== n) store.put('snapshots', { date: today, backlog: n });
 }

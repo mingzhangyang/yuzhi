@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseIcs } from '../src/ics';
-import { normalizeIcsUrl, handleIcsRequest } from '../shared/icsProxy';
+import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
 
 const ICS = `BEGIN:VCALENDAR
 VERSION:2.0
@@ -94,5 +94,49 @@ describe('ics 代理', () => {
     expect(r1.status).toBe(200);
     const r2 = await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', bad);
     expect(r2.status).toBe(422);
+  });
+
+  it('按规范解析地址，拒绝各种写法的内网地址', () => {
+    const bad = [
+      'http://[::ffff:127.0.0.1]/a.ics',
+      'http://[::ffff:7f00:1]/a.ics',
+      'http://[::ffff:10.0.0.1]/a.ics',
+      'http://[::127.0.0.1]/a.ics',
+      'http://[64:ff9b::a9fe:a9fe]/a.ics',
+      'http://[2002:7f00:1::]/a.ics',
+      'http://[::1]/a.ics',
+      'http://[::]/a.ics',
+      'http://[fd12::1]/a.ics',
+      'http://[fe80::1]/a.ics',
+      'http://2130706433/a.ics',
+      'http://0x7f.1/a.ics',
+      'http://017700000001/a.ics',
+      'http://169.254.169.254/latest',
+      'http://100.64.0.1/a.ics',
+      'http://0.0.0.0/a.ics',
+      'http://foo.localhost/a.ics',
+      'http://printer.local/a.ics',
+    ];
+    for (const u of bad) expect(() => normalizeIcsUrl(u), u).toThrow('内网');
+    for (const u of ['https://calendar.google.com/x.ics', 'https://[2606:4700::1111]/x.ics', 'https://8.8.8.8/x.ics', 'https://[::ffff:8.8.8.8]/x.ics']) expect(() => normalizeIcsUrl(u), u).not.toThrow();
+    expect(isPrivateHost('LOCALHOST.')).toBe(true);
+  });
+  it('重定向的每一跳都重新校验，不跟到内网', async () => {
+    const calls: string[] = [];
+    const redirecting = (async (u: string) => {
+      calls.push(u);
+      if (u.includes('example.com')) return new Response(null, { status: 302, headers: { location: 'http://[::ffff:127.0.0.1]/secret' } });
+      return new Response('BEGIN:VCALENDAR\nEND:VCALENDAR');
+    }) as unknown as typeof fetch;
+    const r = await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', redirecting);
+    expect(r.status).toBe(400);
+    expect(calls).toEqual(['https://example.com/a.ics']);
+    const ok = (async (u: string) => (u.endsWith('/a.ics') ? new Response(null, { status: 301, headers: { location: '/b.ics' } }) : new Response('BEGIN:VCALENDAR\nEND:VCALENDAR'))) as unknown as typeof fetch;
+    expect((await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', ok)).status).toBe(200);
+  });
+  it('没有 content-length 的超大响应也会被截断', async () => {
+    const big = (async () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)); } }))) as unknown as typeof fetch;
+    const r = await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', big);
+    expect(r.status).toBe(413);
   });
 });

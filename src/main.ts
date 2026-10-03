@@ -124,6 +124,8 @@ async function boot() {
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
   function update() {
+    // 积压快照：只在数值变化时写入，写入触发的再次更新不会再写
+    A.recordBacklogSnapshot(store);
     const today = store.today();
     const now = store.clock();
     updateStats(store);

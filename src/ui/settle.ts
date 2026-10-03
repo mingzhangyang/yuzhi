@@ -29,6 +29,8 @@ export class SettleSheet {
   private date: ISODate = '';
   /** 每一天的草稿：key → 决定 */
   private drafts = new Map<ISODate, Map<string, A.Decision>>();
+  /** 草稿里用「还做了别的事…」拉进来的任务：提交前不改动任务本身 */
+  private pulled = new Map<ISODate, Set<string>>();
   private box = $('settleBox');
   private drag: { el: HTMLElement; key: string; x: number; y: number; dx: number; moved: boolean; locked: boolean; id: number } | null = null;
 
@@ -82,7 +84,15 @@ export class SettleSheet {
   }
 
   private items(): SettleItem[] {
-    return itemsForDay(this.store.data, this.date);
+    const base = itemsForDay(this.store.data, this.date);
+    const have = new Set(base.map((it) => it.key));
+    for (const id of this.pulled.get(this.date) ?? []) {
+      const t = this.store.task(id);
+      const key = `task|${id}`;
+      if (!t || t.status !== 'open' || !t.projectId || have.has(key)) continue;
+      base.push({ key, type: 'task', id, title: t.title, projectId: t.projectId });
+    }
+    return base;
   }
 
   render() {
@@ -99,7 +109,7 @@ export class SettleSheet {
 
     const tabs = days.map((x) => `<button data-day="${x}" class="${x === this.date ? 'on' : ''} ${x < today ? 'fog' : ''}">${esc(relDay(x, today))}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
-    const extra = s.data.tasks.filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date).slice(0, 80);
+    const extra = s.data.tasks.filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
     const extraSel = extra.length
       ? `<div class="sextra"><select data-pull aria-label="还做了别的事"><option value="">${this.date === today ? '今天' : '这天'}还做了别的事…</option>${extra.map((t) => `<option value="${t.id}">${esc(t.title)} · ${esc(s.project(t.projectId)?.name ?? '')}</option>`).join('')}</select></div>`
       : '';
@@ -241,7 +251,8 @@ export class SettleSheet {
     const sel = e.target as HTMLSelectElement;
     if (!sel.matches('[data-pull]') || !sel.value) return;
     const id = sel.value;
-    A.pullIntoDay(this.store, id, this.date);
+    if (!this.pulled.has(this.date)) this.pulled.set(this.date, new Set());
+    this.pulled.get(this.date)!.add(id);
     this.draft().set(`task|${id}`, { outcome: 'done' });
     this.render();
     const el = this.box.querySelector<HTMLElement>(`.sitem[data-key="task|${CSS.escape(id)}"]`);
@@ -269,8 +280,11 @@ export class SettleSheet {
   private commit() {
     const date = this.date;
     const d = this.draft();
+    // 拉进来、并且确实给了决定的任务，到提交时才挪到这一天
+    for (const id of this.pulled.get(date) ?? []) if (d.has(`task|${id}`)) A.pullIntoDay(this.store, id, date);
     const text = A.settleDay(this.store, date, d);
     this.drafts.delete(date);
+    this.pulled.delete(date);
     toast(text);
     const rest = pendingDays(this.store.data, this.store.today());
     if (rest.length) this.open(rest[0]);
