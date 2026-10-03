@@ -1,0 +1,29 @@
+{
+  "name": "yuzhi",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p functions",
+    "test": "vitest run",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name yuzhi",
+    "preview:worker": "npm run build && wrangler dev",
+    "preview:pages": "npm run build && wrangler pages dev dist"
+  },
+  "dependencies": {
+    "ical.js": "^2.2.1",
+    "idb": "^8.0.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261003.1",
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.147.0"
+  }
+}

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#eceee2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151812" media="(prefers-color-scheme: dark)">
+<title>屿志 · 一座由你的日子长成的岛</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>屿志</h1>
+      <p class="sub">一座由你的日子长成的岛。你定规则、做选择，小岛记账、提醒、讲故事。</p>
+    </div>
+    <div class="controls">
+      <span class="date" id="date"></span>
+      <button class="btn" id="newBtn">＋ 新建</button>
+      <button class="btn" id="calBtn">日历</button>
+      <button class="btn" id="moreBtn" aria-haspopup="menu" aria-label="更多">⋯</button>
+      <button class="btn dusk" id="settleBtn">晚间结算</button>
+    </div>
+  </header>
+
+  <div class="fogbar card" id="fogbar" hidden>
+    <div class="tx" id="fogTxt"></div>
+    <button class="btn small" id="fogGo">补上记录</button>
+  </div>
+
+  <section class="stats" id="stats"></section>
+
+  <div class="main">
+    <section class="card panel mapcard">
+      <div class="maphead">
+        <div><div class="ptitle">我的小岛</div><p class="pdesc" id="mapDesc">项目是村落，任务是住在里面的人。</p></div>
+        <span class="badge" id="weather"></span>
+      </div>
+      <div class="mapwrap" id="mapwrap">
+        <canvas id="map" aria-label="小岛地图：点村落看项目，点小人看任务，点码头安排新任务"></canvas>
+        <div class="zoom"><button id="zin" aria-label="放大">+</button><button id="zout" aria-label="缩小">−</button><button id="zfit" aria-label="复位">⤢</button></div>
+        <div class="tip" id="tip">点村落、小人或码头看看</div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="chron">
+        <div class="ptitle">编年史 <small id="chronCount"></small></div>
+        <ol id="chron"></ol>
+      </div>
+    </section>
+
+    <aside class="card panel right" id="tracker" aria-label="追踪栏">
+      <button class="sheet-handle" id="sheetHandle"><span id="sheetTitle">追踪栏</span><small id="sheetSub"></small></button>
+      <div id="trackerBody"></div>
+    </aside>
+  </div>
+
+  <details class="card how">
+    <summary>小岛如何运转</summary>
+    <p>你在日历上的时间，决定村落热闹还是冷清；你自己建的项目和任务，决定小岛往哪个方向长。每个项目是一座村落，每件还没做完的任务是住在里面的一个小人。新任务先乘船停在码头，等你决定它住进哪个村落、排在哪天。</p>
+    <p>晚上点「晚间结算」，小岛进入黄昏。今天的事件和任务排成一列：右滑是做了，变成一块砖飞进村落；左滑是没做，可以选一个原因；轻点是做了一部分。过去的事不会默认算完成，要你确认。忘了结算的日子，小岛会被海雾笼罩；补上就散。超过 3 天还没结算，自动归档为「未记录」，不产生任何后果。</p>
+    <p>村落按距上次真实推进的天数变化：一周没动会安静下来，两周屋顶蒙灰，四周开始有居民搬离，这时小岛会问你：重新启动、缩小规模，还是正式关闭。每有一天真实推进，村落就回退一个阶段——荒了一个月的村落，认真两三天就能恢复热闹。「推到明天」单次无后果，同一件事推 3 次起村落会加重一档；「没精力」不伤害村落，只让粮仓少一点；「不重要了」是好的取舍，不算惩罚。</p>
+    <p>一个项目做完时，点「完成项目 · 落成仪式」：小岛暂停，翻开它的一生之书小结——用时、推迟次数、主要卡点、关键转折——然后由你决定它的去处：立为海岸上的地标，或收进山顶灯塔里的档案馆。地标越多，岛会向外长出新的陆地，像年轮。选择以后可以反悔。</p>
+    <p>所有数据只存在这个浏览器里（IndexedDB）。可以在「⋯」里导出 / 导入 JSON 备份。</p>
+  </details>
+</div>
+
+<div class="dlg-back" id="mdl" hidden>
+  <div class="dlg card" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mdlT" id="mdlBox"></div>
+</div>
+
+<div class="settle" id="settle" hidden>
+  <div class="sbox card" role="dialog" aria-modal="true" aria-labelledby="settleT" id="settleBox"></div>
+</div>
+
+<div class="ceremony" id="ceremony" hidden>
+  <div class="cbox card" role="dialog" aria-modal="true" aria-labelledby="ceremonyT" id="ceremonyBox"></div>
+</div>
+
+<div class="menu card" id="menu" role="menu" hidden>
+  <button data-m="settings" role="menuitem">工作时段与外观</button>
+  <button data-m="export" role="menuitem">导出备份（JSON）</button>
+  <button data-m="import" role="menuitem">导入备份…</button>
+  <hr>
+  <button data-m="archive" role="menuitem">档案馆（山顶的灯塔）</button>
+  <button data-m="demo" role="menuitem">放几个示例村落</button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fileIcs" accept=".ics,text/calendar" hidden>
+<input type="file" id="fileBackup" accept=".json,application/json" hidden>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
