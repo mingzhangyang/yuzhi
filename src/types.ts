@@ -82,6 +82,8 @@ export type SkipReason = 'interrupted' | 'no_energy' | 'not_important' | 'postpo
 export interface SettlementEntry {
   /** `${date}|${itemType}|${itemId}` */
   id: string;
+  /** 首次结算时分配并保持不变；与 OperationEvent.seq 共用同一事实顺序。 */
+  seq: number;
   date: ISODate;
   itemType: 'task' | 'event';
   itemId: string;
@@ -138,7 +140,7 @@ export interface OperationPayload extends Record<string, unknown> {
   legacyLifeId?: string;
 }
 
-/** 用户主动操作事实；seq 在本地数据内单调递增，用来确定同一天内先后顺序。 */
+/** 用户主动操作事实；seq 与 SettlementEntry 共用同一单调递增事实顺序。 */
 export interface OperationEvent {
   id: string;
   seq: number;

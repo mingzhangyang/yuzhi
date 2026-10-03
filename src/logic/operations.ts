@@ -5,9 +5,10 @@ const LIFE_KINDS = new Set<LifeKind>([
 ]);
 const REASONS = new Set<SkipReason>(['interrupted', 'no_energy', 'not_important', 'postponed']);
 
-export function nextOperationSeq(data: Data): number {
+export function nextFactSeq(data: Data): number {
   let max = 0;
   for (const event of data.operations) if (event.seq > max) max = event.seq;
+  for (const entry of data.entries) if (entry.seq > max) max = entry.seq;
   return max + 1;
 }
 

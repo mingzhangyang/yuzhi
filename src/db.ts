@@ -93,27 +93,46 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
     to: 2,
     run(data) {
       const life = Array.isArray(data.life) ? data.life : [];
+      const entries = Array.isArray(data.entries) ? data.entries : [];
       const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
-      let seq = operations.reduce((max, value) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return max;
+
+      // v2 introduces one stable fact sequence shared by settlement facts and
+      // explicit operation facts. Rejudging an old settlement keeps its seq,
+      // so later manual operations still replay after it.
+      let seq = 0;
+      for (const value of [...entries, ...operations]) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
         const n = (value as Record<string, unknown>).seq;
-        return Number.isInteger(n) && (n as number) > max ? n as number : max;
-      }, 0);
-      const candidates = life
+        if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
+      }
+      const entryById = new Map<string, Record<string, unknown>>();
+      for (const value of entries) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.id === 'string') entryById.set(row.id, row);
+      }
+
+      const orderedLife = life
         .map((value, index) => ({ value, index }))
-        .filter(({ value }) => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-          const kind = (value as Record<string, unknown>).kind;
-          return typeof kind === 'string' && ACTIVE_LIFE_KINDS.has(kind);
-        })
         .sort((a, b) => {
-          const ad = (a.value as Record<string, unknown>).date;
-          const bd = (b.value as Record<string, unknown>).date;
+          const ad = a.value && typeof a.value === 'object' && !Array.isArray(a.value) ? (a.value as Record<string, unknown>).date : '';
+          const bd = b.value && typeof b.value === 'object' && !Array.isArray(b.value) ? (b.value as Record<string, unknown>).date : '';
           return String(ad ?? '').localeCompare(String(bd ?? '')) || a.index - b.index;
         });
-      for (const { value } of candidates) {
+
+      for (const { value } of orderedLife) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
         const row = value as Record<string, unknown>;
-        if (typeof row.id !== 'string' || typeof row.date !== 'string' || typeof row.text !== 'string' || typeof row.kind !== 'string') continue;
+        if (typeof row.id !== 'string' || typeof row.date !== 'string' || typeof row.kind !== 'string') continue;
+
+        // Settlement-generated life rows already encode the legacy write order.
+        // Use that order to give the corresponding settlement a stable seq.
+        if (row.id.startsWith('l|')) {
+          const entry = entryById.get(row.id.slice(2));
+          if (entry && !Number.isInteger(entry.seq)) entry.seq = ++seq;
+        }
+
+        if (!ACTIVE_LIFE_KINDS.has(row.kind) || typeof row.text !== 'string') continue;
         const lifeSnapshot: Record<string, unknown> = { kind: row.kind, text: row.text };
         if (typeof row.projectId === 'string') lifeSnapshot.projectId = row.projectId;
         if (typeof row.taskId === 'string') lifeSnapshot.taskId = row.taskId;
@@ -128,11 +147,19 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
           payload: { legacyLifeId: row.id, legacyKind: row.kind, life: [lifeSnapshot] },
         });
       }
+
+      // A few legacy settlement records may have no life row (for example a
+      // partially written old database). Keep them valid and deterministic.
+      const missing = [...entryById.values()]
+        .filter((row) => !Number.isInteger(row.seq))
+        .sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? '')));
+      for (const row of missing) row.seq = ++seq;
+
+      data.entries = entries;
       data.operations = operations;
     },
   },
 ];
-
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
   if (raw.settings === undefined) raw.settings = defaultSettings();
@@ -339,7 +366,7 @@ const SHAPES: Record<Coll, Shape> = {
   },
   rules: { id: isText, contains: isText, projectId: isText },
   entries: {
-    id: isText, date: isDate, itemType: ITEM_TYPE, itemId: isText, outcome: OUTCOME, 'reason?': REASON,
+    id: isText, seq: intIn(1), date: isDate, itemType: ITEM_TYPE, itemId: isText, outcome: OUTCOME, 'reason?': REASON,
     'projectId?': isText, title: isStr,
   },
   days: { date: isDate, status: oneOf('settled', 'unrecorded') },

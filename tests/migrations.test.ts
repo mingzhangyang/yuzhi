@@ -82,6 +82,7 @@ describe('数据迁移基础设施', () => {
     expect(parsed.interruptions).toHaveLength(1);
     expect(parsed.operations).toHaveLength(1);
     expect(parsed.operations[0]).toMatchObject({ seq: 1, kind: 'project-created', projectId: 'p1' });
+    expect(parsed.entries.map((entry) => entry.seq)).toEqual([2, 3]);
     const migratedLife = lifeEntries(parsed);
     expect(migratedLife).toHaveLength(3);
     expect(migratedLife.filter((entry) => entry.text === '立项，村落「团队」在岛上落成')).toHaveLength(1);

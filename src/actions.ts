@@ -11,7 +11,7 @@ import { daysToArchive, entryId, itemsForDay, type SettleItem } from './logic/da
 import { dayLine, stageChangeText, type StageChange } from './logic/chronicle';
 import { applyRules, matchRule } from './logic/classify';
 import { backlog } from './logic/metrics';
-import { nextOperationSeq } from './logic/operations';
+import { nextFactSeq } from './logic/operations';
 import { ringOfLandmark, totalLandmarkCapacity } from './island/map';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
@@ -48,7 +48,7 @@ function operation(
   const payload = o.life?.length ? { ...(o.payload ?? {}), life: o.life } : o.payload;
   const event: OperationEvent = {
     id: uid('o'),
-    seq: nextOperationSeq(store.data),
+    seq: nextFactSeq(store.data),
     date: o.date ?? store.today(),
     kind: o.kind,
     projectId: o.projectId,
@@ -348,7 +348,17 @@ function recordEntry(store: Store, date: ISODate, item: SettleItem, outcome: Out
   if (prev && prev.outcome === outcome && prev.reason === reason) return;
   if (prev) revertEntry(store, prev);
   const projectId = item.projectId && item.projectId !== CHORES ? item.projectId : undefined;
-  const entry: SettlementEntry = { id, date, itemType: item.type, itemId: item.id, outcome, reason, projectId, title: item.title };
+  const entry: SettlementEntry = {
+    id,
+    seq: prev?.seq ?? nextFactSeq(store.data),
+    date,
+    itemType: item.type,
+    itemId: item.id,
+    outcome,
+    reason,
+    projectId,
+    title: item.title,
+  };
   store.put('entries', entry);
 
   const title = q(item.title);
