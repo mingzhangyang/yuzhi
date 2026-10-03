@@ -33,7 +33,20 @@ export class Store {
     const i = arr.findIndex((x) => x[key] === rec[key]);
     if (i >= 0) arr[i] = rec;
     else arr.push(rec);
-    this.queue(() => this.persist.put(coll, item as object));
+    this.queue(async () => {
+      const authoritativeSeq = await this.persist.put(coll, item as object);
+      if (
+        (coll === 'entries' || coll === 'operations') &&
+        authoritativeSeq !== undefined &&
+        rec.seq !== authoritativeSeq
+      ) {
+        rec.seq = authoritativeSeq;
+        // Persistence may allocate a different cross-tab sequence than the
+        // provisional local value. Invalidate replay caches only after the
+        // authoritative value has been applied to in-memory data.
+        this.changed();
+      }
+    });
     this.changed();
   }
 
@@ -44,7 +57,13 @@ export class Store {
     const i = arr.findIndex((x) => x[key] === oldKey);
     if (i >= 0) arr[i] = rec;
     else arr.push(rec);
-    this.queue(() => this.persist.renameFact(coll, oldKey, item as object));
+    this.queue(async () => {
+      const authoritativeSeq = await this.persist.renameFact(coll, oldKey, item as object);
+      if (rec.seq !== authoritativeSeq) {
+        rec.seq = authoritativeSeq;
+        this.changed();
+      }
+    });
     this.changed();
   }
 
