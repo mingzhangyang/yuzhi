@@ -13,6 +13,8 @@ import { STAGE_NAMES } from '../logic/config';
 import { addDays, dateOfStamp, diffDays, fmtDay, relDay, startOfLocalDay } from '../lib/date';
 import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
+import { summarize } from '../logic/summary';
+import { summaryHTML } from './ceremony';
 
 export type View =
   | { kind: 'overview' }
@@ -20,13 +22,15 @@ export type View =
   | { kind: 'task'; id: string }
   | { kind: 'dock' }
   | { kind: 'granary' }
-  | { kind: 'chores' };
+  | { kind: 'chores' }
+  | { kind: 'archive' };
 
 export interface TrackerHooks {
   openNewProject(): void;
   openClassify(): void;
   openPrompt(p: Project): void;
   openSettings(): void;
+  openCeremony(p: Project): void;
   onViewChange(v: View): void;
 }
 
@@ -156,6 +160,9 @@ export class Tracker {
       case 'chores':
         [html, title, sub] = this.chores();
         break;
+      case 'archive':
+        [html, title, sub] = this.archive();
+        break;
     }
     const focused = document.activeElement as HTMLInputElement | null;
     const keep = focused && this.body.contains(focused) && focused.name ? { name: focused.name, value: focused.value, pos: focused.selectionStart } : null;
@@ -203,6 +210,7 @@ export class Tracker {
       <div class="rows">${rows || '<p class="empty">岛上还没有村落。建一个项目，它就是第一座村落；也可以在「⋯」里放几个示例村落。</p>'}</div>
       <div class="sect">码头 <small>${b.dock} 船待安排 · ${b.overdue} 件过期</small></div>
       <button class="row" data-act="dock"><i class="sw" style="background:#a8794a"></i><span class="tx"><b>${b.dock ? `${b.dock} 条船停在码头` : '码头空着'}</b><span>${b.dock ? '决定它们住进哪个村落、排在哪天，或者婉拒' : '新任务会先停在这里'}</span></span><span class="end">›</span></button>
+      ${this.coastRow()}
       ${groups.length ? `<div class="sect">日历 <small>${groups.length} 类事件待归类</small></div><button class="row" data-act="classify"><i class="sw" style="background:var(--dusk)"></i><span class="tx"><b>有新的日历事件不知道归哪</b><span>指定一次，以后同类自动归位</span></span><span class="end">›</span></button>` : ''}
     `;
     return [html, '小岛总览', `${ps.length} 个村落 · 码头 ${b.dock} 船`];
@@ -218,7 +226,11 @@ export class Tracker {
     const active = p.status === 'active';
     const stage = v?.stage ?? 0;
     const chips = [
-      active ? `<span class="chip ${stage ? 'warn' : 'ok'}">${STAGE_NAMES[stage]}</span>` : `<span class="chip warn">${p.status === 'closed' ? '已关闭 · 未竟之书' : '已完成'}</span>`,
+      active
+        ? `<span class="chip ${stage ? 'warn' : 'ok'}">${STAGE_NAMES[stage]}</span>`
+        : p.status === 'closed'
+          ? '<span class="chip warn">已关闭 · 未竟之书</span>'
+          : `<span class="chip ok">已落成 · ${p.resting === 'landmark' ? '海岸上的地标' : '灯塔里的档案'}</span>`,
       v?.postponePenalty ? '<span class="chip warn">有事连续推迟 3 次以上</span>' : '',
       active && stage === 3 ? '<span class="chip warn">任务可能放弃</span>' : '',
       `<span class="chip">${houseCount(s, p.id)} 间房</span>`,
@@ -234,22 +246,31 @@ export class Tracker {
     const life = s.data.life.filter((l) => l.projectId === p.id);
     const html = `
       ${this.back$()}
-      <div class="who"><div class="emblem">${emblem(roofOf(p.islandSlot), active ? stage : 2)}</div><div><div class="fname">${esc(p.name)}</div><div class="fmeta">${fmtDay(p.createdAt)}立项 · 已 ${diffDays(p.createdAt, today)} 天${p.closedAt ? ` · ${fmtDay(p.closedAt)}关闭` : ''}</div></div></div>
+      <div class="who"><div class="emblem">${emblem(roofOf(p.islandSlot), active ? stage : 2)}</div><div><div class="fname">${esc(p.name)}</div><div class="fmeta">${fmtDay(p.createdAt)}立项 · 已 ${diffDays(p.createdAt, today)} 天${p.closedAt ? ` · ${fmtDay(p.closedAt)}关闭` : ''}${p.doneAt ? ` · ${fmtDay(p.doneAt)}落成` : ''}</div></div></div>
       <div class="chips">${chips}</div>
-      <div class="nums"><div><b>${open.length}</b><span>未完成</span></div><div><b>${done.length}</b><span>已完成</span></div><div><b>${since ?? '—'}</b><span>距上次推进（天）</span></div></div>
+      ${
+        p.status === 'done'
+          ? `<div class="sect">一生之书小结</div>${summaryHTML(summarize(s.data, p, p.doneAt ?? today), true)}`
+          : `<div class="nums"><div><b>${open.length}</b><span>未完成</span></div><div><b>${done.length}</b><span>已完成</span></div><div><b>${since ?? '—'}</b><span>距上次推进（天）</span></div></div>`
+      }
       ${p.closeReason ? `<p class="hint">停下的原因：${esc(p.closeReason)}</p>` : ''}
-      <div class="sect">住在这里的任务 <small>${open.length}</small></div>
+      ${active && !open.length && done.length ? `<div class="ready"><span>村里的事都做完了。要举行落成仪式吗？</span><button class="btn small primary" data-act="complete" data-id="${p.id}">落成仪式</button></div>` : ''}
+      ${p.status === 'done' ? '' : `<div class="sect">住在这里的任务 <small>${open.length}</small></div>`}
       ${active ? `<form class="add" data-form="ptask" data-id="${p.id}"><input name="ptask" placeholder="添加任务…" autocomplete="off" aria-label="新任务">${dateSelect('pdate', today, today)}<button class="btn primary">添加</button></form>` : ''}
-      <div>${taskRows || '<p class="empty">村里还没有人。添加一件要做的事吧。</p>'}</div>
+      ${p.status === 'done' ? '' : `<div>${taskRows || (active ? '<p class="empty">村里还没有人。添加一件要做的事吧。</p>' : '')}</div>`}
       ${done.length ? `<details class="hint"><summary>已完成 ${done.length} 件</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${t.id}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
       <div class="sect">一生之书 <small>${life.length} 条</small></div>
       ${lifeList(life, today)}
       <div class="btnrow">
+        ${active ? `<button class="btn small primary" data-act="complete" data-id="${p.id}">完成项目 · 落成仪式</button>` : ''}
         ${active ? `<button class="btn small" data-act="rename" data-id="${p.id}">改名</button>` : ''}
         ${active && stage >= 1 ? `<button class="btn small" data-act="prompt" data-id="${p.id}">重新启动 / 缩小规模</button>` : ''}
-        ${active ? `<button class="btn small danger" data-act="close" data-id="${p.id}">正式关闭</button>` : `<button class="btn small" data-act="reopen" data-id="${p.id}">重新立起</button>`}
+        ${active ? `<button class="btn small danger" data-act="close" data-id="${p.id}">正式关闭</button>` : ''}
+        ${p.status === 'closed' ? `<button class="btn small" data-act="reopen" data-id="${p.id}">重新立起</button>` : ''}
+        ${p.status === 'done' && p.resting === 'landmark' ? `<button class="btn small" data-act="rest" data-to="archive" data-id="${p.id}">收进档案馆</button>` : ''}
+        ${p.status === 'done' && p.resting !== 'landmark' ? `<button class="btn small primary" data-act="rest" data-to="landmark" data-id="${p.id}">重新立为地标</button>` : ''}
       </div>`;
-    return [html, p.name, active ? STAGE_NAMES[stage] + ` · ${open.length} 件未完成` : '已关闭'];
+    return [html, p.name, active ? STAGE_NAMES[stage] + ` · ${open.length} 件未完成` : p.status === 'done' ? (p.resting === 'landmark' ? '海岸上的地标' : '灯塔里的档案') : '已关闭'];
   }
 
   private task(t: Task): [string, string, string] {
@@ -328,6 +349,49 @@ export class Tracker {
       ${evs.map((e) => `<div class="task"><div class="tt"><b>${esc(e.title)}</b><span>${timeOf(e.start)}–${timeOf(e.end)} · ${esc(e.projectId === CHORES ? '杂务' : s.project(e.projectId)?.name ?? '未归类')}</span></div></div>`).join('') || '<p class="empty">今天日历上没有安排。</p>'}
       <div class="btnrow"><button class="btn small" data-act="settings">调整工作时段</button></div>`;
     return [html, '粮仓', `可用 ${g.available.toFixed(1)} 小时`];
+  }
+
+  private coastRow(): string {
+    const s = this.store;
+    const marks = s.data.projects.filter((p) => p.status === 'done' && p.resting === 'landmark').length;
+    const books = s.data.projects.filter((p) => (p.status === 'done' && p.resting !== 'landmark') || p.status === 'closed').length;
+    if (!marks && !books) return '';
+    return `<div class="sect">海岸与灯塔</div><button class="row" data-act="archive"><i class="sw" style="background:#c8473a"></i><span class="tx"><b>${marks} 座地标 · 灯塔里 ${books} 本书</b><span>完成和关闭的项目都在这里，可以按年份翻看</span></span><span class="end">›</span></button>`;
+  }
+
+  /** 档案馆：山顶的灯塔。地标、落成之书（按年份）、未竟之书 */
+  private archive(): [string, string, string] {
+    const s = this.store;
+    const done = s.data.projects.filter((p) => p.status === 'done');
+    const marks = done.filter((p) => p.resting === 'landmark').sort((a, b) => (a.landmarkIndex ?? 0) - (b.landmarkIndex ?? 0));
+    const books = done.filter((p) => p.resting !== 'landmark');
+    const closed = s.data.projects.filter((p) => p.status === 'closed');
+    const row = (p: Project, meta: string) =>
+      `<button class="row" data-act="project" data-id="${p.id}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(meta)}</span></span><span class="end">›</span></button>`;
+    const byYear = (ps: Project[], dateOf: (p: Project) => string | undefined, meta: (p: Project) => string) => {
+      const years = new Map<string, Project[]>();
+      for (const p of ps) {
+        const y = (dateOf(p) ?? p.createdAt).slice(0, 4);
+        if (!years.has(y)) years.set(y, []);
+        years.get(y)!.push(p);
+      }
+      return [...years.entries()]
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([y, list]) => `<div class="year">${y} 年 <small>${list.length} 本</small></div><div class="rows">${list.sort((a, b) => (dateOf(b) ?? '').localeCompare(dateOf(a) ?? '')).map((p) => row(p, meta(p))).join('')}</div>`)
+        .join('');
+    };
+    const span = (p: Project, end?: string) => (end ? `${fmtDay(p.createdAt)}–${fmtDay(end)} · 用时 ${diffDays(p.createdAt, end) + 1} 天` : fmtDay(p.createdAt) + ' 立项');
+    const html = `
+      ${this.back$()}
+      <div class="ptitle" style="margin-top:8px">山顶的灯塔 <small>档案馆</small></div>
+      <p class="pdesc">完成的项目立在海岸上，或收在这里；正式关闭的项目放在「未竟之书」，记着它为什么停下。</p>
+      <div class="sect">海岸上的地标 <small>${marks.length}</small></div>
+      <div class="rows">${marks.map((p) => row(p, span(p, p.doneAt))).join('') || '<p class="empty">还没有地标。完成一个项目时可以把它立在海岸上。</p>'}</div>
+      <div class="sect">落成之书 <small>${books.length}</small></div>
+      ${byYear(books, (p) => p.doneAt, (p) => span(p, p.doneAt)) || '<p class="empty">书架还空着。</p>'}
+      <div class="sect">未竟之书 <small>${closed.length}</small></div>
+      ${byYear(closed, (p) => p.closedAt, (p) => span(p, p.closedAt) + (p.closeReason ? ' · ' + p.closeReason : '')) || '<p class="empty">没有中途停下的项目。</p>'}`;
+    return [html, '档案馆', `${marks.length} 座地标 · ${books.length + closed.length} 本书`];
   }
 
   private chores(): [string, string, string] {
@@ -462,6 +526,22 @@ export class Tracker {
       }
       case 'close':
         this.closeDialog(id);
+        break;
+      case 'archive':
+        this.open({ kind: 'archive' });
+        break;
+      case 'complete': {
+        const p = s.project(id);
+        if (p) this.hooks.openCeremony(p);
+        break;
+      }
+      case 'rest':
+        try {
+          A.setResting(s, id, el.dataset.to as 'landmark' | 'archive');
+          toast(el.dataset.to === 'landmark' ? '重新立在了海岸上' : '收进了山顶的灯塔');
+        } catch (err) {
+          if (err instanceof A.ActionError) toast(err.message, true);
+        }
         break;
       case 'reopen':
         try {

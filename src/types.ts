@@ -20,6 +20,12 @@ export interface Project {
   promptSnoozeUntil?: ISODate;
   /** 上一次记录在一生之书里的阶段，用于发现阶段变化 */
   lastStage?: number;
+  /** 落成（完成）的日期 */
+  doneAt?: ISODate;
+  /** 完成后的去处：海岸上的地标，或山顶灯塔里的档案馆 */
+  resting?: 'landmark' | 'archive';
+  /** 地标位编号（越小越靠里的年轮） */
+  landmarkIndex?: number;
 }
 
 export interface Task {
@@ -92,7 +98,7 @@ export interface DayRecord {
   status: 'settled' | 'unrecorded';
 }
 
-export type ChronicleKind = 'day' | 'event' | 'quiet' | 'recover';
+export type ChronicleKind = 'day' | 'event' | 'quiet' | 'recover' | 'landmark';
 
 export interface ChronicleLine {
   id: string;
@@ -102,7 +108,7 @@ export interface ChronicleLine {
   kind: ChronicleKind;
 }
 
-export type LifeKind = 'start' | 'task' | 'done' | 'partial' | 'skip' | 'stage' | 'close' | 'restart' | 'trim' | 'drop' | 'event';
+export type LifeKind = 'start' | 'task' | 'done' | 'partial' | 'skip' | 'stage' | 'close' | 'restart' | 'trim' | 'drop' | 'event' | 'complete';
 
 /** 一生之书里的一行 */
 export interface LifeEntry {

@@ -9,7 +9,7 @@ import { closeModal, openModal } from './modal';
 import * as A from '../actions';
 import { addFileSource, addUrlSource, syncSource } from '../calendar';
 import { suggestKeyword, unclassifiedGroups } from '../logic/classify';
-import { addDays, dateOfStamp, fmtDay, relDay } from '../lib/date';
+import { addDays, dateOfStamp, relDay } from '../lib/date';
 import { roofOf } from './scene';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -235,25 +235,6 @@ export function openSettings(store: Store, applyTheme: () => void) {
   });
 }
 
-/** 未竟之书：正式关闭的项目 */
-export function openClosed(store: Store, openProject: (id: string) => void) {
-  const ps = store.data.projects.filter((p) => p.status !== 'active').sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''));
-  openModal({
-    kick: '山顶的灯塔',
-    title: '未竟之书',
-    body: `<p class="hint">正式关闭的项目放在这里，记着它们为什么停下。落成仪式和档案馆会在第二版开放。</p>
-      <div class="rows">${ps.map((p) => `<button class="row" data-p="${p.id}"><span class="tx"><b>${esc(p.name)}</b><span>${fmtDay(p.createdAt)} 立项 · ${p.closedAt ? fmtDay(p.closedAt) + ' 关闭' : ''}${p.closeReason ? ' · ' + esc(p.closeReason) : ''}</span></span><span class="end">›</span></button>`).join('') || '<p class="empty">书架还空着。</p>'}</div>`,
-    mount(box) {
-      box.querySelectorAll<HTMLElement>('[data-p]').forEach((b) =>
-        b.addEventListener('click', () => {
-          closeModal(false);
-          openProject(b.dataset.p!);
-        }),
-      );
-    },
-  });
-}
-
 /** 第一次打开 */
 export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void }) {
   openModal({
@@ -284,6 +265,7 @@ export function seedDemo(store: Store) {
     const date = addDays(today, -days);
     store.put('projects', { ...p, createdAt: date });
     for (const l of store.data.life) if (l.projectId === pid && l.kind === 'start') store.put('life', { ...l, date });
+    for (const c of store.data.chronicle) if (c.text === `岛上立起了新村落「${p.name}」。`) store.put('chronicle', { ...c, date });
   };
   const doneOn = (pid: string, title: string, date: ISODate) => {
     const t = A.createTask(store, { title, projectId: pid, scheduledFor: date });
@@ -315,6 +297,19 @@ export function seedDemo(store: Store) {
     // 健身：没精力的几天不伤害村落
     mark(addDays(today, -3), doneOn(gym.id, '慢跑 3 公里', addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
     for (const [date, m] of [...settled.entries()].sort((a, b) => a[0].localeCompare(b[0]))) A.settleDay(store, date, m);
+
+    // 一个已经落成的项目：立在海岸上
+    const photo = A.createProject(store, '整理旧照片');
+    back(photo.id, 40);
+    for (let k = 0; k < 7; k++) {
+      const d = addDays(today, -38 + k * 4);
+      const t = doneOn(photo.id, ['扫描相册', '去重', '按年份归档', '补写说明', '做一本电子相册', '备份到硬盘', '分享给家人'][k], d);
+      A.settleDay(store, d, new Map([[`task|${t.id}`, { outcome: 'done' }]]));
+    }
+    A.completeProject(store, photo.id, 'landmark');
+    store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
+    for (const l of store.data.life) if (l.projectId === photo.id && l.kind === 'complete') store.put('life', { ...l, date: addDays(today, -10) });
+    for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes('整理旧照片')) store.put('chronicle', { ...c, date: addDays(today, -10) });
 
     A.createTask(store, { title: '第 5 章初稿', projectId: write.id, scheduledFor: today });
     A.createTask(store, { title: '找出版社聊聊', projectId: write.id });

@@ -4,6 +4,7 @@ import { CHORES } from '../types';
 import { BRICKS_PER_HOUSE, MAX_WALKERS } from '../logic/config';
 import { granary, progressWeight } from '../logic/metrics';
 import { pendingDays } from '../logic/days';
+import { islandRings } from '../actions';
 import { addDays, dateOfStamp, seasonOf } from '../lib/date';
 
 /** 村落的屋顶颜色，按槽位固定 */
@@ -58,5 +59,9 @@ export function buildScene(store: Store, selected: Selection | null, dusk: boole
     granaryLabel: `粮仓 ${g.available.toFixed(1)} 小时`,
     fog: Math.min(1, pending * 0.4),
     selected,
+    rings: islandRings(store),
+    landmarks: store.data.projects
+      .filter((p) => p.status === 'done' && p.resting === 'landmark' && p.landmarkIndex != null)
+      .map((p) => ({ projectId: p.id, name: p.name.length > 8 ? p.name.slice(0, 7) + '…' : p.name, roof: roofOf(p.islandSlot), index: p.landmarkIndex!, size: houseCount(store, p.id) })),
   };
 }

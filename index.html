@@ -63,6 +63,7 @@
     <p>你在日历上的时间，决定村落热闹还是冷清；你自己建的项目和任务，决定小岛往哪个方向长。每个项目是一座村落，每件还没做完的任务是住在里面的一个小人。新任务先乘船停在码头，等你决定它住进哪个村落、排在哪天。</p>
     <p>晚上点「晚间结算」，小岛进入黄昏。今天的事件和任务排成一列：右滑是做了，变成一块砖飞进村落；左滑是没做，可以选一个原因；轻点是做了一部分。过去的事不会默认算完成，要你确认。忘了结算的日子，小岛会被海雾笼罩；补上就散。超过 3 天还没结算，自动归档为「未记录」，不产生任何后果。</p>
     <p>村落按距上次真实推进的天数变化：一周没动会安静下来，两周屋顶蒙灰，四周开始有居民搬离，这时小岛会问你：重新启动、缩小规模，还是正式关闭。每有一天真实推进，村落就回退一个阶段——荒了一个月的村落，认真两三天就能恢复热闹。「推到明天」单次无后果，同一件事推 3 次起村落会加重一档；「没精力」不伤害村落，只让粮仓少一点；「不重要了」是好的取舍，不算惩罚。</p>
+    <p>一个项目做完时，点「完成项目 · 落成仪式」：小岛暂停，翻开它的一生之书小结——用时、推迟次数、主要卡点、关键转折——然后由你决定它的去处：立为海岸上的地标，或收进山顶灯塔里的档案馆。地标越多，岛会向外长出新的陆地，像年轮。选择以后可以反悔。</p>
     <p>所有数据只存在这个浏览器里（IndexedDB）。可以在「⋯」里导出 / 导入 JSON 备份。</p>
   </details>
 </div>
@@ -75,12 +76,16 @@
   <div class="sbox card" role="dialog" aria-modal="true" aria-labelledby="settleT" id="settleBox"></div>
 </div>
 
+<div class="ceremony" id="ceremony" hidden>
+  <div class="cbox card" role="dialog" aria-modal="true" aria-labelledby="ceremonyT" id="ceremonyBox"></div>
+</div>
+
 <div class="menu card" id="menu" role="menu" hidden>
   <button data-m="settings" role="menuitem">工作时段与外观</button>
   <button data-m="export" role="menuitem">导出备份（JSON）</button>
   <button data-m="import" role="menuitem">导入备份…</button>
   <hr>
-  <button data-m="closed" role="menuitem">未竟之书（已关闭的项目）</button>
+  <button data-m="archive" role="menuitem">档案馆（山顶的灯塔）</button>
   <button data-m="demo" role="menuitem">放几个示例村落</button>
 </div>
 

@@ -9,7 +9,8 @@ import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
 import { SettleSheet } from './ui/settle';
 import { buildScene, lightNow, ROOFS } from './ui/scene';
-import { openCalendar, openClassify, openClosed, openNew, openSettings, openWelcome, seedDemo } from './ui/forms';
+import { Ceremony } from './ui/ceremony';
+import { openCalendar, openClassify, openNew, openSettings, openWelcome, seedDemo } from './ui/forms';
 import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
@@ -51,9 +52,18 @@ async function boot() {
     openClassify: () => openClassify(store),
     openPrompt: (p) => abandonPrompt(store, p, () => setTimeout(maybePrompt, 300)),
     openSettings: () => openSettings(store, applyTheme),
+    openCeremony: (p) => ceremony.open(p),
     onViewChange: () => update(),
   });
   tracker.bindChange();
+
+  const ceremony = new Ceremony(store, {
+    pause: (on) => (renderer.paused = on),
+    done: (p, where) => {
+      tracker.open(where === 'landmark' ? { kind: 'project', id: p.id } : { kind: 'archive' });
+      setTimeout(() => renderer.pulse(p.id), 400);
+    },
+  });
 
   const settle = new SettleSheet(store, {
     brick: (pid, from) => flyBrick(pid, from),
@@ -94,6 +104,7 @@ async function boot() {
       case 'dock':
       case 'granary':
       case 'chores':
+      case 'archive':
         return { kind: v.kind };
       default:
         return null;
@@ -103,10 +114,6 @@ async function boot() {
   renderer.onTap = (hit) => {
     $('tip').style.opacity = '0';
     if (!hit) return;
-    if (hit.kind === 'lighthouse') {
-      toast('山顶的灯塔是档案馆。落成仪式和档案馆会在第二版开放。');
-      return;
-    }
     if (hit.kind === 'project' || hit.kind === 'task') tracker.open({ kind: hit.kind, id: hit.id });
     else tracker.open({ kind: hit.kind });
   };
@@ -146,7 +153,7 @@ async function boot() {
   /** 进入「搬离」阶段的村落：询问重新启动 / 缩小规模 / 正式关闭 */
   const asked = new Set<string>();
   function maybePrompt() {
-    if (isModalOpen() || settle.isOpen()) return;
+    if (isModalOpen() || settle.isOpen() || ceremony.isOpen()) return;
     const p = A.projectsNeedingPrompt(store).find((x) => !asked.has(x.id));
     if (!p) return;
     asked.add(p.id);
@@ -230,7 +237,7 @@ async function boot() {
       } catch (err) {
         toast(err instanceof Error ? err.message : String(err), true);
       }
-    } else if (m === 'closed') openClosed(store, (id) => tracker.open({ kind: 'project', id }));
+    } else if (m === 'archive') tracker.open({ kind: 'archive' });
     else if (m === 'demo') seedDemo(store);
   });
 

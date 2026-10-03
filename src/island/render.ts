@@ -23,6 +23,16 @@ export interface VillageView {
   openCount: number;
 }
 
+export interface LandmarkView {
+  projectId: string;
+  name: string;
+  roof: string;
+  /** 地标位编号 */
+  index: number;
+  /** 规模：由村落当年的房子数决定，1–10 */
+  size: number;
+}
+
 export type Light = 'day' | 'dusk' | 'night';
 
 export interface Scene {
@@ -37,10 +47,13 @@ export interface Scene {
   /** 0–1 */
   fog: number;
   selected: Selection | null;
+  /** 地标越多，岛向外长出的年轮越多 */
+  rings: number;
+  landmarks: LandmarkView[];
 }
 
-export type Selection = { kind: 'project'; id: string } | { kind: 'task'; id: string } | { kind: 'dock' } | { kind: 'granary' } | { kind: 'chores' };
-export type Hit = Selection | { kind: 'lighthouse' } | null;
+export type Selection = { kind: 'project'; id: string } | { kind: 'task'; id: string } | { kind: 'dock' } | { kind: 'granary' } | { kind: 'chores' } | { kind: 'archive' };
+export type Hit = Selection | null;
 
 interface Walker {
   id: string;
@@ -78,7 +91,9 @@ export function shade(c: string, t: number): string {
 }
 
 export class IslandRenderer {
-  readonly map: IslandMap = buildIsland();
+  map: IslandMap = buildIsland(0);
+  /** 落成仪式时小岛暂停 */
+  paused = false;
   private ctx: CanvasRenderingContext2D;
   private view = { w: 0, h: 0, dpr: 1, zoom: 1, panX: 0, panY: 0, tw: 30, ox: 0, oy: 0 };
   private scene: Scene | null = null;
@@ -91,7 +106,7 @@ export class IslandRenderer {
   private t = 0;
   private drag: { x: number; y: number; px: number; py: number; moved: boolean } | null = null;
   private grow = new Map<string, { houses: number; anim: number }>();
-  private pulses: { slot: number; t: number }[] = [];
+  private pulses: { at: Tile; t: number }[] = [];
   private lights: [number, number, number][] = [];
   private rnd = mulberry32(7);
   onTap: (hit: Hit) => void = () => {};
@@ -161,6 +176,16 @@ export class IslandRenderer {
     const prev = this.scene;
     this.scene = s;
     if (!prev || prev.season !== s.season) this.colorKey = '';
+    if (s.rings !== this.map.rings) {
+      this.map = buildIsland(s.rings);
+      this.colorKey = '';
+      this.layout();
+    }
+    for (const l of s.landmarks) {
+      const key = 'lm:' + l.projectId;
+      const g = this.grow.get(key);
+      if (!g || g.houses !== l.index) this.grow.set(key, { houses: l.index, anim: prev ? 0 : 1 });
+    }
     const keep = new Set<string>();
     for (const v of s.villages) {
       const site = this.map.villages[v.slot];
@@ -201,7 +226,10 @@ export class IslandRenderer {
   /** 一块砖飞进村落后，让村落亮一下 */
   pulse(projectId: string) {
     const v = this.scene?.villages.find((x) => x.projectId === projectId);
-    if (v) this.pulses.push({ slot: v.slot, t: 0 });
+    if (v) this.pulses.push({ at: this.map.villages[v.slot].center, t: 0 });
+    const l = this.scene?.landmarks.find((x) => x.projectId === projectId);
+    const site = l && this.map.landmarks[l.index];
+    if (site) this.pulses.push({ at: site, t: 0 });
   }
 
   /** 村落在页面上的位置（用于砖块飞行动画） */
@@ -249,7 +277,8 @@ export class IslandRenderer {
     const v = this.view;
     const N = this.map.N;
     // 岛的半径约 10.5 格：等距投影后横向跨度约 15 格宽、纵向约 8 格高
-    const base = Math.min((v.w * 0.97) / 15.2, (v.h * 0.94) / 8.4);
+    const k = this.map.radius / 10.5;
+    const base = Math.min((v.w * 0.97) / (15.2 * k), (v.h * 0.94) / (8.4 * k));
     v.tw = base * v.zoom;
     v.panX = clamp(v.panX, -v.w * 0.6 * v.zoom, v.w * 0.6 * v.zoom);
     v.panY = clamp(v.panY, -v.h * 0.6 * v.zoom, v.h * 0.6 * v.zoom);
@@ -296,7 +325,11 @@ export class IslandRenderer {
     if (fj > m.dock.j - 0.6 && Math.abs(fi - m.dock.i) < 1.8 && fj < m.dock.j + m.pierLen + 1) return { kind: 'dock' };
     if (near(m.granary, 0.9)) return { kind: 'granary' };
     if (near(m.chores, 0.9)) return { kind: 'chores' };
-    if (near(m.lighthouse, 1.3)) return { kind: 'lighthouse' };
+    if (near(m.lighthouse, 1.3)) return { kind: 'archive' };
+    for (const l of s.landmarks) {
+      const site = m.landmarks[l.index];
+      if (site && near(site, 0.8)) return { kind: 'project', id: l.projectId };
+    }
     let vb: VillageView | null = null;
     let vd = 2.6;
     for (const v of s.villages) {
@@ -317,6 +350,10 @@ export class IslandRenderer {
   private step(dt: number) {
     const s = this.scene;
     if (!s) return;
+    for (const g of this.grow.values()) if (g.anim < 1) g.anim = Math.min(1, g.anim + dt * (this.paused ? 0.6 : 1.6));
+    for (const pl of this.pulses) pl.t += dt;
+    this.pulses = this.pulses.filter((p) => p.t < 1.4);
+    if (this.paused) return;
     const speed = 0.55 * dt;
     const m = this.map;
     for (const p of this.walkers.values()) {
@@ -339,9 +376,6 @@ export class IslandRenderer {
       if (p.wait > 0) continue;
       this.retarget(p, m.villages[p.slot], s);
     }
-    for (const g of this.grow.values()) if (g.anim < 1) g.anim = Math.min(1, g.anim + dt * 1.6);
-    for (const pl of this.pulses) pl.t += dt;
-    this.pulses = this.pulses.filter((p) => p.t < 1.4);
   }
 
   private retarget(p: Walker, site: VillageSite, s: Scene) {
@@ -498,6 +532,55 @@ export class IslandRenderer {
       c.fill();
       c.restore();
     }
+  }
+
+  /** 地标：村落合成的永久建筑。石台 + 主屋，规模大的多一座塔；返回窗户位置 */
+  private drawLandmark(x: number, y: number, tw: number, l: LandmarkView, anim: number, selected: boolean): [number, number] {
+    const c = this.ctx;
+    const k = 0.25 + 0.75 * anim;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    if (selected) {
+      c.strokeStyle = this.theme.accent;
+      c.lineWidth = 2;
+      c.beginPath();
+      c.ellipse(x, y, hw * 0.95, hh * 0.95, 0, 0, Math.PI * 2);
+      c.stroke();
+    }
+    // 石台
+    const pw = hw * 0.78;
+    const ph = hh * 0.78;
+    const pd = tw * 0.1;
+    this.poly('#cfc8b4', x - pw, y, x, y + ph, x, y + ph + pd, x - pw, y + pd);
+    this.poly('#b3ab95', x, y + ph, x + pw, y, x + pw, y + pd, x, y + ph + pd);
+    this.poly('#e4dece', x, y - ph, x + pw, y, x, y + ph, x - pw, y);
+    c.save();
+    c.translate(x, y);
+    c.scale(1, k);
+    c.translate(-x, -y);
+    const big = l.size >= 6;
+    const roof = shade(l.roof, -0.05);
+    if (big) {
+      // 后面一座塔
+      const tx = x + hw * 0.32;
+      const ty = y - hh * 0.32;
+      const w = tw * 0.13;
+      const h = tw * 0.62;
+      this.poly('#f1eadb', tx - w, ty, tx, ty + w * 0.5, tx, ty + w * 0.5 - h, tx - w, ty - h);
+      this.poly('#d8cfbb', tx, ty + w * 0.5, tx + w, ty, tx + w, ty - h, tx, ty + w * 0.5 - h);
+      this.poly(roof, tx - w * 1.2, ty - h, tx, ty - h - tw * 0.3, tx, ty - h + w * 0.6);
+      this.poly(shade(roof, -0.2), tx, ty - h - tw * 0.3, tx + w * 1.2, ty - h, tx, ty - h + w * 0.6);
+    }
+    const win = this.drawHouse(x - (big ? hw * 0.12 : 0), y + (big ? hh * 0.12 : 0), tw * (big ? 0.5 : 0.44), roof, '#f4ecd8');
+    // 旗
+    const fx = x - hw * (big ? 0.55 : 0.4);
+    const fy = y - tw * (big ? 0.62 : 0.55);
+    c.fillStyle = '#6b4a30';
+    c.fillRect(fx, fy - tw * 0.3, Math.max(1, tw * 0.025), tw * 0.34);
+    const wave = Math.sin(this.t * 2 + l.index) * tw * 0.02;
+    this.poly(l.roof, fx, fy - tw * 0.3, fx + tw * 0.18, fy - tw * 0.25 + wave, fx, fy - tw * 0.19);
+    c.restore();
+    return [win[0], y + (win[1] - y) * k];
   }
 
   private drawGranary(x: number, y: number, tw: number, ratio: number) {
@@ -717,6 +800,8 @@ export class IslandRenderer {
     const occupied = new Map<number, VillageView>();
     for (const vv of s.villages) occupied.set(vv.slot, vv);
     const night = s.light !== 'day';
+    const lmAt = new Map<number, LandmarkView>();
+    for (const l of s.landmarks) lmAt.set(l.index, l);
     for (const t of m.all) {
       const [x, y] = this.iso(t.i, t.j);
       if (t.type === 'mountain') this.drawMountain(x, y, t, tw, s.season);
@@ -754,6 +839,13 @@ export class IslandRenderer {
           const litFrac = [0.9, 0.5, 0.25, 0.12][vv.stage];
           if (night && !boarded && hash(vv.projectId + t.slotIdx) < litFrac) this.lights.push([win[0], win[1], tw * 0.2]);
         }
+      }
+      const lm = t.landmark >= 0 ? lmAt.get(t.landmark) : undefined;
+      if (lm) {
+        const g = this.grow.get('lm:' + lm.projectId);
+        const win = this.drawLandmark(x, y, tw, lm, g ? g.anim : 1, s.selected?.kind === 'project' && s.selected.id === lm.projectId);
+        if (night) this.lights.push([win[0], win[1], tw * 0.24]);
+        continue;
       }
       for (const tr of t.trees) this.drawTree(x + (tr.dx - tr.dy) * hw, y + (tr.dx + tr.dy) * hh, tw * 0.42 * tr.s, tr.kind, s.season);
     }
@@ -801,8 +893,7 @@ export class IslandRenderer {
 
     // 落砖时的光圈
     for (const pl of this.pulses) {
-      const ctr = m.villages[pl.slot].center;
-      const [x, y] = this.iso(ctr.i, ctr.j);
+      const [x, y] = this.iso(pl.at.i, pl.at.j);
       const k = pl.t / 1.4;
       c.strokeStyle = `rgba(226,173,47,${(1 - k) * 0.9})`;
       c.lineWidth = 3;
@@ -847,6 +938,14 @@ export class IslandRenderer {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
         this.label(cx2, cy2 + tw * 0.3, `杂务 ${s.choresCount}`, '#8a8578', sel?.kind === 'chores', true);
       }
+    }
+    for (const l of s.landmarks) {
+      const site = m.landmarks[l.index];
+      if (!site) continue;
+      const hl = sel?.kind === 'project' && sel.id === l.projectId;
+      if (!hl && v.zoom < 1.4) continue;
+      const [x, y] = this.iso(site.i, site.j);
+      this.label(x, y - tw * 0.95, l.name, l.roof, hl, !hl);
     }
     if (selW) {
       const [p, x, y] = selW;
