@@ -3,6 +3,7 @@ import type { Data, Settings } from './types';
 import { CHORES } from './types';
 import { localDate } from './lib/date';
 import { MAX_VILLAGES, STAGE_NAMES } from './logic/config';
+import { runMigrationSteps, type MigrationStep } from './migrations';
 
 /** 数据集合名 → 主键字段 */
 export const COLLECTIONS = {
@@ -22,9 +23,34 @@ export type Coll = keyof typeof COLLECTIONS;
 export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
-const DB_VERSION = 2;
+export const IDB_SCHEMA_VERSION = 2;
+export const DATA_VERSION = 1;
+const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = DATA_VERSION;
+
+const STORAGE_UNAVAILABLE_NAMES = new Set(['SecurityError', 'NotAllowedError', 'InvalidStateError', 'UnknownError', 'QuotaExceededError', 'NotSupportedError']);
+
+function isStorageUnavailableCause(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const name = (error as { name?: unknown }).name;
+  return typeof name === 'string' && STORAGE_UNAVAILABLE_NAMES.has(name);
+}
+
+export class StorageUnavailableError extends Error {
+  constructor(
+    cause: unknown,
+    /** Data that was already read and validated before persistence failed. */
+    public readonly recoveredData?: Data,
+  ) {
+    super('浏览器本地存储不可用', { cause });
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+export function isStorageUnavailableError(error: unknown): error is StorageUnavailableError {
+  return error instanceof StorageUnavailableError;
+}
 
 export function defaultSettings(): Settings {
   return { workStart: '09:00', workEnd: '18:00', firstDay: localDate(), theme: 'auto' };
@@ -47,6 +73,27 @@ export function emptyData(): Data {
   };
 }
 
+type RawData = Record<string, unknown> & { settings: unknown };
+
+/** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
+const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [];
+
+function ensureCurrentCollections(raw: RawData): RawData {
+  for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
+  if (raw.settings === undefined) raw.settings = defaultSettings();
+  return raw;
+}
+
+function migrateRawData(raw: RawData, fromVersion: number) {
+  return runMigrationSteps(raw, fromVersion, DATA_VERSION, DATA_MIGRATIONS);
+}
+
+function parseStoredDataVersion(v: unknown): number | undefined {
+  if (v === undefined) return undefined;
+  if (!Number.isInteger(v) || (v as number) < 1) throw new Error('本地数据版本号损坏');
+  return v as number;
+}
+
 export interface Persistence {
   load(): Promise<Data>;
   put(coll: Coll, item: object): Promise<void>;
@@ -58,21 +105,65 @@ export interface Persistence {
 export class IdbPersistence implements Persistence {
   private dbp: Promise<IDBPDatabase>;
   constructor(name = DB_NAME) {
-    this.dbp = openDB(name, DB_VERSION, {
+    this.dbp = openDB(name, IDB_SCHEMA_VERSION, {
       upgrade(db) {
         for (const c of COLL_NAMES) if (!db.objectStoreNames.contains(c)) db.createObjectStore(c, { keyPath: COLLECTIONS[c] });
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
       },
+      blocking(_currentVersion, _blockedVersion, event) {
+        // Do not let an old tab keep a future schema upgrade blocked indefinitely.
+        (event.target as IDBDatabase | null)?.close();
+      },
     });
   }
   async load(): Promise<Data> {
-    const db = await this.dbp;
-    const d = emptyData();
-    for (const c of COLL_NAMES) (d as unknown as Record<Coll, unknown[]>)[c] = await db.getAll(c);
-    const s = (await db.get('meta', 'settings')) as Settings | undefined;
-    if (s) d.settings = { ...defaultSettings(), ...s };
-    else await db.put('meta', d.settings, 'settings');
-    return d;
+    let db: IDBPDatabase;
+    let raw: RawData;
+    let storedSettings: unknown;
+    let storedVersionValue: unknown;
+    try {
+      db = await this.dbp;
+      // Read every persisted collection, including legacy stores that are no
+      // longer part of the current Data type. A skipped-version upgrade may
+      // still need them as migration input.
+      raw = { settings: defaultSettings() };
+      for (const name of Array.from(db.objectStoreNames)) {
+        if (name !== 'meta') raw[name] = await db.getAll(name);
+      }
+      ensureCurrentCollections(raw);
+      storedSettings = await db.get('meta', 'settings');
+      storedVersionValue = await db.get('meta', 'dataVersion');
+    } catch (error) {
+      // Only known browser/IndexedDB availability failures may fall back to
+      // transient memory storage. Migration, version and validation failures
+      // must remain visible so we never make existing data look "empty".
+      if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error);
+      throw error;
+    }
+    raw.settings = storedSettings ?? defaultSettings();
+
+    const storedVersion = parseStoredDataVersion(storedVersionValue);
+    const fromVersion = storedVersion ?? LEGACY_DATA_VERSION;
+    const migrated = migrateRawData(raw, fromVersion);
+    const data = validateCurrentData(migrated.data, '本地数据');
+
+    try {
+      if (migrated.version !== fromVersion) {
+        await this.writeAll(db, data, migrated.version);
+      } else if (storedVersion === undefined || storedSettings === undefined) {
+        const tx = db.transaction('meta', 'readwrite');
+        if (storedSettings === undefined) await tx.objectStore('meta').put({ ...data.settings }, 'settings');
+        if (storedVersion === undefined) await tx.objectStore('meta').put(DATA_VERSION, 'dataVersion');
+        await tx.done;
+      }
+    } catch (error) {
+      // Startup persistence failures such as quota/security errors mean the
+      // browser cannot safely persist this session. Keep migration/version/
+      // validation errors outside this block so they remain actionable.
+      if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error, data);
+      throw error;
+    }
+    return data;
   }
   async put(coll: Coll, item: object) {
     await (await this.dbp).put(coll, structuredClone(item));
@@ -84,14 +175,18 @@ export class IdbPersistence implements Persistence {
     await (await this.dbp).put('meta', { ...s }, 'settings');
   }
   async replaceAll(d: Data) {
-    const db = await this.dbp;
+    await this.writeAll(await this.dbp, d, DATA_VERSION);
+  }
+  private async writeAll(db: IDBPDatabase, d: Data, dataVersion: number) {
     const tx = db.transaction([...COLL_NAMES, 'meta'], 'readwrite');
     for (const c of COLL_NAMES) {
       const st = tx.objectStore(c);
       await st.clear();
       for (const item of (d as unknown as Record<Coll, object[]>)[c]) await st.put(structuredClone(item));
     }
-    await tx.objectStore('meta').put({ ...d.settings }, 'settings');
+    const meta = tx.objectStore('meta');
+    await meta.put({ ...d.settings }, 'settings');
+    await meta.put(dataVersion, 'dataVersion');
     await tx.done;
   }
 }
@@ -114,21 +209,22 @@ const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 /** 校验备份里的设置：类型、格式、取值范围都对才接受，否则整份备份拒绝 */
-export function parseSettings(v: unknown): Settings {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('备份里的设置格式不对');
+export function parseSettings(v: unknown, source = '备份'): Settings {
+  const at = `${source}里的`;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${at}设置格式不对`);
   const o = v as Record<string, unknown>;
   const s = defaultSettings();
   const str = (k: string, re: RegExp, label: string) => {
     if (o[k] === undefined) return undefined;
-    if (typeof o[k] !== 'string' || !re.test(o[k] as string)) throw new Error(`备份里的${label}格式不对`);
+    if (typeof o[k] !== 'string' || !re.test(o[k] as string)) throw new Error(`${at}${label}格式不对`);
     return o[k] as string;
   };
   s.workStart = str('workStart', HM, '工作开始时间') ?? s.workStart;
   s.workEnd = str('workEnd', HM, '工作结束时间') ?? s.workEnd;
   s.firstDay = str('firstDay', YMD, '起始日期') ?? s.firstDay;
-  if (s.workEnd <= s.workStart) throw new Error('备份里的工作时段不对：结束要晚于开始');
+  if (s.workEnd <= s.workStart) throw new Error(`${at}工作时段不对：结束要晚于开始`);
   if (o.theme !== undefined) {
-    if (o.theme !== 'auto' && o.theme !== 'light' && o.theme !== 'dark') throw new Error('备份里的外观设置不对');
+    if (o.theme !== 'auto' && o.theme !== 'light' && o.theme !== 'dark') throw new Error(`${at}外观设置不对`);
     s.theme = o.theme;
   }
   return s;
@@ -201,10 +297,10 @@ function badField(x: unknown, shape: Shape): string | null {
 }
 
 /** 记录之间的引用：任务、事件归属、规则指向的项目要存在；活跃村落的位置不能重叠 */
-function checkRelations(d: Data) {
+function checkRelations(d: Data, source: string) {
   const projects = new Set(d.projects.map((p) => p.id));
   const fail = (what: string) => {
-    throw new Error(`备份里的数据对不上：${what}`);
+    throw new Error(`${source}里的数据对不上：${what}`);
   };
   for (const c of COLL_NAMES) {
     const key = COLLECTIONS[c];
@@ -225,6 +321,35 @@ function checkRelations(d: Data) {
   }
 }
 
+function validateCurrentData(raw: RawData, source: string): Data {
+  const d = emptyData();
+  for (const c of COLL_NAMES) {
+    const v = raw[c];
+    if (!Array.isArray(v)) throw new Error(`${source}里的 ${c} 格式不对`);
+    v.forEach((x, i) => {
+      const bad = badField(x, SHAPES[c]);
+      if (bad) throw new Error(`${source}里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
+    });
+    (d as unknown as Record<Coll, unknown[]>)[c] = v;
+  }
+  d.settings = parseSettings(raw.settings, source);
+  checkRelations(d, source);
+  return d;
+}
+
+function rawBackupData(o: Record<string, unknown>): RawData {
+  // Preserve unknown legacy fields so future migrations can consume them
+  // before current-schema validation discards them from the Data read model.
+  const raw: RawData = { settings: o.settings ?? defaultSettings() };
+  for (const [key, value] of Object.entries(o)) {
+    if (key === 'format' || key === 'version' || key === 'exportedAt' || key === 'settings') continue;
+    raw[key] = value;
+  }
+  ensureCurrentCollections(raw);
+  for (const c of COLL_NAMES) if (!Array.isArray(raw[c])) throw new Error(`备份里的 ${c} 格式不对`);
+  return raw;
+}
+
 export function exportBackup(d: Data): string {
   const out: Record<string, unknown> = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), settings: d.settings };
   for (const c of COLL_NAMES) out[c] = (d as unknown as Record<Coll, unknown[]>)[c];
@@ -240,19 +365,9 @@ export function parseBackup(text: string): Data {
     throw new Error('这不是有效的 JSON 文件');
   }
   if (!o || o.format !== BACKUP_FORMAT) throw new Error('这不是屿志的备份文件');
-  if (typeof o.version !== 'number' || o.version > BACKUP_VERSION) throw new Error('备份来自更新的版本，请先升级屿志');
-  const d = emptyData();
-  for (const c of COLL_NAMES) {
-    const v = o[c];
-    if (v == null) continue;
-    if (!Array.isArray(v)) throw new Error(`备份里的 ${c} 格式不对`);
-    v.forEach((x, i) => {
-      const bad = badField(x, SHAPES[c]);
-      if (bad) throw new Error(`备份里的 ${c} 第 ${i + 1} 条记录损坏（${bad}）`);
-    });
-    (d as unknown as Record<Coll, unknown[]>)[c] = v;
-  }
-  if (o.settings != null) d.settings = parseSettings(o.settings);
-  checkRelations(d);
-  return d;
+  if (!Number.isInteger(o.version) || (o.version as number) < LEGACY_DATA_VERSION) throw new Error('备份版本号不对');
+  if ((o.version as number) > DATA_VERSION) throw new Error('备份来自更新的版本，请先升级屿志');
+
+  const migrated = migrateRawData(rawBackupData(o), o.version as number);
+  return validateCurrentData(migrated.data, '备份');
 }
