@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { closeProject, createProject, createTask, rescheduleTask, restartProject, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
+import { taskStates } from '../src/logic/read-model';
 import { makeStore } from './helpers';
 
 describe('Phase 2 fact replay', () => {
+  it('历史快照不包含 throughDate 之后才创建的回填任务', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '团队');
+    h.setToday('2026-09-10');
+    const futureTask = createTask(h.store, { title: '后来补录', projectId: p.id, scheduledFor: '2026-09-02' });
+
+    expect(taskStates(h.store.data, '2026-09-02').some((task) => task.id === futureTask.id)).toBe(false);
+  });
+
   it('改判旧结算不会覆盖后来手动改期', () => {
     const h = makeStore('2026-10-01');
     const p = createProject(h.store, '团队');

@@ -183,31 +183,44 @@ function reconcileLegacyEntries(
         entry.seq > original.seq &&
         entry.seq < baseline.seq,
     );
-    const laterOps = data.operations.filter(
-      (event) =>
-        event.seq > original.seq &&
-        event.seq < baseline.seq &&
-        (event.taskId === taskId || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)),
-    );
+    const laterOps = data.operations
+      .filter(
+        (event) =>
+          event.seq > original.seq &&
+          event.seq < baseline.seq &&
+          (event.taskId === taskId || (PROJECT_TASK_KINDS.has(event.kind) && event.projectId)),
+      )
+      .sort((a, b) => a.seq - b.seq);
+
+    // Project-wide facts only affect this task while replay says the task
+    // actually belongs to that project at that sequence. An unrelated close
+    // must not protect a migrated baked-in status from reconciliation.
+    let replayedProjectId = original.projectId;
+    let projectStatusOverridden = false;
+    let postponeReset = false;
+    for (const event of laterOps) {
+      if (event.taskId === taskId) {
+        if (event.kind === 'task-arranged') replayedProjectId = event.projectId;
+        else if (event.kind === 'task-moved') replayedProjectId = text(event.payload?.toProjectId);
+      }
+      if (!event.projectId || event.projectId !== replayedProjectId) continue;
+      if (event.kind === 'project-closed' || event.kind === 'project-completed') projectStatusOverridden = true;
+      if (event.kind === 'project-restarted' || event.kind === 'project-trimmed') postponeReset = true;
+    }
 
     const statusOverridden =
       laterEntries.length > 0 ||
-      laterOps.some((event) =>
-        event.kind === 'task-dropped' ||
-        event.kind === 'project-closed' ||
-        event.kind === 'project-completed'
-      );
+      laterOps.some((event) => event.kind === 'task-dropped' && event.taskId === taskId) ||
+      projectStatusOverridden;
     const scheduleOverridden =
       laterEntries.some((entry) => entry.outcome === 'partial' || (entry.outcome === 'skipped' && entry.reason !== 'not_important')) ||
       laterOps.some((event) =>
-        event.kind === 'task-rescheduled' ||
-        event.kind === 'task-arranged' ||
-        (event.kind === 'task-moved' && !text(event.payload?.toProjectId))
-      );
-    const postponeReset =
-      laterOps.some((event) =>
-        (event.kind === 'project-restarted' || event.kind === 'project-trimmed') &&
-        event.projectId === original.projectId
+        event.taskId === taskId &&
+        (
+          event.kind === 'task-rescheduled' ||
+          event.kind === 'task-arranged' ||
+          (event.kind === 'task-moved' && !text(event.payload?.toProjectId))
+        )
       );
 
     // Undo the original v2 side effect, but never overwrite a later fact that
@@ -298,7 +311,9 @@ export function taskState(data: Data, task: Task, throughDate?: ISODate): TaskVi
 }
 
 export function taskStates(data: Data, throughDate?: ISODate): TaskView[] {
-  return data.tasks.map((task) => taskState(data, task, throughDate));
+  return data.tasks
+    .filter((task) => !throughDate || task.createdAt <= throughDate)
+    .map((task) => taskState(data, task, throughDate));
 }
 
 export function lastProgressAt(data: Data, projectId: string): ISODate | undefined {

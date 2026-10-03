@@ -180,6 +180,7 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       const tasks = Array.isArray(data.tasks) ? data.tasks : [];
       const projects = Array.isArray(data.projects) ? data.projects : [];
       const life = Array.isArray(data.life) ? data.life : [];
+      const chronicle = Array.isArray(data.chronicle) ? data.chronicle : [];
 
       let seq = 0;
       for (const value of [...entries, ...operations]) {
@@ -213,6 +214,18 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       }
       if (baselineDate === '1970-01-01') baselineDate = '2000-01-01';
 
+      // Phase 2 must never invent pre-migration stage chronicle rows. Persist
+      // the old chronicle horizon as an explicit no-op fact so refreshStages()
+      // keeps the same cutoff after it starts writing new stage lines.
+      let stageReplayBoundary: string | undefined;
+      for (const value of chronicle) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const date = (value as Record<string, unknown>).date;
+        if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) && (!stageReplayBoundary || date > stageReplayBoundary)) {
+          stageReplayBoundary = date;
+        }
+      }
+
       for (const value of tasks) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
         const row = value as Record<string, unknown>;
@@ -245,6 +258,15 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
           payload,
         });
         delete row.postponeCount;
+      }
+
+      if (stageReplayBoundary) {
+        operations.push({
+          id: 'op|v3-stage-replay-boundary',
+          seq: ++seq,
+          date: stageReplayBoundary,
+          kind: 'migration-boundary',
+        });
       }
 
       const settlementLifeIds = new Set<string>();
@@ -525,7 +547,7 @@ const ITEM_TYPE = oneOf('task', 'event');
 const OPERATION_KIND = oneOf(
   'project-created', 'project-renamed', 'project-restarted', 'project-trimmed', 'project-closed',
   'project-completed', 'project-resting-changed', 'task-created', 'task-arranged', 'task-rescheduled',
-  'task-moved', 'task-dropped', 'task-state-baseline', 'legacy-life',
+  'task-moved', 'task-dropped', 'task-state-baseline', 'migration-boundary', 'legacy-life',
 );
 const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete');
 const OPERATION_LIFE = arrayOf({

@@ -78,7 +78,7 @@ describe('数据迁移基础设施', () => {
 
   it('迁移全部主动 life kind，并保留同日事实顺序', () => {
     const parsed = parseBackup(JSON.stringify(v1OperationHistoryFixture));
-    expect(parsed.operations.filter((event) => event.kind !== 'task-state-baseline').map((event) => [event.seq, event.kind])).toEqual([
+    expect(parsed.operations.filter((event) => event.kind !== 'task-state-baseline' && event.kind !== 'migration-boundary').map((event) => [event.seq, event.kind])).toEqual([
       [1, 'project-created'],
       [2, 'legacy-life'],
       [3, 'legacy-life'],
@@ -217,7 +217,7 @@ describe('数据迁移基础设施', () => {
     const reverse = await seed(dbName('legacy-life-reverse'), [...rows].reverse());
     const order = (data: typeof forward) =>
       data.operations
-        .filter((event) => event.kind !== 'task-state-baseline')
+        .filter((event) => event.kind !== 'task-state-baseline' && event.kind !== 'migration-boundary')
         .slice()
         .sort((a, b) => a.seq - b.seq)
         .map((event) => [event.seq, event.kind, event.payload?.legacyLifeId]);
@@ -245,6 +245,7 @@ describe('数据迁移基础设施', () => {
     expect(taskState(parsed, rawTask)).toMatchObject({ scheduledFor: '2026-10-02', postponeCount: 1, status: 'open' });
     expect(interruptions(parsed)).toHaveLength(1);
     expect(parsed.operations.filter((event) => event.kind === 'task-state-baseline')).toHaveLength(2);
+    expect(parsed.operations.find((event) => event.kind === 'migration-boundary')).toMatchObject({ date: '2026-10-01' });
     expect(parsed.operations.find((event) => event.kind === 'project-created')).toMatchObject({ seq: 1, projectId: 'p1' });
     expect(parsed.entries.map((entry) => entry.seq)).toEqual([2, 3]);
     expect(parsed.life.some((entry) => ['done', 'partial', 'skip', 'stage'].includes(entry.kind))).toBe(false);
@@ -276,6 +277,51 @@ describe('数据迁移基础设施', () => {
       status: 'open',
       scheduledFor: '2026-10-01',
       postponeCount: 0,
+    });
+  });
+
+  it('迁移 reconciliation 不把无关项目关闭当成任务状态 override', () => {
+    const legacy = JSON.parse(JSON.stringify(v1BackupFixture)) as any;
+    legacy.projects.push({
+      id: 'p2',
+      name: '无关项目',
+      createdAt: '2026-10-01',
+      status: 'closed',
+      islandSlot: 1,
+      closedAt: '2026-10-01',
+    });
+    legacy.tasks[0] = {
+      ...legacy.tasks[0],
+      status: 'done',
+      closedAt: '2026-10-01',
+      scheduledFor: '2026-10-01',
+      postponeCount: 0,
+    };
+    legacy.entries[0] = { ...legacy.entries[0], outcome: 'done' };
+    delete legacy.entries[0].reason;
+    const taskLifeIndex = legacy.life.findIndex((row: any) => row.id === 'l|2026-10-01|task|t1');
+    legacy.life[taskLifeIndex] = {
+      ...legacy.life[taskLifeIndex],
+      kind: 'done',
+      text: '完成了「写周报」',
+    };
+    delete legacy.life[taskLifeIndex].reason;
+    legacy.life.splice(taskLifeIndex + 1, 0, {
+      id: 'l-close-p2',
+      date: '2026-10-01',
+      projectId: 'p2',
+      text: '正式关闭：无关项目',
+      kind: 'close',
+    });
+
+    const migrated = parseBackup(JSON.stringify(legacy));
+    const raw = migrated.tasks.find((task) => task.id === 't1')!;
+    migrated.entries = migrated.entries.filter((entry) => !(entry.itemType === 'task' && entry.itemId === 't1'));
+
+    expect(taskState(migrated, raw)).toMatchObject({
+      status: 'open',
+      closedAt: undefined,
+      scheduledFor: '2026-10-01',
     });
   });
 

@@ -157,6 +157,24 @@ describe('阶段历史重放', () => {
     ]);
   });
 
+  it('迁移阶段边界在多次 refreshStages 后保持稳定，不回填旧阶段', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    createProject(h.store, '迁移项目');
+    h.store.data.operations.push({
+      id: 'op|v3-stage-replay-boundary',
+      seq: Math.max(0, ...h.store.data.operations.map((event) => event.seq)) + 1,
+      date: '2026-09-20',
+      kind: 'migration-boundary',
+    });
+    h.setToday('2026-10-01');
+
+    expect(refreshStages(h.store).map((change) => change.to)).toEqual([3]);
+    expect(h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.date)).toEqual(['2026-09-30']);
+
+    expect(refreshStages(h.store)).toEqual([]);
+    expect(h.store.data.chronicle.filter((line) => line.id.startsWith('stage|')).map((line) => line.date)).toEqual(['2026-09-30']);
+  });
+
   it('历史 pending 按当时任务状态重建，不把前一天误算成荒置并制造假恢复', () => {
     const h = makeStore('2026-09-01', '2026-09-01');
     const p = createProject(h.store, '团队');

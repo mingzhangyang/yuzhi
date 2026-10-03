@@ -119,6 +119,7 @@ export type OperationKind =
   | 'task-moved'
   | 'task-dropped'
   | 'task-state-baseline'
+  | 'migration-boundary'
   | 'legacy-life';
 
 export interface OperationLifeSnapshot {

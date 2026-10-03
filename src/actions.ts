@@ -363,13 +363,7 @@ export function archiveOldDays(store: Store): ISODate[] {
 export function refreshStages(store: Store): StageChange[] {
   const today = store.today();
   const changes: StageChange[] = [];
-  const fixedStageLines = store.data.chronicle.filter((line) => line.id.startsWith('stage|'));
-  const legacyBoundary = fixedStageLines.length
-    ? undefined
-    : store.data.chronicle.reduce<ISODate | undefined>(
-        (last, line) => (!last || line.date > last ? line.date : last),
-        undefined,
-      );
+  const legacyBoundary = store.data.operations.find((event) => event.kind === 'migration-boundary')?.date;
   const transitions = stageTransitions(store.data, today)
     .filter((transition) => transition.source === 'time')
     .filter((transition) => !legacyBoundary || transition.date > legacyBoundary)
