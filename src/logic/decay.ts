@@ -428,12 +428,14 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
           } else if (event.kind === 'project-restarted') {
             active = true;
             neglect = 0;
+            heavy = false;
             resetToday = true;
             factBaseline = stageWithPenalty(neglect, heavy);
             visibleStage = factBaseline;
           } else if (event.kind === 'project-trimmed') {
             active = true;
             neglect = TRIM_TO_NEGLECT;
+            heavy = false;
             resetToday = true;
             factBaseline = stageWithPenalty(neglect, heavy);
             visibleStage = factBaseline;

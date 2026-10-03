@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents, arrangeTask, recordBacklogSnapshot } from '../src/actions';
+import { createProject, createTask, settleDay, markTaskDone, closeProject, classifyEvents, mergeEvents, arrangeTask, recordBacklogSnapshot, rescheduleTask } from '../src/actions';
 import { interruptions, lastProgressAt } from '../src/logic/read-model';
 import { lifeEntries } from '../src/logic/operations';
 import { itemKey, itemsForDay, pendingDays } from '../src/logic/days';
@@ -54,6 +54,20 @@ describe('晚间结算', () => {
     expect(pendingDays(h.store.data, h.today)).toEqual(['2026-10-01', '2026-10-02']);
     settleDay(h.store, '2026-10-01', new Map());
     expect(pendingDays(h.store.data, h.today)).toEqual(['2026-10-02']);
+  });
+
+  it('多次改期后的历史 pending 按任务时间线一次前向重建', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '历史任务');
+    const t = createTask(h.store, { title: '反复改期', projectId: p.id, scheduledFor: '2026-09-02' });
+
+    h.setToday('2026-09-03');
+    rescheduleTask(h.store, t.id, '2026-09-04');
+    h.setToday('2026-09-05');
+    rescheduleTask(h.store, t.id, '2026-09-06');
+    h.setToday('2026-09-07');
+
+    expect(pendingDays(h.store.data, h.today)).toEqual(['2026-09-02', '2026-09-04', '2026-09-06']);
   });
 
   it('结算之外直接记下做完', () => {

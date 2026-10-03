@@ -119,6 +119,27 @@ describe('衰败与恢复', () => {
     expect(h.store.villages().get(p.id)!.stage).toBe(0);
   });
 
+  it('重启清掉 heavy penalty 时不生成同日伪恢复阶段', () => {
+    const h = makeStore('2026-09-01');
+    const p = createProject(h.store, '重启项目');
+    const t = createTask(h.store, { title: '拖延任务', projectId: p.id, scheduledFor: h.today });
+
+    for (let k = 0; k < 3; k++) {
+      const date = h.store.task(t.id)!.scheduledFor!;
+      h.setToday(date);
+      settleDay(h.store, date, new Map([[itemKey('task', t.id), { outcome: 'skipped', reason: 'postponed' }]]));
+      h.setToday(h.store.task(t.id)!.scheduledFor!);
+    }
+
+    expect(h.store.villages().get(p.id)!.stage).toBe(1);
+    const restartDate = h.today;
+    restartProject(h.store, p.id);
+    expect(h.store.villages().get(p.id)!.stage).toBe(0);
+    expect(stageTransitions(h.store.data, h.today).filter(
+      (row) => row.projectId === p.id && row.date === restartDate && row.source === 'facts' && row.from === 1 && row.to === 0,
+    )).toEqual([]);
+  });
+
   it('缩小规模回到安静阶段起点，并放下选中的任务', () => {
     const h = makeStore('2026-08-01', '2026-08-01');
     const p = createProject(h.store, 'C');

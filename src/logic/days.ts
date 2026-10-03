@@ -1,7 +1,7 @@
 import type { CalendarEvent, Data, ISODate, SettlementEntry, Task } from '../types';
 import { addDays, dateOfStamp, diffDays } from '../lib/date';
 import { ARCHIVE_AFTER_DAYS } from './config';
-import { taskState, taskStates } from './read-model';
+import { taskStates, taskStatesForDates } from './read-model';
 
 export interface SettleItem {
   key: string;
@@ -67,12 +67,12 @@ export function pendingDays(data: Data, today: ISODate): ISODate[] {
   const recorded = new Set(data.days.map((d) => d.date));
   const first = data.settings.firstDay;
   const found = new Set<ISODate>();
-  const candidateTasks = new Map<ISODate, Set<string>>();
+  const candidateDatesByTask = new Map<string, Set<ISODate>>();
   const addTaskCandidate = (date: ISODate | undefined, taskId: string) => {
     if (!date) return;
-    let ids = candidateTasks.get(date);
-    if (!ids) candidateTasks.set(date, (ids = new Set()));
-    ids.add(taskId);
+    let dates = candidateDatesByTask.get(taskId);
+    if (!dates) candidateDatesByTask.set(taskId, (dates = new Set()));
+    dates.add(date);
   };
 
   // Reconstruct every date a task could historically have been pending.
@@ -97,15 +97,19 @@ export function pendingDays(data: Data, today: ISODate): ISODate[] {
   }
 
   const taskById = new Map(data.tasks.map((task) => [task.id, task] as const));
-  for (const [date, ids] of candidateTasks) {
-    if (date < first || date >= today || recorded.has(date)) continue;
-    const pending = [...ids].some((id) => {
-      const task = taskById.get(id);
-      if (!task || task.createdAt > date) return false;
-      const state = taskState(data, task, date);
-      return state.status === 'open' && !!state.projectId && state.scheduledFor === date;
-    });
-    if (pending) found.add(date);
+  for (const [taskId, dates] of candidateDatesByTask) {
+    const task = taskById.get(taskId);
+    if (!task) continue;
+    const candidates = [...dates]
+      .filter((date) => date >= first && date < today && !recorded.has(date) && task.createdAt <= date)
+      .sort();
+    if (!candidates.length) continue;
+
+    const states = taskStatesForDates(data, task, candidates);
+    for (const date of candidates) {
+      const state = states.get(date);
+      if (state?.status === 'open' && state.projectId && state.scheduledFor === date) found.add(date);
+    }
   }
 
   for (const event of data.events) {
