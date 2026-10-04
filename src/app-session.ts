@@ -243,6 +243,12 @@ export class AppSession {
     this.lifecycleTarget = 'suspended';
     this.lifecycleGeneration++;
 
+    // pageswap/pagehide (or duplicate hidden notifications) can describe the
+    // same suspension. The generation must advance so any in-flight resume is
+    // invalidated, but resource cleanup itself is idempotently shared until a
+    // successful resume clears pageSuspension.
+    if (this.pageSuspension) return this.pageSuspension;
+
     const task = (async () => {
       await this.tabs.relinquish(() => this.drainAndClosePersistence());
       this.tabs.suspendNotifications();
