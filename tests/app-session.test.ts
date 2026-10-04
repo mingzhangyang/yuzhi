@@ -228,6 +228,9 @@ describe('AppSession', () => {
     await Promise.all([firstSuspend, secondSuspend]);
     expect(await staleResume).toBe(false);
 
+    // Both suspension signals share one resource cleanup. The later signal
+    // still invalidates the stale resume through lifecycleGeneration.
+    expect(persistence.operations.filter((operation) => operation === 'close')).toHaveLength(1);
     expect(session.state).toBe('reader');
     expect(session.store.isReadOnly).toBe(true);
     expect(FakeChannel.peers.size).toBe(0);
