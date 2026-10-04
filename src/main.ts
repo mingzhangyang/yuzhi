@@ -22,29 +22,42 @@ async function boot() {
   initModal();
   let appStore: Store | undefined;
   let idb: IdbPersistence | undefined;
+  let readerRefresh: Promise<void> = Promise.resolve();
+  let versionChangeRecovery: Promise<void> | undefined;
   const tabs = new SingleWriterCoordinator({
     onRoleChange: (role) => {
-      if (!appStore || !idb) return;
-      idb.setWriteAccess(role === 'writer');
-      appStore.setReadOnly(role !== 'writer');
-      if (role === 'writer') {
-        void idb.load().then((fresh) => appStore?.reload(fresh)).catch((error) => appStore?.onError(error));
-      }
+      appStore?.setReadOnly(role !== 'writer');
       const notice = document.querySelector<HTMLElement>('#tabNotice');
-      if (notice) notice.hidden = role === 'writer';
+      if (notice) {
+        notice.hidden = role === 'writer';
+        if (role === 'writer') delete notice.dataset.blocked;
+      }
     },
     onPeerCommit: () => {
-      if (!appStore || !idb || tabs.role === 'writer') return;
-      void idb.load().then((fresh) => appStore?.reload(fresh)).catch((error) => appStore?.onError(error));
+      readerRefresh = readerRefresh
+        .catch(() => {})
+        .then(async () => {
+          if (!appStore || !idb || tabs.role === 'writer') return;
+          const fresh = await idb.load();
+          // A takeover may have completed while this read was in flight.
+          if (tabs.role === 'reader' && appStore.isReadOnly) appStore.reload(fresh);
+        })
+        .catch((error) => appStore?.onError(error));
     },
     onVersionChange: () => {
-      idb?.close();
+      // A versionchange closes the current connection. Stop new actions first,
+      // release the writer lease, then reopen as a reader after the upgrader.
       appStore?.setReadOnly(true);
       const notice = document.querySelector<HTMLElement>('#tabNotice');
       if (notice) {
         notice.hidden = false;
         notice.dataset.blocked = 'true';
       }
+      const current = idb;
+      versionChangeRecovery = (async () => {
+        await tabs.release();
+        if (current) await current.reopen(false);
+      })().catch((error) => appStore?.onError(error));
     },
   });
   const canWrite = await tabs.acquire();
@@ -70,6 +83,7 @@ async function boot() {
       }
       return;
     }
+    idb = undefined;
     per = new MemoryPersistence(error.recoveredData);
     data = await per.load();
     setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
@@ -77,15 +91,62 @@ async function boot() {
   const store = new Store(data, per);
   appStore = store;
   store.setReadOnly(!canWrite);
-  store.onCommitted = () => tabs.announceCommit();
-  const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
-  if (tabNotice) tabNotice.hidden = canWrite;
-  const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
-  if (takeOver) takeOver.onclick = async () => {
-    if (await tabs.takeOver()) toast('已接管写权限');
-    else toast('另一个标签页仍在写入，请稍后再试', true);
-  };
   store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
+  store.onCommitted = () => {
+    if (idb) tabs.announceCommit();
+  };
+
+  const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
+  const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
+  if (!tabs.supportsWriterLock) {
+    if (tabNotice) {
+      tabNotice.hidden = false;
+      const text = tabNotice.querySelector('span');
+      if (text) text.textContent = '此浏览器不支持安全的多标签页写入协调；为保护本地数据，此页保持只读。';
+    }
+    if (takeOver) takeOver.disabled = true;
+  } else if (tabNotice) {
+    tabNotice.hidden = canWrite;
+  }
+
+  const requestTakeover = async (notify = true): Promise<boolean> => {
+    if (!tabs.supportsWriterLock) {
+      if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
+      return false;
+    }
+    appStore?.setReadOnly(true);
+    try {
+      if (versionChangeRecovery) {
+        await versionChangeRecovery;
+        versionChangeRecovery = undefined;
+      }
+      const acquired = await tabs.takeOver(idb
+        ? async () => {
+          // The lock is held, but the Store remains read-only until this
+          // reconnect + authoritative reload has completed.
+          await idb!.setWriteAccess(true);
+          const fresh = await idb!.load();
+          appStore!.reload(fresh);
+        }
+        : undefined);
+      if (!acquired) {
+        if (notify) toast('另一个标签页仍在写入，请稍后再试', true);
+        return false;
+      }
+      if (notify) toast('已接管写权限');
+      return true;
+    } catch (error) {
+      appStore?.setReadOnly(true);
+      if (idb) {
+        try { await idb.reopen(false); } catch { /* keep the failed tab read-only */ }
+      }
+      console.error('接管写权限失败', error);
+      if (notify) toast('接管写权限失败：' + (error instanceof Error ? error.message : String(error)), true);
+      return false;
+    }
+  };
+
+  if (takeOver && tabs.supportsWriterLock) takeOver.onclick = () => { void requestTakeover(); };
 
   const applyTheme = () => {
     const t = store.data.settings.theme;
@@ -250,9 +311,36 @@ async function boot() {
       update();
     }
   });
-  window.addEventListener('pagehide', () => { void tabs.close(); }, { once: true });
+  let pageSuspension: Promise<void> | undefined;
+  const suspendForCache = async () => {
+    // Stop actions before draining writes; only release the lease after the
+    // persistence connection is no longer write-capable.
+    store.setReadOnly(true);
+    try { await store.flush(); } catch (error) { store.onError(error); }
+    if (idb) {
+      try { await idb.setWriteAccess(false); } catch (error) { store.onError(error); }
+    }
+    await tabs.release();
+  };
+  window.addEventListener('pagehide', (event) => {
+    store.setReadOnly(true);
+    if (event.persisted) {
+      pageSuspension = suspendForCache();
+      return;
+    }
+    void (async () => {
+      try { await store.flush(); } catch (error) { store.onError(error); }
+      await idb?.close();
+      await tabs.close();
+    })();
+  });
   window.addEventListener('pageshow', () => {
-    if (store.isReadOnly) void tabs.takeOver();
+    if (!store.isReadOnly) return;
+    void (async () => {
+      if (pageSuspension) await pageSuspension.catch(() => {});
+      pageSuspension = undefined;
+      await requestTakeover(false);
+    })();
   });
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 

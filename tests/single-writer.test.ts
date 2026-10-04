@@ -33,9 +33,76 @@ describe('single writer', () => {
     expect(await a.acquire()).toBe(true);
     expect(await b.acquire()).toBe(false);
     await a.release();
+    expect(a.role).toBe('reader');
     expect(await b.acquire()).toBe(true);
     await b.close();
     await a.close();
+  });
+
+  it('拿到锁后仍保持只读，直到刷新准备完成才发布 writer', async () => {
+    const locks = new FakeLocks();
+    const roles: string[] = [];
+    let finish!: () => void;
+    const prepared = new Promise<void>((resolve) => { finish = resolve; });
+    const tab = new SingleWriterCoordinator({
+      ownerId: 'prepared',
+      locks,
+      channelFactory,
+      onRoleChange: (role) => roles.push(role),
+    });
+
+    const takeover = tab.takeOver(async () => {
+      expect(tab.role).toBe('reader');
+      await prepared;
+    });
+    await Promise.resolve();
+
+    expect(tab.role).toBe('reader');
+    expect(roles).toEqual([]);
+    finish();
+    expect(await takeover).toBe(true);
+    expect(tab.role).toBe('writer');
+    expect(roles).toEqual(['writer']);
+
+    await tab.release();
+    expect(tab.role).toBe('reader');
+    expect(roles).toEqual(['writer', 'reader']);
+    await tab.close();
+  });
+
+  it('刷新失败不会短暂开放写权限，并会释放 lease 给其他标签页', async () => {
+    const locks = new FakeLocks();
+    const a = new SingleWriterCoordinator({ ownerId: 'failed', locks, channelFactory });
+    const b = new SingleWriterCoordinator({ ownerId: 'after-failed', locks, channelFactory });
+
+    await expect(a.takeOver(async () => {
+      throw new Error('fresh reload failed');
+    })).rejects.toThrow('fresh reload failed');
+    expect(a.role).toBe('reader');
+    expect(await b.acquire()).toBe(true);
+
+    await b.close();
+    await a.close();
+  });
+
+  it('没有 Web Locks 时 fail closed，不把 BroadcastChannel 当互斥锁', async () => {
+    const tab = new SingleWriterCoordinator({ ownerId: 'unsupported', locks: null, channelFactory });
+    expect(tab.supportsWriterLock).toBe(false);
+    expect(await tab.acquire()).toBe(false);
+    expect(tab.role).toBe('reader');
+    await tab.close();
+  });
+
+  it('同一 coordinator 释放后可以重新准备并接管，支持 bfcache 恢复', async () => {
+    const locks = new FakeLocks();
+    let refreshes = 0;
+    const tab = new SingleWriterCoordinator({ ownerId: 'resume', locks, channelFactory });
+    expect(await tab.acquire()).toBe(true);
+    await tab.release();
+    expect(await tab.takeOver(async () => { refreshes++; })).toBe(true);
+    expect(refreshes).toBe(1);
+    expect(tab.role).toBe('writer');
+    await tab.close();
   });
 
   it('commit 广播只通知 reader，不承担互斥', async () => {
@@ -61,8 +128,26 @@ describe('read-only persistence', () => {
     const data = await reader.load();
     expect(data).toEqual(emptyData());
     await expect(reader.batch([{ kind: 'put', coll: 'projects', item: { id: 'p', name: '只读', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } }])).rejects.toThrow('只读');
-    writer.close();
-    reader.close();
+    await writer.close();
+    await reader.close();
+  });
+
+  it('reader 只有在重连并刷新后才获得持久层写权限', async () => {
+    const name = `yuzhi-promote-${Date.now()}-${Math.random()}`;
+    const writer = new IdbPersistence(name, true);
+    await writer.load();
+    await writer.batch([{ kind: 'put', coll: 'projects', item: { id: 'p1', name: '已有村落', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } }]);
+    await writer.close();
+
+    const reader = new IdbPersistence(name, false);
+    expect((await reader.load()).projects.map((row) => row.id)).toEqual(['p1']);
+    await reader.setWriteAccess(true);
+    const fresh = await reader.load();
+    expect(fresh.projects.map((row) => row.id)).toEqual(['p1']);
+    await reader.batch([{ kind: 'put', coll: 'projects', item: { id: 'p2', name: '接管后新增', createdAt: '2026-10-02', status: 'active', islandSlot: 1 } }]);
+    await reader.setWriteAccess(false);
+    await expect(reader.batch([{ kind: 'del', coll: 'projects', key: 'p1' }])).rejects.toThrow('只读');
+    await reader.close();
   });
 
   it('只读 Store 拒绝 action', () => {

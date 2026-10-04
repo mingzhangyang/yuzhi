@@ -188,10 +188,35 @@ describe('数据迁移基础设施', () => {
     expect(() => parseBackup(JSON.stringify(bad))).toThrow('事实序号');
   });
 
+  it('业务迁移失败时停在 staging schema，legacy stores 保持完整', async () => {
+    const name = dbName('staging-preserves-legacy');
+    const raw = await openDB(name, 3, {
+      upgrade(db) {
+        for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
+          if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
+        }
+        if (!db.objectStoreNames.contains('life')) db.createObjectStore('life', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('interruptions')) db.createObjectStore('interruptions', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+      },
+    });
+    await raw.put('meta', { workStart: 1 }, 'settings');
+    await raw.put('life', { id: 'legacy-life', date: '2026-10-01', kind: 'event', text: '旧记录' });
+    await raw.put('interruptions', { id: 'legacy-interruption' });
+    raw.close();
+
+    await expect(new IdbPersistence(name).load()).rejects.toThrow('本地数据里的工作开始时间');
+
+    const staged = await openDB(name);
+    expect(staged.version).toBe(IDB_SCHEMA_VERSION - 1);
+    expect(Array.from(staged.objectStoreNames)).toEqual(expect.arrayContaining(['life', 'interruptions']));
+    staged.close();
+  });
+
   it('v1 IndexedDB 原地升级对同日 life 使用稳定 id fallback，不依赖写入顺序', async () => {
     const rows = [...v1OperationHistoryFixture.life];
     const seed = async (name: string, lifeRows: typeof rows) => {
-      const raw = await openDB(name, IDB_SCHEMA_VERSION - 1, {
+      const raw = await openDB(name, 3, {
         upgrade(db) {
           for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
             if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
@@ -211,7 +236,13 @@ describe('数据迁移基础设施', () => {
       for (const interruption of v1OperationHistoryFixture.interruptions) await raw.put('interruptions', structuredClone(interruption));
       for (const snapshot of v1OperationHistoryFixture.snapshots) await raw.put('snapshots', structuredClone(snapshot));
       raw.close();
-      return new IdbPersistence(name).load();
+      const migrated = await new IdbPersistence(name).load();
+      const upgraded = await openDB(name);
+      expect(upgraded.version).toBe(IDB_SCHEMA_VERSION);
+      expect(Array.from(upgraded.objectStoreNames)).not.toContain('life');
+      expect(Array.from(upgraded.objectStoreNames)).not.toContain('interruptions');
+      upgraded.close();
+      return migrated;
     };
 
     const forward = await seed(dbName('legacy-life-forward'), rows);

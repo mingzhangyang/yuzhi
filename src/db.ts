@@ -24,12 +24,15 @@ export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 const DB_NAME = 'yuzhi';
 const FACT_SEQ_KEY = 'factSeq';
 /**
- * Schema 6 is a staging schema: it keeps legacy stores available long enough
- * for the business-data migration to read them. Schema 7 drops those stores
+ * Schema 7 is a staging schema: it keeps legacy stores available long enough
+ * for the business-data migration to read them. Schema 8 drops those stores
  * after the migrated data has been durably written.
+ *
+ * Schema 8 also repairs databases that were briefly opened by the PR build
+ * which reached schema 7 without deleting the legacy stores.
  */
-const STAGING_SCHEMA_VERSION = 6;
-export const IDB_SCHEMA_VERSION = 7;
+const STAGING_SCHEMA_VERSION = 7;
+export const IDB_SCHEMA_VERSION = 8;
 export const DATA_VERSION = 4;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
@@ -394,6 +397,7 @@ export class IdbPersistence implements Persistence {
   private readonly name: string;
   private writeAccess: boolean;
   private versionChangeHandler?: () => void;
+  private accessTail: Promise<void> = Promise.resolve();
   constructor(name = DB_NAME, writeAccess = true, options: { onVersionChange?: () => void } = {}) {
     this.name = name;
     this.writeAccess = writeAccess;
@@ -401,12 +405,32 @@ export class IdbPersistence implements Persistence {
     this.dbp = writeAccess ? this.openWritableDatabase() : this.openDatabase(undefined, false);
   }
 
-  setWriteAccess(value: boolean) {
-    this.writeAccess = value;
+  private queueReconnect(writeAccess: boolean): Promise<void> {
+    const change = this.accessTail.catch(() => {}).then(async () => {
+      let current: IDBPDatabase | undefined;
+      try { current = await this.dbp; } catch { /* reconnect from a failed/closed connection */ }
+      current?.close();
+      this.writeAccess = writeAccess;
+      this.dbp = writeAccess ? this.openWritableDatabase() : this.openDatabase(undefined, false);
+      await this.dbp;
+    });
+    this.accessTail = change;
+    return change;
   }
 
-  close() {
-    void this.dbp.then((db) => db.close());
+  async setWriteAccess(value: boolean) {
+    if (this.writeAccess === value) return;
+    await this.queueReconnect(value);
+  }
+
+  /** Reopen even when the logical access mode is unchanged (for versionchange recovery). */
+  async reopen(writeAccess = this.writeAccess) {
+    await this.queueReconnect(writeAccess);
+  }
+
+  async close() {
+    await this.accessTail.catch(() => {});
+    try { (await this.dbp).close(); } catch { /* already failed or closed */ }
   }
 
   onVersionChange(fn: () => void) {
@@ -417,13 +441,17 @@ export class IdbPersistence implements Persistence {
     const notifyVersionChange = () => this.versionChangeHandler?.();
     return openDB(this.name, version, {
       upgrade: allowUpgrade
-        ? (db, oldVersion) => {
-          // Legacy object stores are intentionally retained through the
-          // staging schema. load() must read them before the final upgrade
-          // removes them.
-          if (oldVersion < 4 && db.objectStoreNames.contains('interruptions')) db.deleteObjectStore('interruptions');
+        ? (db, oldVersion, newVersion) => {
+          // Every old schema first reaches the staging version with legacy
+          // stores intact. Business migration runs in load(); only the final
+          // staging -> current upgrade is allowed to delete migration input.
           for (const c of COLL_NAMES) if (!db.objectStoreNames.contains(c)) db.createObjectStore(c, { keyPath: COLLECTIONS[c] });
           if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+          if (newVersion === IDB_SCHEMA_VERSION && oldVersion >= STAGING_SCHEMA_VERSION) {
+            for (const name of LEGACY_COLLECTIONS) {
+              if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
+            }
+          }
         }
         : undefined,
       blocking(_currentVersion, _blockedVersion, event) {
@@ -444,7 +472,10 @@ export class IdbPersistence implements Persistence {
 
   private async dropLegacyCollections(db: IDBPDatabase): Promise<IDBPDatabase> {
     const hasLegacy = LEGACY_COLLECTIONS.some((name) => db.objectStoreNames.contains(name));
-    if (!hasLegacy && db.version >= IDB_SCHEMA_VERSION) return db;
+    if (db.version >= IDB_SCHEMA_VERSION) {
+      if (hasLegacy) throw new Error('数据库最终 schema 仍包含旧集合，拒绝继续写入');
+      return db;
+    }
     db.close();
     return this.openDatabase(IDB_SCHEMA_VERSION, true);
   }
