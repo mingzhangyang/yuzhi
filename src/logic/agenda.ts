@@ -87,11 +87,16 @@ function nextChangeOf(items: EventWithTime[], nowMs: number, today: ISODate): Da
   return Number.isFinite(at) ? new Date(at) : null;
 }
 
+/**
+ * 漂流瓶的范围：今天及以后的未归类组，加上过去还在等结算的日子里的。
+ * 已经结算或已经归档为「未记录」的日子由海雾和归档负责，不再占瓶子位。
+ */
 function driftingTitles(data: Data, today: ISODate, settled: Set<string>): string[] {
+  const recorded = new Set(data.days.map((day) => day.date));
   return unclassifiedGroups(data.events)
     .filter((group) => group.events.some((event) => {
       const day = dateOfStamp(event.start);
-      return day >= today || !settled.has(event.id);
+      return day >= today || (!settled.has(event.id) && !recorded.has(day));
     }))
     .map((group) => group.title);
 }

@@ -8,6 +8,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     light: 'day',
     date: '2026-10-04',
     hour: 14,
+    now: new Date(2026, 9, 4, 14).getTime(),
     villages: [],
     dockShips: 0,
     choresCount: 0,

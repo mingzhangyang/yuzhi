@@ -65,6 +65,18 @@ describe('此刻层 agendaAt', () => {
   });
 });
 
+describe('漂流瓶范围', () => {
+  it('已归档或已结算的过去日子不再漂瓶子，等结算的过去日子和今天以后照常漂', () => {
+    const h = makeStore('2026-10-04');
+    const ev = (id: string, title: string, day: string) =>
+      ({ id, sourceId: 's', uid: id, title, start: stamp(day, 10), end: stamp(day, 11), allDay: false, classified: false });
+    h.store.data.events.push(ev('a', '归档那天', '2026-09-20'), ev('b', '结算那天', '2026-10-02'), ev('c', '还没结算', '2026-10-03'), ev('d', '明天', '2026-10-05'));
+    h.store.data.days.push({ date: '2026-09-20', status: 'unrecorded' }, { date: '2026-10-02', status: 'settled' });
+    const result = agendaAt(h.store.data, new Date('2026-10-04T10:00:00'));
+    expect(result.drifting.sort()).toEqual(['明天', '还没结算'].sort());
+  });
+});
+
 describe('柴堆档位', () => {
   it('按 0 / 1–3 / 4–8 / 9+ 分档', () => {
     expect([0, 1, 3, 4, 8, 9, 20].map(woodpileStep)).toEqual([0, 1, 1, 2, 2, 3, 3]);

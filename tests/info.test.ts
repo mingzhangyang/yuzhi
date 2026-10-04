@@ -57,8 +57,15 @@ group('日程说明', () => {
     expect(info.lines[0]).toBe('「周会」即将开始，14:10 开始。');
   });
 
+  it('稍后和待结算同时存在时两句都写', () => {
+    const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'ended', later: 2, ended: 1, banners: [] }, ctx());
+    const text = info.lines.join('');
+    expect(text).toContain('稍后还有 2 场');
+    expect(text).toContain('有 1 场已经结束');
+  });
+
   it('只有全天条幅时不说稍后还有场次', () => {
-    const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'later', later: 0, ended: 0, banners: ['出差'] }, ctx());
+    const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'allday', later: 0, ended: 0, banners: ['出差'] }, ctx());
     expect(info.lines.join('')).not.toContain('稍后');
     expect(info.lines.join('')).toContain('今天全天：出差');
   });

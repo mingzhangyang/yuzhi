@@ -27,7 +27,7 @@ export type InfoTarget =
       kind: 'agenda';
       target: string;
       targetName?: string;
-      phase: 'later' | 'soon' | 'live' | 'ended';
+      phase: 'allday' | 'later' | 'soon' | 'live' | 'ended';
       title?: string;
       until?: string;
       start?: string;
@@ -156,12 +156,15 @@ function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
   } else if (t.phase === 'soon') {
     lines.push(`${t.title ? `「${t.title}」` : name}即将开始${timeOf(t.start) ? `，${timeOf(t.start)} 开始` : ''}。`);
     lines.push('这是此刻的提醒，还没有产生任何后果。');
-  } else if (t.phase === 'ended') {
-    lines.push(`${name}今天有 ${t.ended} 场已经结束，等待晚间结算。`);
-    lines.push('结算时确认做了，才会留下砖；没做不会提前改变村落。');
-  } else if (t.later) {
+  }
+  // 稍后和待结算互不遮挡：同时有的话两句都写
+  if (t.later) {
     lines.push(`${name}今天稍后还有 ${t.later} 场日程。`);
-    lines.push('告示牌只表示安排，不表示已经完成。');
+    if (t.phase !== 'live' && t.phase !== 'soon') lines.push('告示牌只表示安排，不表示已经完成。');
+  }
+  if (t.ended) {
+    lines.push(`${name}今天有 ${t.ended} 场已经结束，等待晚间结算。`);
+    if (t.phase !== 'live') lines.push('结算时确认做了，才会留下砖；没做不会提前改变村落。');
   }
   if (t.banners.length) {
     const extra = t.banners.length > 2 ? `，另外 ${t.banners.length - 2} 件` : '';

@@ -33,7 +33,7 @@ function phaseOf(slot: AgendaSlot): AgendaView['phase'] | null {
   if (slot.soon.length) return 'soon';
   if (slot.ended) return 'ended';
   if (slot.later) return 'later';
-  return slot.banners.length ? 'later' : null;
+  return slot.banners.length ? 'allday' : null;
 }
 
 function agendaViewOf(slot: AgendaSlot | undefined): AgendaView | undefined {
@@ -57,14 +57,18 @@ function agendaViewOf(slot: AgendaSlot | undefined): AgendaView | undefined {
 
 function choresOf(store: Store, agenda: Agenda, today: string): ChoresView {
   const slot = agenda.slots.get(CHORES);
+  // 柴堆只算真正做了的杂务；没做的不留柴
   const count = store.data.entries.filter((entry) =>
-    entry.projectId === CHORES && entry.date > addDays(today, -7) && entry.date <= today,
+    entry.projectId === CHORES && (entry.outcome === 'done' || entry.outcome === 'partial')
+      && entry.date > addDays(today, -7) && entry.date <= today,
   ).length;
   const live = slot?.live[0];
+  const soon = slot?.soon[0];
   return {
     count,
     woodpile: woodpileStep(count),
     live: live ? { title: live.title, until: live.end } : undefined,
+    soon: !live && soon ? { title: soon.title, start: soon.start } : undefined,
     later: slot?.later ?? 0,
     ended: slot?.ended ?? 0,
   };
@@ -123,6 +127,7 @@ export function buildScene(
     light: lightNow(now, dusk),
     date: today,
     hour: now.getHours() + now.getMinutes() / 60,
+    now: now.getTime(),
     villages: views,
     dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
     choresCount: chores.count,

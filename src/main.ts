@@ -297,6 +297,8 @@ async function boot() {
     $('tip').style.opacity = '0';
     if (!hit) return showInfo(pt);
     if (hit.kind === 'drift') {
+      // 只读标签页不能归类；这时捞起并记下「已捞起」会让写入页的瓶子也消失，只显示说明
+      if (store.isReadOnly) return showInfo(pt);
       renderer.pickDrift(hit.title);
       markDriftSeen(hit.title);
       update();

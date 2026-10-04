@@ -54,6 +54,10 @@ async function seed(page) {
       store.put('sources', { id: 'seed', name: '测试日历' });
       for (const e of [
         ev('live', '周会', d('14:00'), d('15:00'), live.id),
+        ev('live-ended', '站会', d('09:00'), d('09:30'), live.id),
+        ev('live-later', '回顾', d('17:00'), d('18:00'), live.id),
+        ev('trip2', '团建', d('00:00'), d('00:00', '05'), banner.id, true),
+        ev('birthday', '生日', d('00:00'), d('00:00', '05'), 'chores', true),
         ev('soon', '方案评审', d('14:40'), d('15:30'), soon.id),
         ev('trip', '出差', d('00:00'), d('00:00', '06'), banner.id, true),
         ev('chores-ended', '取快递', d('09:00'), d('09:30'), 'chores'),
@@ -84,7 +88,8 @@ async function points(page) {
         id: v.projectId,
         well: page(r.iso(c.i, c.j)),
         board: page([ax, ay]),
-        banner: page([ax - tw * 0.17, ay - tw * 0.28]),
+        banner: page((([b]) => b ? [b.x, b.y] : [ax, ay - tw * 0.28])(r.villageBannerLayout(v))),
+        banner2: page((([, b]) => b ? [b.x, b.y] : [ax, ay - tw * 0.28])(r.villageBannerLayout(v))),
         label: v.agenda,
       };
     }
@@ -97,7 +102,7 @@ async function points(page) {
     out.walkers = walkers;
     const [lx, ly] = r.iso(r.map.lighthouse.i, r.map.lighthouse.j);
     const [bx, by] = r.lighthouseBannerAnchor();
-    out.lighthouse = { banner: page([bx - tw * 0.16, by]), tower: page([lx, ly - tw * 1.2]), banners: scene.lighthouseBanners };
+    out.lighthouse = { banner: page([bx, by]), tower: page([lx, ly - tw * 1.2]), banners: scene.lighthouseBanners };
     out.bottles = scene.drifting.map((d, k) => {
       const at = r.driftBottleAnchor(k);
       return { title: d.title, onSea: r.onSea(at[0], at[1]), ...page(at) };
@@ -118,6 +123,19 @@ async function click(page, p) {
     view: window.yuzhi.tracker.view,
     info: document.getElementById('mapinfo').hidden ? null : document.getElementById('mapinfo').innerText,
   }));
+}
+
+/**
+ * 告示牌的说明文字。小人会走动，可能正好挡在牌子前（小人优先是预期行为）：
+ * 没挡住时真实点击并读信息卡，挡住时直接取渲染器给这一点的说明。
+ */
+async function boardInfo(page, p) {
+  const hit = await hitAt(page, p);
+  if (hit?.kind === 'agenda') return (await click(page, p)).info;
+  return page.evaluate((pt) => {
+    const info = window.yuzhi.renderer.inspect(pt)?.info;
+    return info ? [info.title, ...info.lines].join('\n') : null;
+  }, p.local);
 }
 
 const browser = await chromium.launch({ channel: channel || undefined, headless: true });
@@ -162,9 +180,19 @@ try {
     assert(r.view.kind === 'task', `real click on walker opened ${JSON.stringify(r.view)}`);
   });
 
+  await runScenario('稍后和待结算同时存在：标签和说明两样都写', async () => {
+    const v = p['团队'];
+    assert(v.label?.later === 1 && v.label?.ended === 1, `团队 agenda: ${JSON.stringify(v.label)}`);
+    const label = await page.evaluate(() => window.yuzhi.renderer.scene.villages.find((x) => x.name === '团队').agenda);
+    assert(label.phase === 'live', `expected live phase, got ${label.phase}`);
+    const lines = await boardInfo(page, v.board);
+    assert(lines?.includes('稍后还有 1 场') && lines.includes('1 场已经结束'), `团队 board info: ${JSON.stringify(lines)}`);
+  });
+
   await runScenario('即将开始：点告示牌显示开始时间', async () => {
-    const r = await click(page, p['评审'].board);
-    assert(r.info?.includes('14:40 开始'), `soon info missing start time: ${JSON.stringify(r.info)}`);
+    const info = await boardInfo(page, p['评审'].board);
+    assert(info?.includes('14:40 开始'), `soon info missing start time: ${JSON.stringify(info)}`);
+    await click(page, p['评审'].board);
     await shot(page, '2-soon-info');
   });
 
@@ -173,8 +201,11 @@ try {
     assert(v.label?.later === 0, `banner-only village counted later sessions: ${JSON.stringify(v.label)}`);
     const boardHit = await hitAt(page, v.board);
     assert(boardHit?.kind !== 'agenda', `invisible notice board still hit: ${JSON.stringify(boardHit)}`);
+    assert(v.label?.phase === 'allday', `banner-only village phase: ${JSON.stringify(v.label)}`);
     const banner = await click(page, v.banner);
-    assert(banner.info?.includes('今天全天：出差') && !banner.info.includes('稍后'), `banner info: ${JSON.stringify(banner.info)}`);
+    assert(banner.info?.includes('今天全天：') && banner.info.includes('出差') && banner.info.includes('团建') && !banner.info.includes('稍后'), `banner info: ${JSON.stringify(banner.info)}`);
+    const upper = await hitAt(page, v.banner2);
+    assert(upper?.kind === 'agenda', `second stacked banner not hittable: ${JSON.stringify(upper)}`);
     await shot(page, '3-banner-info');
     const center = await click(page, v.well);
     assert(center.view.kind === 'project' && center.view.id === v.id, `banner village center opened ${JSON.stringify(center.view)}`);
@@ -209,6 +240,17 @@ try {
     assert(r.view.kind === 'chores', `chores hut opened ${JSON.stringify(r)}`);
     const broom = await hitAt(page, p.chores.broom);
     assert(broom?.kind !== 'agenda', `undrawn broom still hit: ${JSON.stringify(broom)}`);
+  });
+
+  await runScenario('杂务即将开始：扫帚靠在门口，点扫帚显示开始时间', async () => {
+    await page.clock.setFixedTime(at('16:50'));
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(600);
+    p = await points(page);
+    assert(p.chores.view.soon?.title === '买菜', `chores not soon: ${JSON.stringify(p.chores.view)}`);
+    const broom = await click(page, p.chores.broom);
+    assert(broom.info?.includes('17:00 开始'), `soon broom info: ${JSON.stringify(broom)}`);
+    await shot(page, '4a-1650-chores-soon');
   });
 
   await runScenario('杂务进行中：点扫帚看说明，点小屋仍然打开杂务', async () => {

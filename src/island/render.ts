@@ -39,7 +39,8 @@ export interface VillageView {
 }
 
 export interface AgendaView {
-  phase: 'later' | 'soon' | 'live' | 'ended';
+  /** allday：只有全天条幅，没有任何定时场次 */
+  phase: 'allday' | 'later' | 'soon' | 'live' | 'ended';
   title?: string;
   until?: string;
   /** 即将开始那一场的开始时间 */
@@ -52,9 +53,11 @@ export interface AgendaView {
 }
 
 export interface ChoresView {
+  /** 近 7 天结算为做了 / 做了一部分的杂务数 */
   count: number;
   woodpile: 0 | 1 | 2 | 3;
   live?: { title: string; until: string };
+  soon?: { title: string; start: string };
   later: number;
   ended: number;
 }
@@ -78,6 +81,8 @@ export interface Scene {
   date: ISODate;
   /** 本地时刻（小时，可带小数），决定光线和月亮 */
   hour: number;
+  /** 构建场景时的精确时间戳（毫秒）；钟声冷却按它计算，hour 会丢掉秒 */
+  now: number;
   villages: VillageView[];
   dockShips: number;
   /** 兼容旧调用方；新 UI 从 chores.count 读取。 */
@@ -220,13 +225,6 @@ export function shade(c: string, t: number): string {
 }
 const rgb = (c: number[]) => '#' + c.map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
 
-function sceneTime(scene: Scene): number {
-  const [y, m, d] = scene.date.split('-').map(Number);
-  const h = Math.floor(scene.hour);
-  const minute = Math.round((scene.hour - h) * 60);
-  return new Date(y, m - 1, d, h, minute).getTime();
-}
-
 export class IslandRenderer {
   map: IslandMap = buildIsland(0);
   /** 落成仪式时小岛暂停 */
@@ -335,6 +333,15 @@ export class IslandRenderer {
   /** 页面从后台恢复时只显示当前终态，不把错过的 soon 边界当成新提示。 */
   suppressNextCues() {
     this.suppressCuesOnce = true;
+    // 后台期间可能已经排进队列的提示（rAF 暂停时不会播完）也一并丢掉，
+    // 回到前台只显示终态。
+    this.bellRipples = [];
+    this.stageCues = [];
+    this.pulses = [];
+    this.pickedBottles = [];
+    this.granaryTransition = null;
+    this.fogTransition = null;
+    for (const g of this.grow.values()) g.anim = 1;
   }
 
   setScene(s: Scene) {
@@ -425,7 +432,8 @@ export class IslandRenderer {
           this.triggerPulse(cue.projectId);
         }
       } else if (cue.kind === 'stage-changed') {
-        this.stageCues.push({ projectId: cue.projectId, to: cue.to, t: this.calm ? 1 : 0 });
+        // 减弱动态效果时阶段直接到终态，不播灰尘落下 / 吹散
+        if (!this.calm) this.stageCues.push({ projectId: cue.projectId, to: cue.to, t: 0 });
       } else if (cue.kind === 'granary-changed') {
         this.granaryTransition = { from: cue.from, to: cue.to, t: this.calm ? 1 : 0 };
       } else if (cue.kind === 'fog-changed') {
@@ -444,12 +452,13 @@ export class IslandRenderer {
       }
     }
     const selected = scene.selected?.kind === 'project' ? scene.selected.id : null;
-    const chosen = pickBell(bellCandidates, this.lastBellAt, selected, sceneTime(scene));
+    const chosen = pickBell(bellCandidates, this.lastBellAt, selected, scene.now);
     if (chosen) {
-      this.lastBellAt = sceneTime(scene);
+      // 冷却和去重照常记账；减弱动态效果时只是不画涟漪
+      this.lastBellAt = scene.now;
       const village = scene.villages.find((v) => v.projectId === chosen.projectId);
       const at = village && this.map.villages[village.slot]?.center;
-      if (at) this.bellRipples.push({ at, t: this.calm ? 1 : 0 });
+      if (at && !this.calm) this.bellRipples.push({ at, t: 0 });
     }
   }
 
@@ -553,12 +562,12 @@ export class IslandRenderer {
     return this.iso(center.i - 0.72, center.j - 0.72);
   }
 
-  /** 告示牌只在有场次可数时立起来；只有全天条幅时不立牌 */
+  /** 告示牌数的是今天还没开始的场次（即将开始 + 稍后）；已结束的由砖坯表示，只有全天条幅时不立牌 */
   private hasNoticeBoard(agenda: AgendaView): boolean {
-    return agenda.phase === 'soon' || agenda.phase === 'ended' || (agenda.phase === 'later' && agenda.later > 0);
+    return (agenda.soon?.length ?? 0) > 0 || agenda.later > 0;
   }
 
-  /** 杂务的此刻层只在进行中画扫帚，锚点就是扫帚的位置 */
+  /** 杂务的此刻层只在即将开始 / 进行中画扫帚，锚点就是扫帚的位置 */
   private choresAgendaAnchor(): [number, number] {
     const [x, y] = this.iso(this.map.chores.i, this.map.chores.j);
     const tw = this.view.tw;
@@ -643,9 +652,11 @@ export class IslandRenderer {
       if (!v.agenda) continue;
       const [x, y] = this.villageAgendaAnchor(v);
       if (this.hasNoticeBoard(v.agenda) && Math.hypot(pt.x - x, pt.y - y) < r) return { kind: 'agenda', target: v.projectId };
-      if (v.agenda.banners.length && Math.abs(pt.x - x) < tw * 0.34 && Math.abs(pt.y - (y - tw * 0.28)) < tw * 0.12) return { kind: 'agenda', target: v.projectId };
+      for (const b of this.villageBannerLayout(v)) {
+        if (Math.abs(pt.x - b.x) < b.w * 0.48 && pt.y > b.y - Math.max(tw * 0.2, 6) && pt.y < b.y + Math.max(tw * 0.15, 5)) return { kind: 'agenda', target: v.projectId };
+      }
     }
-    if (s.chores.live) {
+    if (s.chores.live || s.chores.soon) {
       const [x, y] = this.choresAgendaAnchor();
       if (Math.hypot(pt.x - x, pt.y - y) < Math.max(7, tw * 0.16)) return { kind: 'agenda', target: CHORES };
     }
@@ -653,7 +664,8 @@ export class IslandRenderer {
       const [x, y] = this.lighthouseBannerAnchor();
       const [lx] = this.iso(this.map.lighthouse.i, this.map.lighthouse.j);
       // 条幅区域，但塔身两侧 0.25 格留给档案馆
-      if (Math.abs(pt.x - (x - tw * 0.16)) < tw * 0.42 && Math.abs(pt.y - y) < tw * 0.2 && Math.abs(pt.x - lx) >= tw * 0.25) return { kind: 'agenda', target: '__lighthouse__' };
+      const n = Math.min(BANNERS_MAX, s.lighthouseBanners.length);
+      if (this.inBannerStack(pt, x, y, n) && Math.abs(pt.x - lx) >= tw * 0.25) return { kind: 'agenda', target: '__lighthouse__' };
     }
     return null;
   }
@@ -671,18 +683,18 @@ export class IslandRenderer {
     if (hit.kind === 'drift') return { kind: 'drift', title: hit.title };
     if (hit.kind !== 'agenda') return null;
     if (hit.target === '__lighthouse__') {
-      return { kind: 'agenda', target: hit.target, targetName: '灯塔', phase: 'later', later: 0, ended: 0, banners: s.lighthouseBanners };
+      return { kind: 'agenda', target: hit.target, targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners };
     }
     if (hit.target === CHORES) {
       const c = s.chores;
-      const phase: AgendaView['phase'] = c.live ? 'live' : c.ended ? 'ended' : 'later';
       return {
         kind: 'agenda',
         target: CHORES,
         targetName: '杂务',
-        phase,
-        title: c.live?.title,
+        phase: c.live ? 'live' : c.soon ? 'soon' : c.ended ? 'ended' : 'later',
+        title: c.live?.title ?? c.soon?.title,
         until: c.live?.until,
+        start: c.live ? undefined : c.soon?.start,
         later: c.later,
         ended: c.ended,
         banners: [],
@@ -884,13 +896,14 @@ export class IslandRenderer {
       const [x, y] = this.villageAgendaAnchor(v);
       add({ kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda }, null, x, y);
     }
-    if (s.chores.live) {
+    if (s.chores.live || s.chores.soon) {
       const [x, y] = this.choresAgendaAnchor();
-      add({ kind: 'agenda', target: CHORES, targetName: '杂务', phase: 'live', title: s.chores.live.title, until: s.chores.live.until, later: s.chores.later, ended: s.chores.ended, banners: [] }, null, x, y);
+      const target = this.infoTargetForHit({ kind: 'agenda', target: CHORES });
+      if (target) add(target, null, x, y);
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
-      add({ kind: 'agenda', target: '__lighthouse__', targetName: '灯塔', phase: 'later', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
+      add({ kind: 'agenda', target: '__lighthouse__', targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
     }
     for (let k = 0; k < s.drifting.length; k++) {
       const [x, y] = this.driftBottleAnchor(k);
@@ -2060,7 +2073,7 @@ export class IslandRenderer {
 
   private drawNoticeBoard(x: number, y: number, tw: number, agenda: AgendaView) {
     const c = this.ctx;
-    const phaseColor = agenda.phase === 'soon' ? '#c98a3b' : agenda.phase === 'ended' ? '#ad8063' : '#8a6e4d';
+    const phaseColor = agenda.soon?.length ? '#c98a3b' : '#8a6e4d';
     const w = tw * 0.32;
     const h = tw * 0.3;
     c.strokeStyle = '#6b4a30';
@@ -2077,7 +2090,7 @@ export class IslandRenderer {
     c.fillStyle = '#f4e2b7';
     c.fillRect(x - w * 0.3, y - h * 0.16, w * 0.6, Math.max(1, tw * 0.018));
     c.fillRect(x - w * 0.3, y + h * 0.12, w * 0.42, Math.max(1, tw * 0.018));
-    const count = agenda.phase === 'ended' ? agenda.ended : agenda.phase === 'later' ? agenda.later : agenda.soon?.length ?? 0;
+    const count = (agenda.soon?.length ?? 0) + agenda.later;
     c.fillStyle = '#fff6dc';
     c.font = `700 ${Math.max(8, tw * 0.16)}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
     c.textAlign = 'center';
@@ -2099,9 +2112,50 @@ export class IslandRenderer {
     }
   }
 
+  /**
+   * 灯塔条幅竖着叠放的间距：布面连竹竿约占 0.34 格高；格子很小时文字有 7.5px 的下限，
+   * 所以间距也不小于 11px，保证上下两条的字不会叠在一起。
+   */
+  private bannerStep(): number {
+    return Math.max(this.view.tw * 0.36, 11);
+  }
+
+  private bannerWidth(title: string): number {
+    const tw = this.view.tw;
+    return Math.min(tw * 1.35, Math.max(tw * 0.72, title.length * tw * 0.095));
+  }
+
+  /**
+   * 村落条幅横着排在告示牌上方：竖着叠会撞上村名标签。按每条布的实际宽度留间距，
+   * 整排以告示牌为中心。
+   */
+  private villageBannerLayout(v: VillageView): { x: number; y: number; w: number; title: string }[] {
+    if (!v.agenda?.banners.length) return [];
+    const [ax, ay] = this.villageAgendaAnchor(v);
+    const tw = this.view.tw;
+    const gap = Math.max(tw * 0.08, 3);
+    const titles = v.agenda.banners.slice(0, BANNERS_MAX);
+    const widths = titles.map((title) => this.bannerWidth(title));
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (titles.length - 1);
+    let x = ax - total / 2;
+    return titles.map((title, k) => {
+      const item = { x: x + widths[k] / 2, y: ay - tw * 0.28, w: widths[k], title };
+      x += widths[k] + gap;
+      return item;
+    });
+  }
+
+  /** 一列 n 条条幅（中心 x，最下面一条中心 y0）占的点击区域 */
+  private inBannerStack(pt: { x: number; y: number }, x: number, y0: number, n: number): boolean {
+    const tw = this.view.tw;
+    const top = y0 - (n - 1) * this.bannerStep() - Math.max(tw * 0.2, 6);
+    const bottom = y0 + Math.max(tw * 0.15, 5);
+    return Math.abs(pt.x - x) < Math.max(tw * 0.48, 12) && pt.y > top && pt.y < bottom;
+  }
+
   private drawBanner(x: number, y: number, tw: number, title: string, color: string) {
     const c = this.ctx;
-    const w = Math.min(tw * 1.35, Math.max(tw * 0.72, title.length * tw * 0.095));
+    const w = this.bannerWidth(title);
     const h = tw * 0.27;
     c.strokeStyle = '#72533b';
     c.lineWidth = Math.max(0.6, tw * 0.018);
@@ -2810,14 +2864,15 @@ export class IslandRenderer {
         this.drawLighthouse(x, y, tw);
         for (const [k, title] of s.lighthouseBanners.slice(0, BANNERS_MAX).entries()) {
           const [bx, by] = this.lighthouseBannerAnchor();
-          this.drawBanner(bx + (k - 0.5) * tw * 0.32, by - k * tw * 0.18, tw, title, '#d8c9a7');
+          this.drawBanner(bx, by - k * this.bannerStep(), tw, title, '#d8c9a7');
         }
       }
       if (t === m.granary) this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy);
       if (t === m.chores) {
         this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false, !!s.chores.live);
         this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
-        if (s.chores.live) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, true);
+        // 即将开始：扫帚靠在门口；进行中：扫帚动起来
+        if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
       }
       if (t === m.dock) this.drawHarborProps(tw);
       if (t.type === 'plaza' && t.village >= 0) {
@@ -2828,7 +2883,7 @@ export class IslandRenderer {
             const [ax, ay] = this.villageAgendaAnchor(vv);
             if (this.hasNoticeBoard(vv.agenda)) this.drawNoticeBoard(ax, ay, tw, vv.agenda);
             if (vv.agenda.ended) this.drawUnfiredBricks(x, y, tw, vv.agenda.ended);
-            for (const [k, title] of vv.agenda.banners.slice(0, BANNERS_MAX).entries()) this.drawBanner(ax + (k - 0.5) * tw * 0.34, ay - tw * 0.28, tw, title, vv.roof);
+            for (const b of this.villageBannerLayout(vv)) this.drawBanner(b.x, b.y, tw, b.title, vv.roof);
           }
         }
       }
@@ -2961,15 +3016,13 @@ export class IslandRenderer {
       const ctr = m.villages[vv.slot].center;
       const [x, y0] = this.iso(ctr.i, ctr.j);
       const stageTxt = vv.stage ? ` · ${['', '安静', '蒙灰', '搬离'][vv.stage]}` : '';
-      const agendaTxt = vv.agenda?.phase === 'live'
-        ? ` · ${vv.agenda.title ?? '日程'} 至 ${this.timeText(vv.agenda.until)}`
-        : vv.agenda?.phase === 'soon'
-          ? ` · ${vv.agenda.title ?? '日程'} 将开始`
-          : vv.agenda?.phase === 'ended'
-            ? ` · 待结算 ${vv.agenda.ended}`
-            : vv.agenda?.phase === 'later' && vv.agenda.later > 0
-              ? ` · 稍后 ${vv.agenda.later} 场`
-              : '';
+      const ag = vv.agenda;
+      const agendaParts = [
+        ag?.phase === 'live' ? `${ag.title ?? '日程'} 至 ${this.timeText(ag.until)}` : ag?.phase === 'soon' ? `${ag.title ?? '日程'} 将开始` : '',
+        ag?.later ? `稍后 ${ag.later} 场` : '',
+        ag?.ended ? `待结算 ${ag.ended}` : '',
+      ].filter(Boolean);
+      const agendaTxt = agendaParts.map((part) => ` · ${part}`).join('');
       this.label(x, y0 - tw * 1.05, `${vv.name} ${vv.openCount}人${agendaTxt}${stageTxt}`, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
     }
     {
@@ -2977,11 +3030,14 @@ export class IslandRenderer {
       this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock');
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
       this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary');
-      if (s.chores.count || s.chores.live || s.chores.later || s.chores.ended) {
+      const ch = s.chores;
+      if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        const choresText = s.chores.live
-          ? `杂务 · ${s.chores.live.title} 至 ${this.timeText(s.chores.live.until)}`
-          : `杂务 ${s.chores.count}${s.chores.later ? ` · 稍后 ${s.chores.later}` : s.chores.ended ? ` · 待结算 ${s.chores.ended}` : ''}`;
+        const choresText = ch.live
+          ? `杂务 · ${ch.live.title} 至 ${this.timeText(ch.live.until)}`
+          : ch.soon
+            ? `杂务 · ${ch.soon.title} 将开始`
+            : [`杂务 ${ch.count}`, ch.later ? `稍后 ${ch.later}` : '', ch.ended ? `待结算 ${ch.ended}` : ''].filter(Boolean).join(' · ');
         this.label(cx2, cy2 + tw * 0.3, choresText, '#8a8578', sel?.kind === 'chores', true);
       }
     }
