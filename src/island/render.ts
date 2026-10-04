@@ -663,11 +663,11 @@ export class IslandRenderer {
   private driftWanted(): [string, number] {
     const a = this.amb;
     const k = this.calm ? 0.35 : 1;
+    // 降水粒子只由当天真实天气决定；地面积雪不等于正在下雪。
     if (a.weather === 'snow') return ['snow', Math.round(110 * k)];
     if (a.weather === 'rain') return ['rain', Math.round(140 * k)];
     if (a.season === 0 && a.progress < 0.75) return ['petal', Math.round(26 * k)];
     if (a.season === 2) return ['leaf', Math.round((14 + 22 * a.progress) * k)];
-    if (a.season === 3) return ['snow', Math.round(18 * k)];
     return ['', 0];
   }
 
@@ -1560,12 +1560,17 @@ export class IslandRenderer {
       this.poly(shade(roof, -0.2), tx, ty - h - tw * 0.3, tx + w * 1.2, ty - h, tx, ty - h + w * 0.6);
       if (this.amb.cover > 0.2) this.poly(SNOW, tx - w * 0.5, ty - h - tw * 0.17, tx, ty - h - tw * 0.3, tx + w * 0.5, ty - h - tw * 0.17);
     }
+    // Canvas 的 scale 只影响即时绘制；drawHouse 追加到 lights 的坐标需要显式同步同一变换。
+    const lightStart = this.lights.length;
     const win = this.drawHouse(x - (big ? hw * 0.12 : 0), y + (big ? hh * 0.12 : 0), tw * (big ? 0.5 : 0.44), roof, '#f4ecd8');
     // 旗
     const fx = x - hw * (big ? 0.55 : 0.4);
     const fy = y - tw * (big ? 0.62 : 0.55);
     this.drawFlag(fx, fy + tw * 0.04, tw * 0.68, l.roof, l.index);
     c.restore();
+    for (let i = lightStart; i < this.lights.length; i++) {
+      this.lights[i][1] = y + (this.lights[i][1] - y) * k;
+    }
     return [win[0], y + (win[1] - y) * k];
   }
 
