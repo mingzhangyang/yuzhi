@@ -12,6 +12,7 @@ import type { ISODate } from '../types';
 import { buildIsland, mulberry32, tileHash, type IslandMap, type Tile, type VillageSite } from './map';
 import { describe, type InfoContext, type InfoTarget, type MapInfo } from './info';
 import { dayLight, festivalsOf, moonPhase, seasonProgress, snowCover, weatherOf, type DayLight, type Festival, type Weather } from './ambience';
+import { IslandPropArt } from './props';
 
 export interface WalkerView {
   id: string;
@@ -184,6 +185,7 @@ export class IslandRenderer {
   private grow = new Map<string, { houses: number; anim: number }>();
   private pulses: { at: Tile; t: number }[] = [];
   private lights: Glow[] = [];
+  private propArt = new IslandPropArt();
   private rnd = mulberry32(7);
   private amb: Ambience = { date: '', season: 0, progress: 0, weather: 'clear', cover: 0, fest: new Set(), fireworks: false };
   private day: DayLight = dayLight(12, 0);
@@ -1787,6 +1789,22 @@ export class IslandRenderer {
     c.globalAlpha = 1;
   }
 
+  /** 码头边的季节中性美术道具；积雪明显时收起，避免贴图与雪景冲突。 */
+  private drawHarborProps(tw: number) {
+    if (this.amb.cover > 0.18) return;
+    const dock = this.map.dock;
+    const props = [
+      ['crate', -0.56, -0.46, 0.44],
+      ['barrel', 0.42, -0.3, 0.34],
+      ['rope-coil', -0.1, 0.05, 0.34],
+      ['fishing-net', 0.56, 0.08, 0.46],
+    ] as const;
+    for (const [id, di, dj, scale] of props) {
+      const [x, y] = this.iso(dock.i + di, dock.j + dj);
+      this.propArt.draw(this.ctx, id, x, y + tw * 0.12, tw * scale);
+    }
+  }
+
   private drawBoat(x: number, y: number, tw: number, k: number) {
     const c = this.ctx;
     const bob = Math.sin(this.t * 1.6 + k * 1.3) * tw * 0.025;
@@ -2297,6 +2315,7 @@ export class IslandRenderer {
       if (t === m.lighthouse) this.drawLighthouse(x, y, tw);
       if (t === m.granary) this.drawGranary(x, y, tw, s.granaryRatio);
       if (t === m.chores) this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false);
+      if (t === m.dock) this.drawHarborProps(tw);
       if (t.type === 'plaza' && t.village >= 0) {
         const vv = occupied.get(t.village);
         if (vv) this.drawWell(x, y, tw, vv, t);

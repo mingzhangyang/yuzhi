@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "atlases": {
+    "props-1": {
+      "src": "/assets/island/props/props-1.svg",
+      "width": 384,
+      "height": 384
+    },
+    "props-2": {
+      "src": "/assets/island/props/props-2.svg",
+      "width": 384,
+      "height": 384
+    }
+  },
+  "sprites": {
+    "crate": {"atlas":"props-1","category":"harbor","x":5,"y":37,"w":66,"h":54,"anchorX":0.5,"anchorY":1},
+    "barrel": {"atlas":"props-1","category":"harbor","x":81,"y":18,"w":66,"h":73,"anchorX":0.5,"anchorY":1},
+    "stacked-crates": {"atlas":"props-1","category":"harbor","x":157,"y":32,"w":66,"h":59,"anchorX":0.5,"anchorY":1},
+    "fishing-net": {"atlas":"props-1","category":"harbor","x":233,"y":35,"w":66,"h":56,"anchorX":0.5,"anchorY":1},
+    "rope-coil": {"atlas":"props-1","category":"harbor","x":309,"y":32,"w":66,"h":59,"anchorX":0.5,"anchorY":1},
+    "dock-post": {"atlas":"props-1","category":"harbor","x":5,"y":108,"w":66,"h":79,"anchorX":0.5,"anchorY":1},
+    "lantern-post": {"atlas":"props-1","category":"harbor","x":89,"y":101,"w":50,"h":86,"anchorX":0.5,"anchorY":1},
+    "buoy": {"atlas":"props-1","category":"harbor","x":157,"y":119,"w":66,"h":68,"anchorX":0.5,"anchorY":1},
+    "signpost": {"atlas":"props-1","category":"harbor","x":240,"y":101,"w":51,"h":86,"anchorX":0.5,"anchorY":1},
+    "fence": {"atlas":"props-1","category":"harbor","x":309,"y":138,"w":66,"h":49,"anchorX":0.5,"anchorY":1},
+    "market-stall": {"atlas":"props-1","category":"harbor","x":5,"y":228,"w":66,"h":55,"anchorX":0.5,"anchorY":1},
+    "stone-stairs": {"atlas":"props-1","category":"harbor","x":81,"y":238,"w":66,"h":45,"anchorX":0.5,"anchorY":1},
+    "water-jar": {"atlas":"props-1","category":"harbor","x":157,"y":231,"w":66,"h":52,"anchorX":0.5,"anchorY":1},
+    "bench": {"atlas":"props-1","category":"harbor","x":233,"y":238,"w":66,"h":45,"anchorX":0.5,"anchorY":1},
+    "hoist": {"atlas":"props-1","category":"harbor","x":309,"y":228,"w":66,"h":55,"anchorX":0.5,"anchorY":1},
+    "handcart": {"atlas":"props-1","category":"harbor","x":5,"y":338,"w":66,"h":41,"anchorX":0.5,"anchorY":1},
+    "dock-module": {"atlas":"props-1","category":"harbor","x":81,"y":334,"w":66,"h":45,"anchorX":0.5,"anchorY":1},
+    "fishing-supplies": {"atlas":"props-2","category":"harbor","x":5,"y":49,"w":66,"h":42,"anchorX":0.5,"anchorY":1},
+    "reeds": {"atlas":"props-2","category":"nature","x":81,"y":17,"w":66,"h":74,"anchorX":0.5,"anchorY":1},
+    "shore-rocks": {"atlas":"props-2","category":"nature","x":157,"y":46,"w":66,"h":45,"anchorX":0.5,"anchorY":1},
+    "flowering-shrub": {"atlas":"props-2","category":"nature","x":233,"y":34,"w":66,"h":57,"anchorX":0.5,"anchorY":1},
+    "grass-flowers": {"atlas":"props-2","category":"nature","x":309,"y":37,"w":66,"h":54,"anchorX":0.5,"anchorY":1},
+    "stone-marker": {"atlas":"props-2","category":"nature","x":5,"y":123,"w":66,"h":64,"anchorX":0.5,"anchorY":1},
+    "driftwood": {"atlas":"props-2","category":"nature","x":81,"y":157,"w":66,"h":30,"anchorX":0.5,"anchorY":1},
+    "shells": {"atlas":"props-2","category":"nature","x":157,"y":150,"w":66,"h":37,"anchorX":0.5,"anchorY":1},
+    "stone-wall": {"atlas":"props-2","category":"nature","x":233,"y":151,"w":66,"h":36,"anchorX":0.5,"anchorY":1},
+    "stone-lantern": {"atlas":"props-2","category":"nature","x":309,"y":114,"w":66,"h":73,"anchorX":0.5,"anchorY":1},
+    "stepping-path": {"atlas":"props-2","category":"nature","x":5,"y":247,"w":66,"h":36,"anchorX":0.5,"anchorY":1},
+    "vegetable-planter": {"atlas":"props-2","category":"nature","x":81,"y":242,"w":66,"h":41,"anchorX":0.5,"anchorY":1},
+    "haystack": {"atlas":"props-2","category":"nature","x":157,"y":231,"w":66,"h":52,"anchorX":0.5,"anchorY":1},
+    "garden-gate": {"atlas":"props-2","category":"nature","x":233,"y":232,"w":66,"h":51,"anchorX":0.5,"anchorY":1},
+    "potted-flowers": {"atlas":"props-2","category":"nature","x":309,"y":242,"w":66,"h":41,"anchorX":0.5,"anchorY":1},
+    "clothesline": {"atlas":"props-2","category":"nature","x":5,"y":332,"w":66,"h":47,"anchorX":0.5,"anchorY":1},
+    "stump-seating": {"atlas":"props-2","category":"nature","x":81,"y":339,"w":66,"h":40,"anchorX":0.5,"anchorY":1}
+  },
+  "notes": {
+    "seasonality": "Nature sprites are spring/summer biased; avoid unconditional winter use.",
+    "usage": "Canvas drawImage source rectangles; anchors are bottom-center. Atlases are SVG text containers with embedded WebP pixels for reliable repository storage.",
+    "source": "OpenAI-generated project art, optimized for Canvas runtime."
+  }
+}
