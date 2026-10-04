@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseIcs } from '../src/ics';
-import { autoRefresh, syncSource } from '../src/calendar';
+import { addFileSource, addUrlSource, autoRefresh, syncSource } from '../src/calendar';
+import { emptyData, MemoryPersistence } from '../src/db';
+import { Store } from '../src/store';
 import { makeStore } from './helpers';
 import { classifyEvents, createProject, mergeEvents, removeSource, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
@@ -139,6 +141,84 @@ describe('日历合并', () => {
 });
 
 describe('日历后台刷新与 writer 权限', () => {
+  it.each(['response', 'network-error'] as const)('writer 往返切换后丢弃旧请求的 %s，不覆盖新会话数据', async (outcome) => {
+    const h = makeStore('2026-09-21');
+    h.store.put('sources', { id: 'src', name: '订阅', icsUrl: 'https://example.com/a.ics' });
+    await h.store.flush();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await gate;
+      if (outcome === 'network-error') throw new Error('旧会话网络错误');
+      return new Response(ICS, { status: 200 });
+    }));
+    const pending = syncSource(h.store, 'src');
+    h.store.setReadOnly(true);
+    h.store.setReadOnly(false);
+    h.store.put('sources', { ...h.store.data.sources[0], name: '新会话', lastError: '新会话状态' });
+    await h.store.flush();
+    const current = structuredClone(h.store.data);
+    finish();
+    await expect(pending).rejects.toThrow(outcome === 'response' ? '写权限' : '旧会话网络错误');
+    await h.store.flush();
+    expect(h.store.data).toEqual(current);
+  });
+
+  it.each(['url', 'file'] as const)('%s 添加在失权后重新成为 writer 也不能继续提交', async (kind) => {
+    const h = makeStore('2026-09-21');
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async () => { await gate; return new Response(ICS); }));
+    const pending = kind === 'url'
+      ? addUrlSource(h.store, '旧请求', 'https://example.com/a.ics')
+      : addFileSource(h.store, { name: 'a.ics', text: async () => { await gate; return ICS; } } as File);
+    h.store.setReadOnly(true);
+    h.store.setReadOnly(false);
+    finish();
+    await expect(pending).rejects.toThrow('写权限');
+    expect(h.store.data.sources).toEqual([]);
+    expect(h.store.data.events).toEqual([]);
+  });
+
+  it('autoRefresh 的整轮任务属于发起代，旧任务不在重新接管后继续下一个订阅', async () => {
+    const h = makeStore('2026-09-21');
+    for (const id of ['a', 'b']) h.store.put('sources', { id, name: id, icsUrl: `https://example.com/${id}.ics` });
+    await h.store.flush();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const fetchMock = vi.fn(async () => { await gate; return new Response(ICS); });
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = autoRefresh(h.store);
+    h.store.setReadOnly(true);
+    h.store.setReadOnly(false);
+    finish();
+    expect(await pending).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.store.data.events).toEqual([]);
+    expect(await autoRefresh(h.store)).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['revision', 'reload', 'replaceAll'] as const)('%s 变化同样使旧写上下文失效，即使布尔权限始终可写', async (change) => {
+    let revision = 1;
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence, () => revision);
+    store.clock = () => new Date('2026-09-21T12:00:00');
+    store.put('sources', { id: 'src', name: '订阅', icsUrl: 'https://example.com/a.ics' });
+    await store.flush();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async () => { await gate; return new Response(ICS); }));
+    const pending = syncSource(store, 'src');
+    if (change === 'revision') revision++;
+    else if (change === 'reload') store.reload(structuredClone(store.data));
+    else await store.replaceAll(structuredClone(store.data));
+    finish();
+    await expect(pending).rejects.toThrow('写权限');
+    expect(store.data.events).toEqual([]);
+    expect(store.data.sources[0].lastError).toBeUndefined();
+  });
+
   it('只读 reader 不发订阅网络请求', async () => {
     const h = makeStore('2026-09-21');
     h.store.put('sources', { id: 'src', name: '订阅', icsUrl: 'https://example.com/a.ics' });

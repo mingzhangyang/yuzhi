@@ -8,6 +8,98 @@ import { syncThemeDataset } from '../src/ui/theme';
 const dbName = (label: string) => `yuzhi-batch-${label}-${Date.now()}-${Math.random()}`;
 
 describe('原子批次写入', () => {
+  it('原生 async 回调在执行前拒绝，包括绑定后的回调', async () => {
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence);
+    let entered = false;
+    const callback = async () => {
+      entered = true;
+      store.saveSettings({ theme: 'dark' });
+      await Promise.resolve();
+      createProject(store, '逃逸的写入');
+    };
+    // @ts-expect-error Promise-returning callbacks are forbidden by the public API.
+    expect(() => store.batch(callback)).toThrow('must be synchronous');
+    // @ts-expect-error Binding must not hide an async callback from the contract.
+    expect(() => store.batch(callback.bind(null))).toThrow('must be synchronous');
+    await Promise.resolve();
+    await store.flush();
+    expect(entered).toBe(false);
+    expect(await persistence.load()).toEqual(emptyData());
+    createProject(store, '正常同步动作');
+    await store.flush();
+    expect(store.data.projects).toHaveLength(1);
+  });
+
+  it('普通函数包装的异步工作在回滚后不能另起批次，结束后恢复正常写入', async () => {
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence);
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    let attempted = false;
+    let continuation!: Promise<void>;
+    const wrapped = () => {
+      store.saveSettings({ theme: 'dark' });
+      continuation = gate.then(() => {
+        attempted = true;
+        createProject(store, '异步逃逸');
+      });
+      return continuation;
+    };
+    // @ts-expect-error Test the JS/untyped boundary as well as static rejection.
+    expect(() => store.batch(wrapped)).toThrow('must be synchronous');
+    expect(store.data.settings.theme).toBe('auto');
+    expect(() => store.saveSettings({ theme: 'light' })).toThrow('异步 batch 尚未结束');
+    resume();
+    await expect(continuation).rejects.toThrow('异步 batch 尚未结束');
+    await store.flush();
+    expect(attempted).toBe(true);
+    expect(await persistence.load()).toEqual(emptyData());
+    createProject(store, '结束后重试');
+    await store.flush();
+    expect((await persistence.load()).projects.map((p) => p.name)).toEqual(['结束后重试']);
+  });
+
+  it('捕获嵌套 thenable 错误也不能提交异步回调的同步前缀', async () => {
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence);
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    let continuation!: Promise<void>;
+    expect(() => store.batch(() => {
+      createProject(store, '外层前缀');
+      try {
+        // @ts-expect-error Runtime rejection must poison the outer transaction.
+        store.batch(() => {
+          store.saveSettings({ theme: 'dark' });
+          continuation = gate.then(() => store.saveSettings({ theme: 'light' }));
+          return continuation;
+        });
+      } catch { /* the outer callback must not hide the invalid nested batch */ }
+    })).toThrow('must be synchronous');
+    resume();
+    await expect(continuation).rejects.toThrow('异步 batch 尚未结束');
+    await store.flush();
+    expect(store.data).toEqual(emptyData());
+    expect(await persistence.load()).toEqual(emptyData());
+  });
+
+  it('PromiseLike（包括可调用 thenable）失败被消费且不会留下永久写入禁用', async () => {
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence);
+    const thenable = Object.assign(() => {}, {
+      then(_resolve: (value: unknown) => void, reject: (error: unknown) => void) {
+        try { store.saveSettings({ theme: 'dark' }); } catch (error) { reject(error); }
+      },
+    });
+    expect(() => store.batch(() => thenable)).toThrow('must be synchronous');
+    await Promise.resolve();
+    await Promise.resolve();
+    store.saveSettings({ theme: 'light' });
+    await store.flush();
+    expect((await persistence.load()).settings.theme).toBe('light');
+  });
+
   it('一个用户操作只提交一次，并且成功后只通知一次', async () => {
     class CountedPersistence extends MemoryPersistence {
       commits = 0;

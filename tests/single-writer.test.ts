@@ -26,6 +26,31 @@ class FakeLocks {
 const channelFactory = () => new FakeChannel();
 
 describe('single writer', () => {
+  it.each(['resolve', 'reject'] as const)('reader 恢复后再回到 reader，旧 load 的 %s 均不影响恢复结果', async (outcome) => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let snapshot = 'original';
+    const tab = new SingleWriterCoordinator({
+      ownerId: 'reader-generation', locks: new FakeLocks(), channelFactory,
+      onVersionChange: () => { snapshot = 'recovered'; },
+    });
+    const pending = tab.runIfCurrent(async () => {
+      await gate;
+      if (outcome === 'reject') throw new Error('stale load error');
+      return 'stale';
+    }, (value) => { snapshot = value; });
+    await tab.notifyVersionChange();
+    expect(tab.state).toBe('reader');
+    finish();
+    expect(await pending).toBe(false);
+    expect(snapshot).toBe('recovered');
+    expect(await tab.runIfCurrent(async () => 'current', (value) => { snapshot = value; })).toBe(true);
+    expect(snapshot).toBe('current');
+    await expect(tab.runIfCurrent(async () => { throw new Error('current load error'); }, () => {}))
+      .rejects.toThrow('current load error');
+    await tab.close();
+  });
+
   it.each(['relinquish', 'close', 'versionchange'] as const)('%s 撤销新写入后仍广播最后提交，reader 自动刷新', async (transition) => {
     const name = `yuzhi-drain-${transition}-${Date.now()}-${Math.random()}`;
     const persistence = new IdbPersistence(name);

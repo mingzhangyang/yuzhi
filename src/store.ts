@@ -7,6 +7,7 @@ import { taskState, taskStates } from './logic/read-model';
 
 type Item<C extends Coll> = Data[C][number];
 type PendingBatch = { writes: PersistenceWrite[]; snapshot: Data };
+type SyncCallback<T> = () => T & (Extract<T, PromiseLike<unknown>> extends never ? unknown : never);
 
 /**
  * 内存里的全部数据 + 持久层。一个 batch 对应一个 IndexedDB transaction；
@@ -28,6 +29,10 @@ export class Store {
   private hasBatchFailure = false;
   private batchFailure: unknown;
   private readOnly = false;
+  private accessGeneration = 0;
+  /** Dynamic/JS callers can hide async work behind an ordinary function. */
+  private rejectedAsyncCallbacks = 0;
+  private callbackContractError: Error | undefined;
   /** Full-snapshot replacement is an exclusive barrier over the write queue. */
   private replacementInProgress = false;
   /** 测试时可以替换「今天」 */
@@ -36,16 +41,42 @@ export class Store {
   /** Called after a persistence transaction commits, before subscribers run. */
   onCommitted: () => void = () => {};
 
-  constructor(public data: Data, private persist: Persistence) {
+  constructor(
+    public data: Data,
+    private persist: Persistence,
+    private readonly lifecycleRevision: () => number = () => 0,
+  ) {
     this.committedData = structuredClone(data);
   }
 
   setReadOnly(value: boolean) {
+    if (this.readOnly !== value) this.accessGeneration++;
     this.readOnly = value;
   }
 
   get isReadOnly() {
     return this.readOnly;
+  }
+
+  /**
+   * Async work belongs to one ownership generation and one data snapshot.
+   * A writer -> reader -> writer cycle never revives the old permission.
+   * The application supplies the coordinator revision; accessGeneration also
+   * protects standalone Stores and snapshot identity covers reload/import.
+   */
+  captureWriteContext() {
+    this.assertWritable();
+    const generation = this.accessGeneration;
+    const revision = this.lifecycleRevision();
+    const data = this.data;
+    const isCurrent = () => !this.readOnly && generation === this.accessGeneration
+      && revision === this.lifecycleRevision() && data === this.data;
+    return {
+      isCurrent,
+      assertCurrent: () => {
+        if (!isCurrent()) throw new Error('异步任务的写权限或数据快照已失效，已丢弃结果');
+      },
+    };
   }
 
   /** Replace the in-memory snapshot after a read-only tab observes another tab's commit. */
@@ -63,6 +94,7 @@ export class Store {
   }
 
   private assertWritable(allowReplacement = false) {
+    if (this.rejectedAsyncCallbacks) throw new Error('被拒绝的异步 batch 尚未结束，暂时禁止写入');
     if (this.readOnly) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
     if (this.replacementInProgress && !allowReplacement) throw new Error('正在替换全部数据，请等待导入完成');
   }
@@ -76,18 +108,36 @@ export class Store {
    * share the outer transaction, so composite actions such as settleDay or
    * seedDemo still produce one persistence transaction.
    */
-  batch<T>(fn: () => T): T {
+  batch<T>(fn: SyncCallback<T>): T {
     return this.batchInternal(fn, false);
+  }
+
+  private invokeSynchronous<T>(fn: () => T): T {
+    // Reject native async callbacks before even their pre-await side effects.
+    if (Object.prototype.toString.call(fn) === '[object AsyncFunction]') {
+      throw new Error('Store.batch callback must be synchronous');
+    }
+    const result = fn();
+    if (result !== null && (typeof result === 'object' || typeof result === 'function')
+      && typeof (result as { then?: unknown }).then === 'function') {
+      // TypeScript rejects PromiseLike results, but a JS caller/wrapper may
+      // still return one. Quarantine all mutations until that work settles so
+      // its continuation cannot escape the rejected batch as a fresh action.
+      // Consume its rejection too: the caller already receives the sync error.
+      this.rejectedAsyncCallbacks++;
+      const settled = () => { this.rejectedAsyncCallbacks--; };
+      void Promise.resolve(result).then(settled, settled);
+      const error = new Error('Store.batch callback must be synchronous');
+      this.callbackContractError = error;
+      throw error;
+    }
+    return result;
   }
 
   private batchInternal<T>(fn: () => T, allowReplacement: boolean): T {
     this.assertWritable(allowReplacement);
     if (this.activeWrites) {
-      const nested = fn();
-      if (nested && typeof nested === 'object' && 'then' in nested) {
-        throw new Error('Store.batch callback must be synchronous');
-      }
-      return nested;
+      return this.invokeSynchronous(fn);
     }
 
     if (this.pendingBatches.size === 0) {
@@ -99,13 +149,13 @@ export class Store {
     const changedBefore = this.batchChanged;
     const writes: PersistenceWrite[] = [];
     this.activeWrites = writes;
+    this.callbackContractError = undefined;
 
     let result: T;
     try {
-      result = fn();
-      if (result && typeof result === 'object' && 'then' in result) {
-        throw new Error('Store.batch callback must be synchronous');
-      }
+      result = this.invokeSynchronous(fn);
+      // A caller catching a nested async violation must not commit its prefix.
+      if (this.callbackContractError) throw this.callbackContractError;
       this.updateBacklogSnapshot();
     } catch (error) {
       this.activeWrites = null;

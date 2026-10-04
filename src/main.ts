@@ -39,9 +39,10 @@ async function boot() {
         .catch(() => {})
         .then(async () => {
           if (!appStore || !idb || tabs.state !== 'reader') return;
-          const fresh = await idb.load();
-          // A takeover may have started while this read was in flight.
-          if (tabs.state === 'reader' && appStore.isReadOnly) reloadAppSnapshot(fresh);
+          const current = idb;
+          // A return to reader after recovery is a new lifecycle, not permission
+          // for a pre-recovery snapshot to replace the authoritative fresh one.
+          await tabs.runIfCurrent(() => current.load(), reloadAppSnapshot);
         })
         .catch((error) => appStore?.onError(error));
     },
@@ -100,7 +101,7 @@ async function boot() {
     await tabs.close();
     return;
   }
-  const store = new Store(data, per);
+  const store = new Store(data, per, () => tabs.revision);
   appStore = store;
 
   const syncReadOnlyUi = (readOnly: boolean) => {

@@ -298,6 +298,21 @@ export class SingleWriterCoordinator {
     }
   }
 
+  /** Apply an async result only within the lifecycle revision that started it. */
+  async runIfCurrent<T>(work: () => Promise<T>, apply: (value: T) => void): Promise<boolean> {
+    const revision = this.stateRevision;
+    let result: T;
+    try {
+      result = await work();
+    } catch (error) {
+      if (revision !== this.stateRevision) return false;
+      throw error;
+    }
+    if (revision !== this.stateRevision) return false;
+    apply(result);
+    return true;
+  }
+
   async close(prepare?: WriterPreparation) {
     if (this.closed) return;
     this.closed = true;
