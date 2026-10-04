@@ -3,7 +3,8 @@
 个人效率平台：你的工作和生活会自动长成一座等距视角的小岛。你负责定规则和做选择，小岛负责记账、提醒和讲故事。
 
 - 产品与 MVP 交接文档：[`docs/屿志MVP交接文档.md`](docs/屿志MVP交接文档.md)
-- 架构调整方案（继续开发前）：[`docs/架构调整方案.md`](docs/架构调整方案.md)
+- Architecture v2 完结记录：[`docs/ARCHITECTURE_V2_COMPLETION.md`](docs/ARCHITECTURE_V2_COMPLETION.md)
+- 架构调整方案（已完成，维护参考）：[`docs/架构调整方案.md`](docs/架构调整方案.md)
 - 参考源码（禾境）：[`reference/hejing.html`](reference/hejing.html)，原始压缩包 `reference/hejing-repo.zip`
 
 ## 运行
@@ -69,7 +70,7 @@ tests/                单元测试
 
 实体保留自身字段，`entries` / `operations` 保存结算与操作事实，`snapshots` / `chronicle` 保存历史采样与冻结叙述；一生之书、打断记录、阶段和有效任务状态由 read model 计算。旧版 `life` / `interruptions` 在历史保全、校验及业务事务提交成功后才删除。每个用户动作使用一个持久化 batch；多标签页只有 Web Locks 的 writer 接收新动作，已接受写入在释放锁前完成提交及通知，读者接管取得锁后，须刷新成功才开放新动作。
 
-架构状态（2026-10-04）：Phase 0–5 已完成本轮架构调整并进入维护状态。Phase 3 的原子事务、Phase 4 的 `AppSession`/单写者生命周期（含 Chrome 多标签页、versionchange 与真实 BFCache 验收）、Phase 5 的领域实现拆分均已通过对应回归约束；Batch D 已完成兼容路径、文档状态、既有审查问题和验证证据的最终对照。详细结论见[架构调整方案第 10 节](docs/架构调整方案.md#10-阶段状态与剩余实施顺序)。
+架构状态（2026-10-04）：**Architecture v2 已完成，项目进入维护 / 演进状态。** Phase 0–5 与 Batch A–D 均已完成并通过最终对照验收；本轮计划不再追加新的 Phase。正式完结记录见 [`docs/ARCHITECTURE_V2_COMPLETION.md`](docs/ARCHITECTURE_V2_COMPLETION.md)，长期架构不变量与历史实施细节见[架构调整方案第 10 节](docs/架构调整方案.md#10-阶段状态与实施记录)。后续若需要新的结构性调整，应新建独立 RFC / architecture plan，而不是继续延长本计划。
 
 ## 已完成（对应交接文档第 16 节开发顺序 1–9）
 
