@@ -419,17 +419,34 @@ async function boot() {
   update();
   renderer.start();
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      renderer.suppressNextCues();
-      if (store.today() !== lastToday && !store.isReadOnly) {
-        daily();
-        lastToday = store.today();
-      }
-      update();
-    }
-  });
+  // Bind the session first: on a visible transition it publishes any durable
+  // reload/resume work before the renderer waits on the lifecycle barrier.
   session.bindBrowserLifecycle();
+  let visibilityRefresh = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') {
+      visibilityRefresh++;
+      return;
+    }
+    const generation = ++visibilityRefresh;
+    renderer.beginCueSuppression();
+    const applyFreshBaseline = () => {
+      if (document.visibilityState !== 'visible' || generation !== visibilityRefresh) return;
+      try {
+        if (store.today() !== lastToday && !store.isReadOnly) {
+          daily();
+          lastToday = store.today();
+        }
+        // This update runs while suppression is still sticky, so the refreshed
+        // durable snapshot becomes the cue baseline instead of replaying missed
+        // soon / growth transitions from the hidden interval.
+        update();
+      } finally {
+        renderer.endCueSuppression();
+      }
+    };
+    void session.whenIdle().then(applyFreshBaseline, applyFreshBaseline);
+  });
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 
   /* ---------------- 顶部按钮 ---------------- */

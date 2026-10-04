@@ -36,7 +36,7 @@ const titleOf = (event: CalendarEvent) => event.title.trim() || '未命名日程
 function validTime(event: CalendarEvent): EventWithTime | null {
   const start = new Date(event.start).getTime();
   const end = new Date(event.end).getTime();
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
   return { event, start, end, day: dateOfStamp(event.start) };
 }
 

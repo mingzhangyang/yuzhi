@@ -84,7 +84,7 @@ export interface SettlementEntry {
   itemId: string;
   outcome: Outcome;
   reason?: SkipReason;
-  /** 结算时的快照，便于日后回看 */
+  /** 结算时的归属快照；项目 id，或 CHORES 表示杂务。 */
   projectId?: string;
   title: string;
 }

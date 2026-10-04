@@ -1,4 +1,5 @@
 import type { Data, Interruption, ISODate, OperationEvent, Project, SettlementEntry, Task } from '../types';
+import { CHORES } from '../types';
 import { addDays } from '../lib/date';
 
 export type TaskView = Task & { postponeCount: number };
@@ -402,7 +403,7 @@ export function interruptions(data: Data): Interruption[] {
       itemType: entry.itemType,
       itemId: entry.itemId,
       title: entry.title,
-      projectId: entry.projectId,
+      projectId: entry.projectId === CHORES ? undefined : entry.projectId,
     }));
 }
 

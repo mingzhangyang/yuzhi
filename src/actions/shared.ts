@@ -13,7 +13,6 @@ import type {
   SettlementEntry,
   SkipReason,
 } from '../types';
-import { CHORES } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { entryId, type SettleItem } from '../logic/days';
@@ -63,7 +62,7 @@ export function putSettlementEntry(store: Store, date: ISODate, item: SettleItem
   const id = entryId(date, item.type, item.id);
   const prev = store.data.entries.find((entry) => entry.id === id);
   if (prev && prev.outcome === outcome && prev.reason === reason) return;
-  const projectId = item.projectId && item.projectId !== CHORES ? item.projectId : undefined;
+  const projectId = item.projectId;
   const entry: SettlementEntry = {
     id,
     seq: prev?.seq ?? nextFactSeq(store.data),

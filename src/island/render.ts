@@ -263,6 +263,7 @@ export class IslandRenderer {
   private focus: SceneryFocus | null = null;
   private sceneryIndex = -1;
   private suppressCuesOnce = false;
+  private suppressCuesUntilRelease = false;
   onTap: (hit: Hit, pt: { x: number; y: number }) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement, private wrap: HTMLElement) {
@@ -330,9 +331,7 @@ export class IslandRenderer {
 
   /* ---------------- 场景同步 ---------------- */
 
-  /** 页面从后台恢复时只显示当前终态，不把错过的 soon 边界当成新提示。 */
-  suppressNextCues() {
-    this.suppressCuesOnce = true;
+  private clearQueuedCues() {
     // 后台期间可能已经排进队列的提示（rAF 暂停时不会播完）也一并丢掉，
     // 回到前台只显示终态。
     this.bellRipples = [];
@@ -344,8 +343,25 @@ export class IslandRenderer {
     for (const g of this.grow.values()) g.anim = 1;
   }
 
+  /** 只压掉下一次场景差分；用于已有的单次基线切换。 */
+  suppressNextCues() {
+    this.suppressCuesOnce = true;
+    this.clearQueuedCues();
+  }
+
+  /** 页面恢复期间持续压制提示，直到 durable snapshot 已经成为新的基线。 */
+  beginCueSuppression() {
+    this.suppressCuesUntilRelease = true;
+    this.clearQueuedCues();
+  }
+
+  endCueSuppression() {
+    this.suppressCuesUntilRelease = false;
+  }
+
   setScene(s: Scene) {
-    const prev = this.suppressCuesOnce ? null : this.scene;
+    const suppress = this.suppressCuesOnce || this.suppressCuesUntilRelease;
+    const prev = suppress ? null : this.scene;
     this.suppressCuesOnce = false;
     const cues = diffScene(prev, s);
     this.scene = s;
@@ -379,7 +395,7 @@ export class IslandRenderer {
       const site = this.map.villages[v.slot];
       const g = this.grow.get(v.projectId);
       if (!g) this.grow.set(v.projectId, { houses: v.houses, anim: 1 });
-      else if (v.houses > g.houses) this.grow.set(v.projectId, { houses: v.houses, anim: 0 });
+      else if (v.houses > g.houses) this.grow.set(v.projectId, { houses: v.houses, anim: prev ? 0 : 1 });
       else g.houses = v.houses;
       v.walkers.forEach((w, idx) => {
         keep.add(w.id);
@@ -557,6 +573,74 @@ export class IslandRenderer {
     return { fi: (u + w) / 2, fj: (w - u) / 2 };
   }
 
+  private villageLabelText(v: VillageView): string {
+    const stageTxt = v.stage ? ` · ${['', '安静', '蒙灰', '搬离'][v.stage]}` : '';
+    const ag = v.agenda;
+    const agendaParts = [
+      ag?.phase === 'live' ? `${ag.title ?? '日程'} 至 ${this.timeText(ag.until)}` : ag?.phase === 'soon' ? `${ag.title ?? '日程'} 将开始` : '',
+      ag?.later ? `稍后 ${ag.later} 场` : '',
+      ag?.ended ? `待结算 ${ag.ended}` : '',
+    ].filter(Boolean);
+    return `${v.name} ${v.openCount}人${agendaParts.map((part) => ` · ${part}`).join('')}${stageTxt}`;
+  }
+
+  private villageLabelAnchor(v: VillageView): [number, number] {
+    const ctr = this.map.villages[v.slot].center;
+    const [x, y] = this.iso(ctr.i, ctr.j);
+    return [x, y - this.view.tw * 1.05];
+  }
+
+  private labelHitAt(pt: { x: number; y: number }, x: number, y: number, text: string, dot: boolean): boolean {
+    const tw = this.view.tw;
+    const c = this.ctx;
+    c.save();
+    c.font = `600 ${tw < 30 ? 10.5 : 12}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    const bw = c.measureText(text).width + (dot ? 22 : 14);
+    c.restore();
+    const bh = tw < 30 ? 18 : 21;
+    return Math.abs(pt.x - x) <= bw / 2 && Math.abs(pt.y - y) <= bh / 2;
+  }
+
+  private pointToSegmentDistance(
+    pt: { x: number; y: number },
+    a: [number, number],
+    b: [number, number],
+  ): number {
+    const vx = b[0] - a[0];
+    const vy = b[1] - a[1];
+    const len2 = vx * vx + vy * vy;
+    if (!len2) return Math.hypot(pt.x - a[0], pt.y - a[1]);
+    const t = clamp(((pt.x - a[0]) * vx + (pt.y - a[1]) * vy) / len2, 0, 1);
+    return Math.hypot(pt.x - (a[0] + vx * t), pt.y - (a[1] + vy * t));
+  }
+
+  private pointInPolygon(pt: { x: number; y: number }, poly: [number, number][]): boolean {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i];
+      const [xj, yj] = poly[j];
+      if ((yi > pt.y) !== (yj > pt.y) && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  /** 命中区域跟随真实扫帚的刷头和木柄，不用会盖住小屋的最小圆半径。 */
+  private broomHitAt(pt: { x: number; y: number }, moving: boolean): boolean {
+    const [x, y] = this.choresAgendaAnchor();
+    const tw = this.view.tw;
+    const swing = moving && !this.calm ? Math.sin(this.t * 5) * tw * 0.05 : 0;
+    const brush: [number, number][] = [
+      [x - tw * 0.2 + swing, y - tw * 0.08],
+      [x + tw * 0.02 + swing, y - tw * 0.08],
+      [x + tw * 0.08 + swing, y + tw * 0.02],
+      [x - tw * 0.24 + swing, y + tw * 0.02],
+    ];
+    if (this.pointInPolygon(pt, brush)) return true;
+    const handleA: [number, number] = [x - tw * 0.08, y - tw * 0.13];
+    const handleB: [number, number] = [x + tw * 0.1 + swing, y - tw * 0.38];
+    return this.pointToSegmentDistance(pt, handleA, handleB) <= Math.max(1.25, tw * 0.05);
+  }
+
   private villageAgendaAnchor(v: VillageView): [number, number] {
     const center = this.map.villages[v.slot].center;
     return this.iso(center.i - 0.72, center.j - 0.72);
@@ -651,14 +735,21 @@ export class IslandRenderer {
     for (const v of s.villages) {
       if (!v.agenda) continue;
       const [x, y] = this.villageAgendaAnchor(v);
-      if (this.hasNoticeBoard(v.agenda) && Math.hypot(pt.x - x, pt.y - y) < r) return { kind: 'agenda', target: v.projectId };
-      for (const b of this.villageBannerLayout(v)) {
+      const hasBoard = this.hasNoticeBoard(v.agenda);
+      if (hasBoard && Math.hypot(pt.x - x, pt.y - y) < r) return { kind: 'agenda', target: v.projectId };
+      const banners = this.villageBannerLayout(v);
+      for (const b of banners) {
         if (Math.abs(pt.x - b.x) < b.w * 0.48 && pt.y > b.y - Math.max(tw * 0.2, 6) && pt.y < b.y + Math.max(tw * 0.15, 5)) return { kind: 'agenda', target: v.projectId };
       }
+      // 进行中 / 仅待结算没有额外道具；用已经画出的村名标签承载说明，
+      // 避开井和小人，保持项目点击区域不变。
+      if (!hasBoard && !banners.length) {
+        const [lx, ly] = this.villageLabelAnchor(v);
+        if (this.labelHitAt(pt, lx, ly, this.villageLabelText(v), true)) return { kind: 'agenda', target: v.projectId };
+      }
     }
-    if (s.chores.live || s.chores.soon) {
-      const [x, y] = this.choresAgendaAnchor();
-      if (Math.hypot(pt.x - x, pt.y - y) < Math.max(7, tw * 0.16)) return { kind: 'agenda', target: CHORES };
+    if ((s.chores.live || s.chores.soon) && this.broomHitAt(pt, !!s.chores.live)) {
+      return { kind: 'agenda', target: CHORES };
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
@@ -892,8 +983,9 @@ export class IslandRenderer {
     }
 
     for (const v of s.villages) {
-      if (!v.agenda || (!this.hasNoticeBoard(v.agenda) && !v.agenda.banners.length)) continue;
-      const [x, y] = this.villageAgendaAnchor(v);
+      if (!v.agenda) continue;
+      const hasProp = this.hasNoticeBoard(v.agenda) || v.agenda.banners.length > 0;
+      const [x, y] = hasProp ? this.villageAgendaAnchor(v) : this.villageLabelAnchor(v);
       add({ kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda }, null, x, y);
     }
     if (s.chores.live || s.chores.soon) {
@@ -3013,17 +3105,8 @@ export class IslandRenderer {
     // 标签
     const sel = s.selected;
     for (const vv of s.villages) {
-      const ctr = m.villages[vv.slot].center;
-      const [x, y0] = this.iso(ctr.i, ctr.j);
-      const stageTxt = vv.stage ? ` · ${['', '安静', '蒙灰', '搬离'][vv.stage]}` : '';
-      const ag = vv.agenda;
-      const agendaParts = [
-        ag?.phase === 'live' ? `${ag.title ?? '日程'} 至 ${this.timeText(ag.until)}` : ag?.phase === 'soon' ? `${ag.title ?? '日程'} 将开始` : '',
-        ag?.later ? `稍后 ${ag.later} 场` : '',
-        ag?.ended ? `待结算 ${ag.ended}` : '',
-      ].filter(Boolean);
-      const agendaTxt = agendaParts.map((part) => ` · ${part}`).join('');
-      this.label(x, y0 - tw * 1.05, `${vv.name} ${vv.openCount}人${agendaTxt}${stageTxt}`, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
+      const [x, y] = this.villageLabelAnchor(vv);
+      this.label(x, y, this.villageLabelText(vv), vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);

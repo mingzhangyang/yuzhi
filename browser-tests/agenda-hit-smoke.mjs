@@ -42,6 +42,7 @@ async function seed(page) {
     const live = A.createProject(store, '团队');
     const banner = A.createProject(store, '出行');
     const soon = A.createProject(store, '评审');
+    const endedOnly = A.createProject(store, '结算');
     for (let k = 0; k < 4; k++) A.createTask(store, { title: `团队任务 ${k + 1}`, projectId: live.id });
     A.createTask(store, { title: '评审任务', projectId: soon.id });
     const ev = (id, title, start, end, projectId, allDay = false) => ({
@@ -59,6 +60,7 @@ async function seed(page) {
         ev('trip2', '团建', d('00:00'), d('00:00', '05'), banner.id, true),
         ev('birthday', '生日', d('00:00'), d('00:00', '05'), 'chores', true),
         ev('soon', '方案评审', d('14:40'), d('15:30'), soon.id),
+        ev('ended-only', '晨间复盘', d('09:00'), d('09:30'), endedOnly.id),
         ev('trip', '出差', d('00:00'), d('00:00', '06'), banner.id, true),
         ev('chores-ended', '取快递', d('09:00'), d('09:30'), 'chores'),
         ev('chores-later', '买菜', d('17:00'), d('18:00'), 'chores'),
@@ -90,6 +92,7 @@ async function points(page) {
         board: page([ax, ay]),
         banner: page((([b]) => b ? [b.x, b.y] : [ax, ay - tw * 0.28])(r.villageBannerLayout(v))),
         banner2: page((([, b]) => b ? [b.x, b.y] : [ax, ay - tw * 0.28])(r.villageBannerLayout(v))),
+        labelPoint: page(r.villageLabelAnchor(v)),
         label: v.agenda,
       };
     }
@@ -98,7 +101,13 @@ async function points(page) {
       return { id: w.id, ...page([x, y - Math.max(5, tw * 0.2) * 0.7]) };
     });
     const [hx, hy] = r.iso(r.map.chores.i, r.map.chores.j);
-    out.chores = { hut: page([hx + tw * 0.1, hy - tw * 0.1]), broom: page(r.choresAgendaAnchor()), view: scene.chores };
+    const broom = r.choresAgendaAnchor();
+    out.chores = {
+      hut: page([hx + tw * 0.1, hy - tw * 0.1]),
+      broom: page(broom),
+      broomTip: page([broom[0] + tw * 0.1, broom[1] - tw * 0.38]),
+      view: scene.chores,
+    };
     out.walkers = walkers;
     const [lx, ly] = r.iso(r.map.lighthouse.i, r.map.lighthouse.j);
     const [bx, by] = r.lighthouseBannerAnchor();
@@ -180,6 +189,24 @@ try {
     assert(r.view.kind === 'task', `real click on walker opened ${JSON.stringify(r.view)}`);
   });
 
+  await runScenario('只有待结算日程：村名标签可点击，键盘也能浏览到说明', async () => {
+    const v = p['结算'];
+    assert(v.label?.phase === 'ended' && v.label.ended === 1, `ended-only agenda: ${JSON.stringify(v.label)}`);
+    const hit = await hitAt(page, v.labelPoint);
+    assert(hit?.kind === 'agenda' && hit.target === v.id, `ended-only label hit: ${JSON.stringify(hit)}`);
+    const clicked = await click(page, v.labelPoint);
+    assert(clicked.info, 'ended-only label did not open agenda info');
+    const keyboardReachable = await page.evaluate(() => {
+      const r = window.yuzhi.renderer;
+      for (let i = 0; i < 200; i++) {
+        const item = r.browseScenery(1);
+        if (item && JSON.stringify(item.info).includes('结算')) return true;
+      }
+      return false;
+    });
+    assert(keyboardReachable, 'ended-only agenda was missing from keyboard scenery browsing');
+  });
+
   await runScenario('稍后和待结算同时存在：标签和说明两样都写', async () => {
     const v = p['团队'];
     assert(v.label?.later === 1 && v.label?.ended === 1, `团队 agenda: ${JSON.stringify(v.label)}`);
@@ -251,6 +278,21 @@ try {
     const broom = await click(page, p.chores.broom);
     assert(broom.info?.includes('17:00 开始'), `soon broom info: ${JSON.stringify(broom)}`);
     await shot(page, '4a-1650-chores-soon');
+  });
+
+  await runScenario('窄屏：扫帚命中跟随真实形状，不覆盖杂务小屋', async () => {
+    await page.setViewportSize({ width: 320, height: 760 });
+    await page.waitForTimeout(350);
+    p = await points(page);
+    const hutHit = await hitAt(page, p.chores.hut);
+    assert(hutHit?.kind === 'chores', `narrow chores hut hit: ${JSON.stringify(hutHit)}`);
+    const tipHit = await hitAt(page, p.chores.broomTip);
+    assert(tipHit?.kind === 'agenda' && tipHit.target === 'chores', `narrow broom tip hit: ${JSON.stringify(tipHit)}`);
+    const hut = await click(page, p.chores.hut);
+    assert(hut.view.kind === 'chores' && !hut.info, `narrow chores hut opened ${JSON.stringify(hut)}`);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(350);
+    p = await points(page);
   });
 
   await runScenario('杂务进行中：点扫帚看说明，点小屋仍然打开杂务', async () => {

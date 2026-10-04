@@ -161,16 +161,19 @@ export class AppSession {
   }
 
   /**
-   * Test/diagnostic barrier for session-owned async work. It is deliberately a
-   * lifecycle barrier rather than a timer so callers do not encode races.
+   * Barrier for session-owned async work. It includes lifecycle resume,
+   * coordinator transitions and durable reader refreshes, so UI code can
+   * derive a fresh baseline without encoding timing assumptions.
    */
   async whenIdle(): Promise<void> {
     while (true) {
+      const resume = this.resumeTask?.promise;
+      if (resume) await resume.catch(() => {});
       await this.tabs.whenStable();
       const refresh = this.readerRefresh;
       await refresh;
       await this.tabs.whenStable();
-      if (refresh === this.readerRefresh) return;
+      if (refresh === this.readerRefresh && !this.resumeTask) return;
     }
   }
 

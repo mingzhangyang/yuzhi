@@ -197,7 +197,7 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
     toast('日历事件都归好类了');
     return;
   }
-  const preferredIndex = preferredTitle ? groups.findIndex((group) => group.title === preferredTitle) : -1;
+  const preferredIndex = preferredTitle !== undefined ? groups.findIndex((group) => group.title === preferredTitle) : -1;
   const g = groups[preferredIndex >= 0 ? preferredIndex : 0];
   const next = g.events.find((e) => dateOfStamp(e.start) >= today) ?? g.events[g.events.length - 1];
   const ps = store.activeProjects();

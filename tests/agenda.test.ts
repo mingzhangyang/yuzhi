@@ -43,6 +43,27 @@ describe('此刻层 agendaAt', () => {
     expect(result.drifting).toEqual(['未命名会面']);
   });
 
+  it('零时长提醒仍按稍后 → 即将开始 → 待结算流转', () => {
+    const h = makeStore('2026-10-04');
+    const p = createProject(h.store, '提醒');
+    h.store.data.events.push({
+      id: 'point',
+      sourceId: 's',
+      uid: 'point',
+      title: '站起来活动',
+      start: stamp('2026-10-04', 17),
+      end: stamp('2026-10-04', 17),
+      allDay: false,
+      projectId: p.id,
+      classified: true,
+    });
+
+    expect(agendaAt(h.store.data, new Date('2026-10-04T16:00:00')).slots.get(p.id)?.later).toBe(1);
+    expect(agendaAt(h.store.data, new Date('2026-10-04T16:45:00')).slots.get(p.id)?.soon.map((x) => x.title)).toEqual(['站起来活动']);
+    const ended = agendaAt(h.store.data, new Date('2026-10-04T17:00:00'));
+    expect(ended.slots.get(p.id)?.ended).toBe(1);
+  });
+
   it('结算后的事件不再出现在此刻层，且不会改变输入', () => {
     const h = makeStore('2026-10-04');
     const p = createProject(h.store, '已确认');

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildScene } from '../src/ui/scene';
 import { makeStore } from './helpers';
-import { createProject } from '../src/actions';
+import { createProject, settleDay } from '../src/actions';
 import { CHORES } from '../src/types';
+import { itemKey } from '../src/logic/days';
 
 describe('scene time snapshot', () => {
   it('derives date, light and hour from one clock reading', () => {
@@ -53,6 +54,31 @@ describe('scene agenda projection', () => {
     store.data.entries.push(e('a', 'done'), e('b', 'partial'), e('c', 'skipped'), e('d', 'skipped'), e('f', 'skipped'), e('g', 'skipped'));
     const scene = buildScene(store, null, false, new Date(2026, 9, 4, 20));
     expect(scene.chores.count).toBe(2);
+    expect(scene.chores.woodpile).toBe(1);
+  });
+
+  it('keeps CHORES ownership through the real settlement action', () => {
+    const { store } = makeStore('2026-10-04');
+    store.data.events.push({
+      id: 'real-chore',
+      sourceId: 's',
+      uid: 'real-chore',
+      title: '取快递',
+      start: at(9),
+      end: at(10),
+      allDay: false,
+      projectId: CHORES,
+      classified: true,
+    });
+
+    settleDay(store, '2026-10-04', new Map([[itemKey('event', 'real-chore'), { outcome: 'done' }]]));
+
+    expect(store.data.entries.find((entry) => entry.itemId === 'real-chore')).toMatchObject({
+      projectId: CHORES,
+      outcome: 'done',
+    });
+    const scene = buildScene(store, null, false, new Date(2026, 9, 4, 20));
+    expect(scene.chores.count).toBe(1);
     expect(scene.chores.woodpile).toBe(1);
   });
 
