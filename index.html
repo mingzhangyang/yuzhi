@@ -46,7 +46,8 @@
         <span class="badge" id="weather"></span>
       </div>
       <div class="mapwrap" id="mapwrap">
-        <canvas id="map" aria-label="小岛地图：点村落看项目，点小人看任务，点码头安排新任务，点树、山、田或海看看说明"></canvas>
+        <canvas id="map" tabindex="0" aria-describedby="mapKeyHelp" aria-label="小岛地图：点村落看项目，点小人看任务，点码头安排新任务；键盘可浏览树、山、田、溪、空地和海的说明"></canvas>
+        <p class="sr-only" id="mapKeyHelp">键盘操作：聚焦地图后，按回车或空格开始浏览景物；使用方向键切换景物；按 Esc 关闭说明。</p>
         <div class="zoom"><button id="zin" aria-label="放大">+</button><button id="zout" aria-label="缩小">−</button><button id="zfit" aria-label="复位">⤢</button></div>
         <div class="tip" id="tip">点村落、小人或码头看看</div>
         <div class="mapinfo" id="mapinfo" role="status" aria-live="polite" hidden></div>

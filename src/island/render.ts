@@ -10,7 +10,7 @@
 import type { Stage } from '../logic/config';
 import type { ISODate } from '../types';
 import { buildIsland, mulberry32, tileHash, type IslandMap, type Tile, type VillageSite } from './map';
-import { describe, type InfoTarget, type MapInfo } from './info';
+import { describe, type InfoContext, type InfoTarget, type MapInfo } from './info';
 import { dayLight, festivalsOf, moonPhase, seasonProgress, snowCover, weatherOf, type DayLight, type Festival, type Weather } from './ambience';
 
 export interface WalkerView {
@@ -66,6 +66,18 @@ export interface Scene {
 
 export type Selection = { kind: 'project'; id: string } | { kind: 'task'; id: string } | { kind: 'dock' } | { kind: 'granary' } | { kind: 'chores' } | { kind: 'archive' };
 export type Hit = Selection | null;
+
+type SceneryFocus = { i: number; j: number; tree?: [number, number, number] };
+
+export interface SceneryInspection {
+  info: MapInfo;
+  x: number;
+  y: number;
+}
+
+interface SceneryCandidate extends SceneryInspection {
+  focus: SceneryFocus | null;
+}
 
 interface Walker {
   id: string;
@@ -183,7 +195,8 @@ export class IslandRenderer {
   private nextRocket = 0;
   private calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   /** 被点中的景物：画一圈高亮 */
-  private focus: { i: number; j: number; tree?: [number, number, number] } | null = null;
+  private focus: SceneryFocus | null = null;
+  private sceneryIndex = -1;
   onTap: (hit: Hit, pt: { x: number; y: number }) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement, private wrap: HTMLElement) {
@@ -454,17 +467,13 @@ export class IslandRenderer {
     return null;
   }
 
-  /** 点到的景物（树、山、田、溪、空地、海）及其说明；anchor 是信息卡指向的位置 */
-  inspect(pt: { x: number; y: number }): { info: MapInfo; x: number; y: number } | null {
+  /** 当前场景的景物说明上下文；指针和键盘浏览共用。 */
+  private infoContext(): InfoContext | null {
     const s = this.scene;
     if (!s) return null;
-    const m = this.map;
-    const { tw } = this.view;
-    const hw = tw / 2;
-    const hh = tw / 4;
     const a = this.amb;
     const [yy, mm, dd] = s.date.split('-').map(Number);
-    const ctx = {
+    return {
       season: a.season,
       progress: a.progress,
       cover: a.cover,
@@ -474,6 +483,22 @@ export class IslandRenderer {
       fest: [...a.fest],
       moon: moonPhase(new Date(yy, mm - 1, dd, Math.floor(s.hour), (s.hour % 1) * 60)),
     };
+  }
+
+  private selectScenery(target: InfoTarget, focus: SceneryFocus | null, x: number, y: number, ctx: InfoContext): SceneryInspection {
+    this.focus = focus;
+    return { info: describe(target, ctx), x, y };
+  }
+
+  /** 点到的景物（树、山、田、溪、空地、海）及其说明；anchor 是信息卡指向的位置 */
+  inspect(pt: { x: number; y: number }): SceneryInspection | null {
+    const s = this.scene;
+    const ctx = this.infoContext();
+    if (!s || !ctx) return null;
+    const m = this.map;
+    const { tw } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
     const occupied = new Set(s.villages.map((v) => v.slot));
     const built = new Set(s.landmarks.map((l) => l.index));
     // 树：树冠比地块高，按屏幕上的外框找，取最靠前的一棵
@@ -491,9 +516,8 @@ export class IslandRenderer {
       }
     }
     if (best) {
-      this.focus = { i: best.t.i, j: best.t.j, tree: [best.x, best.y, best.s] };
       const target: InfoTarget = { kind: 'tree', tree: best.kind, cherry: best.seed % 1 < 0.35, forest: best.t.type === 'forest' };
-      return { info: describe(target, ctx), x: best.x, y: best.y - best.s * (best.kind === 'pine' ? 1.3 : 1) };
+      return this.selectScenery(target, { i: best.t.i, j: best.t.j, tree: [best.x, best.y, best.s] }, best.x, best.y - best.s * (best.kind === 'pine' ? 1.3 : 1), ctx);
     }
     // 山：同样按屏幕外框
     let mt: Tile | null = null;
@@ -506,15 +530,73 @@ export class IslandRenderer {
     }
     const { fi, fj } = this.tileCoords(pt);
     const t = mt ?? m.at(Math.round(fi), Math.round(fj));
-    if (!t) {
-      this.focus = null;
-      return { info: describe({ kind: 'sea' }, ctx), x: pt.x, y: pt.y };
-    }
+    if (!t) return this.selectScenery({ kind: 'sea' }, null, pt.x, pt.y, ctx);
     const site = t.village >= 0 && !occupied.has(t.village) ? 'village' : t.landmark >= 0 && !built.has(t.landmark) ? 'landmark' : undefined;
-    this.focus = { i: t.i, j: t.j };
     const [x, y] = this.iso(t.i, t.j);
     const top = t.type === 'mountain' ? y - tw * (0.75 + t.v * 0.55) : y - hh;
-    return { info: describe({ kind: 'ground', type: t.type, ring: t.ring, site }, ctx), x, y: top };
+    return this.selectScenery({ kind: 'ground', type: t.type, ring: t.ring, site }, { i: t.i, j: t.j }, x, top, ctx);
+  }
+
+  /**
+   * 键盘浏览真实景物。候选来自当前地图对象，并按最终说明去重：
+   * 键盘用户能访问所有不同的说明，同时不会被几十棵同类树或草地淹没。
+   */
+  browseScenery(step: 1 | -1): SceneryInspection | null {
+    const s = this.scene;
+    const ctx = this.infoContext();
+    if (!s || !ctx) return null;
+    const m = this.map;
+    const { tw, w, h } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    const occupied = new Set(s.villages.map((v) => v.slot));
+    const built = new Set(s.landmarks.map((l) => l.index));
+    const candidates: SceneryCandidate[] = [];
+    const seen = new Set<string>();
+    const add = (target: InfoTarget, focus: SceneryFocus | null, x: number, y: number) => {
+      const info = describe(target, ctx);
+      const key = [info.title, info.sub ?? '', ...info.lines].join('\u0000');
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({ info, focus, x, y });
+    };
+
+    for (const t of m.all) {
+      if (!t.trees.length || (t.landmark >= 0 && built.has(t.landmark))) continue;
+      const [x0, y0] = this.iso(t.i, t.j);
+      for (const tr of t.trees) {
+        const x = x0 + (tr.dx - tr.dy) * hw;
+        const y = y0 + (tr.dx + tr.dy) * hh;
+        const sz = tw * 0.42 * tr.s;
+        const anchorY = y - sz * (tr.kind === 'pine' ? 1.3 : 1);
+        if (x < 0 || x > w || anchorY < 0 || anchorY > h) continue;
+        const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
+        add(
+          { kind: 'tree', tree: tr.kind, cherry: seed % 1 < 0.35, forest: t.type === 'forest' },
+          { i: t.i, j: t.j, tree: [x, y, sz] },
+          x,
+          anchorY,
+        );
+      }
+    }
+
+    for (const t of m.all) {
+      const [x, y] = this.iso(t.i, t.j);
+      const top = t.type === 'mountain' ? y - tw * (0.75 + t.v * 0.55) : y - hh;
+      if (x < 0 || x > w || top < 0 || top > h) continue;
+      const site = t.village >= 0 && !occupied.has(t.village) ? 'village' : t.landmark >= 0 && !built.has(t.landmark) ? 'landmark' : undefined;
+      add({ kind: 'ground', type: t.type, ring: t.ring, site }, { i: t.i, j: t.j }, x, top);
+    }
+
+    // 海面没有单独的地块对象，但说明本身也是同一套 describe() 语义。
+    add({ kind: 'sea' }, null, Math.max(16, w * 0.08), Math.max(16, h * 0.14));
+
+    if (!candidates.length) return null;
+    if (this.sceneryIndex < 0) this.sceneryIndex = step > 0 ? 0 : candidates.length - 1;
+    else this.sceneryIndex = (this.sceneryIndex + step + candidates.length) % candidates.length;
+    const current = candidates[this.sceneryIndex];
+    this.focus = current.focus;
+    return { info: current.info, x: current.x, y: current.y };
   }
 
   clearFocus() {

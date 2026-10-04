@@ -1,7 +1,7 @@
 import './styles.css';
 import { exportBackup, parseBackup } from './db';
 import { AppSession } from './app-session';
-import { IslandRenderer, type Selection } from './island/render';
+import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
 import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
@@ -240,15 +240,15 @@ async function boot() {
     }
   };
 
-  /* 点到景物（树、山、田、溪、空地、海）时，在地图上弹出一张说明卡 */
+  /* 景物说明：指针与键盘共享 renderer 里的同一套景物语义。 */
   const infoBox = $('mapinfo');
+  const mapCanvas = $('map') as HTMLCanvasElement;
   const hideInfo = () => {
     if (infoBox.hidden) return;
     infoBox.hidden = true;
     renderer.clearFocus();
   };
-  const showInfo = (pt: { x: number; y: number }) => {
-    const r = renderer.inspect(pt);
+  const showInspection = (r: SceneryInspection | null) => {
     if (!r) return hideInfo();
     const { info } = r;
     setHTML(
@@ -270,7 +270,19 @@ async function boot() {
     infoBox.style.setProperty('--arrow', `${Math.min(Math.max(14, r.x - left), bw - 14)}px`);
     infoBox.querySelector<HTMLButtonElement>('.mi-x')!.onclick = hideInfo;
   };
-  $('map').addEventListener('pointerdown', hideInfo);
+  const showInfo = (pt: { x: number; y: number }) => showInspection(renderer.inspect(pt));
+
+  mapCanvas.addEventListener('pointerdown', hideInfo);
+  mapCanvas.addEventListener('keydown', (e) => {
+    let step: 1 | -1 | null = null;
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowDown') step = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') step = -1;
+    if (step) {
+      e.preventDefault();
+      $('tip').style.opacity = '0';
+      showInspection(renderer.browseScenery(step));
+    }
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideInfo();
   });
