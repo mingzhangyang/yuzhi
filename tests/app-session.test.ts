@@ -61,7 +61,7 @@ class ControlledPersistence implements SessionPersistence {
   promotionStarted: Promise<void> = Promise.resolve();
   closeStarted: Promise<void> = Promise.resolve();
 
-  constructor(writeAccess: boolean) {
+  constructor(writeAccess: boolean, readonly notifyVersionChange?: () => void) {
     this.writeAccess = writeAccess;
   }
 
@@ -235,6 +235,48 @@ describe('AppSession', () => {
     expect(session.store.isReadOnly).toBe(true);
     expect(FakeChannel.peers.size).toBe(0);
     expect(persistence.operations.some((operation) => operation.startsWith('reopen:'))).toBe(false);
+
+    await session.close();
+  });
+
+  it('versionchange recovery 与 suspend 重叠时，joined demotion 后仍执行最终资源清理', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    let notifyVersionChange!: () => void;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'versionchange-suspend', locks, channelFactory },
+      persistenceFactory: (writeAccess, notify) => {
+        notifyVersionChange = notify;
+        persistence = new ControlledPersistence(writeAccess, notify);
+        return persistence;
+      },
+    })).session;
+
+    expect(session.state).toBe('writer');
+    persistence.operations.length = 0;
+
+    // Hold the recovery close so suspend joins the coordinator's existing
+    // recovering demotion instead of starting its own preparation callback.
+    const finishRecoveryClose = persistence.blockNextClose();
+    notifyVersionChange();
+    await persistence.closeStarted;
+    expect(session.state).toBe('recovering');
+
+    const suspension = session.suspendForCache();
+    finishRecoveryClose();
+    await suspension;
+
+    expect(session.state).toBe('reader');
+    expect(session.store.isReadOnly).toBe(true);
+    expect(FakeChannel.peers.size).toBe(0);
+
+    const reopenIndex = persistence.operations.lastIndexOf('reopen:false');
+    const closeIndexes = persistence.operations
+      .map((operation, index) => operation === 'close' ? index : -1)
+      .filter((index) => index >= 0);
+    expect(reopenIndex).toBeGreaterThanOrEqual(0);
+    expect(closeIndexes.length).toBeGreaterThanOrEqual(2);
+    expect(closeIndexes.at(-1)).toBeGreaterThan(reopenIndex);
 
     await session.close();
   });
