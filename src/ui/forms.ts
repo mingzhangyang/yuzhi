@@ -101,8 +101,10 @@ export function openCalendar(store: Store, onImported: () => void) {
       <div class="sect">归类规则 <small>${rules.length} 条</small></div>
       ${ruleRows || '<p class="empty">第一次遇到一类事件时，你指定一次归属，这里就会多一条规则。</p>'}`;
   };
-  const mount = (box: HTMLElement) => {
+  const mount = (box: HTMLElement, signal: AbortSignal) => {
+    const context = store.captureWriteContext(signal);
     const rerender = () => {
+      if (!context.isCurrent()) return;
       const body = box.querySelector('[data-cal]');
       if (body) {
         body.innerHTML = render();
@@ -113,41 +115,50 @@ export function openCalendar(store: Store, onImported: () => void) {
       const form = box.querySelector<HTMLFormElement>('form[data-f="url"]')!;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!context.isCurrent()) return;
         const fd = new FormData(form);
         const btn = form.querySelector<HTMLButtonElement>('button.primary')!;
         btn.disabled = true;
         btn.textContent = '正在读取…';
         try {
-          const n = await addUrlSource(store, String(fd.get('name') ?? ''), String(fd.get('url') ?? ''));
+          const n = await addUrlSource(store, String(fd.get('name') ?? ''), String(fd.get('url') ?? ''), signal);
+          if (!context.isCurrent()) return;
           toast(`接入成功，读到 ${n} 个事件`);
           rerender();
           onImported();
         } catch (err) {
+          if (!context.isCurrent()) return;
           toast(errMsg(err), true);
           btn.disabled = false;
           btn.textContent = '订阅';
         }
       });
       box.querySelector('[data-file]')!.addEventListener('click', async () => {
+        if (!context.isCurrent()) return;
         const f = await pickFile($('fileIcs') as HTMLInputElement);
-        if (!f) return;
+        if (!f || !context.isCurrent()) return;
         try {
-          const n = await addFileSource(store, f);
+          const n = await addFileSource(store, f, signal);
+          if (!context.isCurrent()) return;
           toast(`导入了 ${n} 个事件`);
           rerender();
           onImported();
         } catch (err) {
+          if (!context.isCurrent()) return;
           toast(errMsg(err), true);
         }
       });
       box.querySelectorAll<HTMLElement>('[data-sync]').forEach((b) =>
         b.addEventListener('click', async () => {
+          if (!context.isCurrent()) return;
           b.textContent = '…';
           try {
-            const n = await syncSource(store, b.dataset.sync!);
+            const n = await syncSource(store, b.dataset.sync!, signal);
+            if (!context.isCurrent()) return;
             toast(`刷新完成，${n} 个事件`);
             onImported();
           } catch (err) {
+            if (!context.isCurrent()) return;
             toast(errMsg(err), true);
           }
           rerender();

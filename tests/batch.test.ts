@@ -60,6 +60,27 @@ describe('原子批次写入', () => {
     expect((await persistence.load()).projects.map((p) => p.name)).toEqual(['结束后重试']);
   });
 
+  it('捕获嵌套 native async 错误仍回滚整个外层事务', async () => {
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence);
+    let entered = false;
+    expect(() => store.batch(() => {
+      createProject(store, '外层前缀');
+      try {
+        // @ts-expect-error Exercise untyped callers violating the sync contract.
+        store.batch(async () => { entered = true; });
+      } catch { /* catching must not recover a poisoned transaction */ }
+      store.saveSettings({ theme: 'dark' });
+    })).toThrow('must be synchronous');
+    await store.flush();
+    expect(entered).toBe(false);
+    expect(store.data).toEqual(emptyData());
+    expect(await persistence.load()).toEqual(emptyData());
+    createProject(store, '新的合法事务');
+    await store.flush();
+    expect((await persistence.load()).projects).toHaveLength(1);
+  });
+
   it('捕获嵌套 thenable 错误也不能提交异步回调的同步前缀', async () => {
     const persistence = new MemoryPersistence();
     const store = new Store(emptyData(), persistence);
@@ -173,6 +194,22 @@ describe('原子批次写入', () => {
     const durable = await persistence.load();
     const durableStore = new Store(durable, persistence);
     expect(durableStore.task(task.id)).toMatchObject({ projectId: from.id, scheduledFor: '2026-10-04' });
+  });
+
+  it('replaceAll 排队期间写者换代不能复活旧替换请求', async () => {
+    const persistence = new MemoryPersistence();
+    const store = new Store(emptyData(), persistence);
+    const replacement = emptyData();
+    replacement.settings.theme = 'dark';
+    const pending = store.replaceAll(replacement);
+    store.setReadOnly(true);
+    store.setReadOnly(false);
+    await expect(pending).rejects.toThrow('已失效');
+    expect(store.data).toEqual(emptyData());
+    expect(await persistence.load()).toEqual(emptyData());
+    store.saveSettings({ theme: 'light' });
+    await store.flush();
+    expect((await persistence.load()).settings.theme).toBe('light');
   });
 
   it('replaceAll 等待写队列真正排空，事实序号不会跨替换边界串改', async () => {

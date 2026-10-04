@@ -64,12 +64,12 @@ export class Store {
    * The application supplies the coordinator revision; accessGeneration also
    * protects standalone Stores and snapshot identity covers reload/import.
    */
-  captureWriteContext() {
+  captureWriteContext(signal?: AbortSignal) {
     this.assertWritable();
     const generation = this.accessGeneration;
     const revision = this.lifecycleRevision();
     const data = this.data;
-    const isCurrent = () => !this.readOnly && generation === this.accessGeneration
+    const isCurrent = () => !signal?.aborted && !this.readOnly && generation === this.accessGeneration
       && revision === this.lifecycleRevision() && data === this.data;
     return {
       isCurrent,
@@ -112,10 +112,16 @@ export class Store {
     return this.batchInternal(fn, false);
   }
 
+  private rejectAsyncCallback(): never {
+    // Contract failure belongs to the whole transaction, not the call frame.
+    this.callbackContractError ??= new Error('Store.batch callback must be synchronous');
+    throw this.callbackContractError;
+  }
+
   private invokeSynchronous<T>(fn: () => T): T {
     // Reject native async callbacks before even their pre-await side effects.
     if (Object.prototype.toString.call(fn) === '[object AsyncFunction]') {
-      throw new Error('Store.batch callback must be synchronous');
+      this.rejectAsyncCallback();
     }
     const result = fn();
     if (result !== null && (typeof result === 'object' || typeof result === 'function')
@@ -127,9 +133,7 @@ export class Store {
       this.rejectedAsyncCallbacks++;
       const settled = () => { this.rejectedAsyncCallbacks--; };
       void Promise.resolve(result).then(settled, settled);
-      const error = new Error('Store.batch callback must be synchronous');
-      this.callbackContractError = error;
-      throw error;
+      this.rejectAsyncCallback();
     }
     return result;
   }
@@ -316,6 +320,7 @@ export class Store {
 
   async replaceAll(d: Data): Promise<void> {
     this.assertWritable();
+    const context = this.captureWriteContext();
     if (this.activeWrites) throw new Error('Store.replaceAll cannot run inside Store.batch');
     const replacement = structuredClone(d);
     this.replacementInProgress = true;
@@ -326,6 +331,7 @@ export class Store {
       // slip into the gap between draining the old queue and capturing the new
       // durable snapshot.
       await this.drainPendingWrites();
+      context.assertCurrent();
       this.assertWritable(true);
 
       this.batchInternal(() => {

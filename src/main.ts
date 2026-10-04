@@ -5,7 +5,7 @@ import { Store } from './store';
 import type { Data } from './types';
 import { IslandRenderer, type Selection } from './island/render';
 import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
-import { confirmModal, initModal, isModalOpen } from './ui/modal';
+import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
 import { SettleSheet } from './ui/settle';
@@ -164,6 +164,7 @@ async function boot() {
     store.setReadOnly(readOnly);
     syncReadOnlyUi(readOnly);
     if (readOnly) {
+      closeModal(false);
       settle?.close();
       ceremony?.close();
     }
@@ -450,7 +451,10 @@ async function boot() {
   function afterImport() {
     // 导入可能带来早于归档期限的事件日子，马上归档，不要等到明天
     daily();
-    if (unclassifiedGroups(store.data.events).length) setTimeout(() => openClassify(store), 400);
+    const context = store.captureWriteContext();
+    if (unclassifiedGroups(store.data.events).length) setTimeout(() => {
+      if (context.isCurrent()) openClassify(store);
+    }, 400);
   }
   $('calBtn').onclick = () => openCalendar(store, afterImport);
   const menu = $('menu');
@@ -477,18 +481,23 @@ async function boot() {
       download(`yuzhi-backup-${store.today()}.json`, exportBackup(store.data));
       toast('备份已导出');
     } else if (m === 'import') {
+      const context = store.captureWriteContext();
+      const revision = tabs.revision;
       const f = await pickFile($('fileBackup') as HTMLInputElement);
-      if (!f) return;
+      if (!f || !context.isCurrent()) return;
       try {
         const d = parseBackup(await f.text());
+        if (!context.isCurrent()) return;
         const ok = await confirmModal({ title: '用备份替换现在的小岛？', text: `备份里有 ${d.projects.length} 个项目、${d.tasks.length} 件任务、${d.entries.length} 条结算记录。现在这座岛上的数据会被替换。`, ok: '替换', danger: true });
-        if (!ok) return;
+        if (!ok || !context.isCurrent()) return;
         await store.replaceAll(d);
+        if (tabs.revision !== revision || store.isReadOnly) return;
         tracker.open({ kind: 'overview' }, false);
         applyTheme();
         daily();
         toast('备份已导入');
       } catch (err) {
+        if (tabs.revision !== revision || store.isReadOnly) return;
         toast(err instanceof Error ? err.message : String(err), true);
       }
     } else if (m === 'archive') tracker.open({ kind: 'archive' });

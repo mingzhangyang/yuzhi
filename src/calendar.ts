@@ -20,9 +20,10 @@ export function ingest(store: Store, src: CalendarSource, text: string): number 
 }
 
 /** 刷新一个订阅链接 */
-export async function syncSource(store: Store, id: string): Promise<number> {
+export async function syncSource(store: Store, id: string, signal?: AbortSignal): Promise<number> {
   if (store.isReadOnly) throw new Error('当前标签页是只读的，不能刷新日历');
-  const context = store.captureWriteContext();
+  const context = store.captureWriteContext(signal);
+  context.assertCurrent();
   const src = store.data.sources.find((s) => s.id === id);
   if (!src?.icsUrl) return 0;
   try {
@@ -47,9 +48,10 @@ export async function syncSource(store: Store, id: string): Promise<number> {
   }
 }
 
-export async function addUrlSource(store: Store, name: string, url: string): Promise<number> {
+export async function addUrlSource(store: Store, name: string, url: string, signal?: AbortSignal): Promise<number> {
   if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
-  const context = store.captureWriteContext();
+  const context = store.captureWriteContext(signal);
+  context.assertCurrent();
   const u = url.trim();
   if (!/^(https?|webcals?):\/\//i.test(u)) throw new Error('请粘贴以 https:// 或 webcal:// 开头的订阅链接');
   const text = await fetchIcs(u);
@@ -66,9 +68,10 @@ export async function addUrlSource(store: Store, name: string, url: string): Pro
   });
 }
 
-export async function addFileSource(store: Store, file: File): Promise<number> {
+export async function addFileSource(store: Store, file: File, signal?: AbortSignal): Promise<number> {
   if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
-  const context = store.captureWriteContext();
+  const context = store.captureWriteContext(signal);
+  context.assertCurrent();
   const text = await file.text();
   context.assertCurrent();
   if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000))) throw new Error('这不是 .ics 日历文件');
