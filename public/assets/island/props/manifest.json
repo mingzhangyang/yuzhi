@@ -2,12 +2,12 @@
   "version": 1,
   "atlases": {
     "props-1": {
-      "src": "/assets/island/props/props-1.webp",
+      "src": "/assets/island/props/props-1.svg",
       "width": 384,
       "height": 384
     },
     "props-2": {
-      "src": "/assets/island/props/props-2.webp",
+      "src": "/assets/island/props/props-2.svg",
       "width": 384,
       "height": 384
     }
@@ -50,7 +50,7 @@
   },
   "notes": {
     "seasonality": "Nature sprites are spring/summer biased; avoid unconditional winter use.",
-    "usage": "Canvas drawImage source rectangles; anchors are bottom-center.",
+    "usage": "Canvas drawImage source rectangles; anchors are bottom-center. Atlases are SVG text containers with embedded WebP pixels for reliable repository storage.",
     "source": "OpenAI-generated project art, optimized for Canvas runtime."
   }
 }
