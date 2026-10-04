@@ -446,12 +446,7 @@ export class Tracker {
           const id = f.dataset.id!;
           const pid = String(fd.get('tproj') ?? '') || undefined;
           const sel = f.querySelector<HTMLSelectElement>('select[name=tdate]')!;
-          const t = s.task(id)!;
-          if (pid !== t.projectId) {
-            if (!t.projectId && pid) A.arrangeTask(s, id, pid, readDate(sel));
-            else A.moveTask(s, id, pid);
-          }
-          if (readDate(sel) !== s.task(id)!.scheduledFor) A.rescheduleTask(s, id, readDate(sel));
+          A.editTaskPlan(s, id, pid, readDate(sel));
           toast('已保存');
           break;
         }
@@ -674,7 +669,9 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
               onClose: onDone,
             });
           } else if (c === 'close') {
+            const context = store.captureWriteContext();
             const ok = await confirmModal({ kick: '最后一步由你决定', title: `正式关闭「${p.name}」？`, text: '村落会腾空，项目放进「未竟之书」。以后可以重新立起。', ok: '正式关闭', danger: true });
+            if (!context.isCurrent()) return;
             if (ok) {
               A.closeProject(store, p.id, why ? `长期停滞（${why}）` : '长期停滞');
               toast(`「${p.name}」放进了未竟之书`);
@@ -685,7 +682,8 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
       );
     },
     onClose: () => {
-      if (!chosen) A.snoozePrompt(store, p.id);
+      // The tab may have lost writer ownership while this modal was open.
+      if (!chosen && !store.isReadOnly) A.snoozePrompt(store, p.id);
       onDone();
     },
   });

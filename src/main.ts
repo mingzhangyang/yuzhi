@@ -1,10 +1,11 @@
 import './styles.css';
-import { IdbPersistence, MemoryPersistence, exportBackup, isStorageUnavailableError, parseBackup, type Persistence } from './db';
+import { IdbPersistence, exportBackup, parseBackup, type Persistence } from './db';
+import { initializePersistence } from './persistence-startup';
 import { Store } from './store';
 import type { Data } from './types';
 import { IslandRenderer, type Selection } from './island/render';
 import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
-import { confirmModal, initModal, isModalOpen } from './ui/modal';
+import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
 import { SettleSheet } from './ui/settle';
@@ -16,41 +17,227 @@ import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
 import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
 import { unclassifiedGroups } from './logic/classify';
+import { SingleWriterCoordinator, type WriterState } from './single-writer';
+import { syncThemeDataset } from './ui/theme';
 
 async function boot() {
   initModal();
-  let per: Persistence = new IdbPersistence();
+  let appStore: Store | undefined;
+  let idb: IdbPersistence | undefined;
+  let settle!: SettleSheet;
+  let ceremony!: Ceremony;
+  let readerRefresh: Promise<void> = Promise.resolve();
+  let syncWriterState = (_state: WriterState) => {};
+  const reloadAppSnapshot = (fresh: Data) => {
+    if (!appStore) return;
+    appStore.reload(fresh);
+  };
+  const tabs = new SingleWriterCoordinator({
+    onStateChange: (state) => syncWriterState(state),
+    onPeerCommit: () => {
+      readerRefresh = readerRefresh
+        .catch(() => {})
+        .then(async () => {
+          if (!appStore || !idb || tabs.state !== 'reader') return;
+          const current = idb;
+          // A return to reader after recovery is a new lifecycle, not permission
+          // for a pre-recovery snapshot to replace the authoritative fresh one.
+          await tabs.runIfCurrent(() => current.load(), reloadAppSnapshot);
+        })
+        .catch((error) => appStore?.onError(error));
+    },
+    onVersionChange: async () => {
+      // The coordinator has already synchronously revoked writability here.
+      // Keep the lease while persistence drains and reconnects as a reader;
+      // SingleWriterCoordinator releases it only after this callback settles.
+      const current = idb;
+      try {
+        if (appStore) {
+          try { await appStore.flush(); } catch (error) { appStore.onError(error); }
+        }
+        if (current) {
+          await current.close();
+          await current.reopen(false);
+          if (appStore) reloadAppSnapshot(await current.load());
+        }
+      } catch (error) {
+        appStore?.onError(error);
+        throw error;
+      }
+    },
+  });
+  await tabs.acquire();
+  idb = new IdbPersistence(undefined, tabs.isWritable, { onVersionChange: () => { void tabs.notifyVersionChange(); } });
+  let per: Persistence = idb;
   let data: Data;
   try {
-    data = await per.load();
+    // Startup only accepts a snapshot produced under one stable coordinator
+    // revision. If versionchange recovery races the load, the stale result is
+    // discarded and retried against the new reader/writer state.
+    const initialized = await initializePersistence(idb, () => tabs.runAgainstStableState(async (writable) => {
+      await idb!.setWriteAccess(writable);
+      return idb!.load();
+    }));
+    per = initialized.persistence;
+    data = initialized.data;
+    if (initialized.fallback) {
+      idb = undefined;
+      setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
+    }
   } catch (error) {
-    if (!isStorageUnavailableError(error)) {
-      console.error('无法打开屿志本地数据', error);
-      const message = error instanceof Error ? error.message : String(error);
-      const wrap = document.querySelector<HTMLElement>('.wrap');
-      if (wrap) {
-        setHTML(
-          wrap,
-          `<section class="card panel" role="alert" style="max-width:760px;margin:48px auto">
-            <h2>无法打开已有数据</h2>
-            <p>${esc(message)}</p>
-            <p>为了保护原有记录，屿志没有切换到空白临时数据，也没有覆盖本地数据。请先刷新页面；如果提示数据来自更新版本，请先更新屿志。不要清除浏览器站点数据。</p>
-          </section>`,
-        );
-      }
+    console.error('无法打开屿志本地数据', error);
+    const message = error instanceof Error ? error.message : String(error);
+    const wrap = document.querySelector<HTMLElement>('.wrap');
+    if (wrap) {
+      setHTML(
+        wrap,
+        `<section class="card panel" role="alert" style="max-width:760px;margin:48px auto">
+          <h2>无法打开已有数据</h2>
+          <p>${esc(message)}</p>
+          <p>为了保护原有记录，屿志没有切换到空白临时数据，也没有覆盖本地数据。请先刷新页面；如果提示数据来自更新版本，请先更新屿志。不要清除浏览器站点数据。</p>
+        </section>`,
+      );
+    }
+    await tabs.close();
+    return;
+  }
+  const store = new Store(data, per, () => tabs.revision);
+  appStore = store;
+
+  const syncReadOnlyUi = (readOnly: boolean) => {
+    for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
+      const button = document.getElementById(id) as HTMLButtonElement | null;
+      if (button) button.disabled = readOnly;
+    }
+    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"]')
+      .forEach((button) => { button.disabled = readOnly; });
+    document.body.dataset.readOnly = readOnly ? 'true' : 'false';
+  };
+
+  const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task']);
+  const guardReadOnlyMutation = (event: Event) => {
+    if (!store.isReadOnly || !(event.target instanceof Element)) return;
+    const target = event.target;
+    let mutating = false;
+    if (event.type === 'submit') {
+      mutating = Boolean(target.closest('#tracker form, #mdl form'));
+    } else if (event.type === 'change') {
+      mutating = Boolean(target.closest('#tracker [data-act-change], #settle [data-pull]'));
+    } else if (event.type === 'pointerdown') {
+      // Pointerdown is only stateful for the settlement swipe gesture. Buttons
+      // are handled on click so one user action produces one read-only notice.
+      mutating = Boolean(target.closest('#settle .scard'));
+    } else {
+      const trackerAction = target.closest<HTMLElement>('#tracker [data-act]');
+      mutating = Boolean(
+        (trackerAction && !readOnlyNavActions.has(trackerAction.dataset.act ?? ''))
+        || target.closest('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]')
+        || target.closest('#settle [data-set], #settle [data-reason], #settle [data-act="all"], #settle [data-act="commit"]')
+        || target.closest('#ceremony [data-go]')
+      );
+    }
+    if (!mutating) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toast('此页当前只读。请先接管写权限，再修改小岛。', true);
+  };
+  for (const type of ['click', 'submit', 'change', 'pointerdown']) {
+    document.addEventListener(type, guardReadOnlyMutation, true);
+  }
+
+  store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
+  store.onCommitted = () => {
+    if (idb) tabs.announceCommit();
+  };
+
+  const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
+  const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
+  if (!tabs.supportsWriterLock && tabNotice) {
+    const text = tabNotice.querySelector('span');
+    if (text) text.textContent = '此浏览器不支持安全的多标签页写入协调；为保护本地数据，此页保持只读。';
+  }
+
+  // Store/UI writability is a projection of coordinator state. No caller keeps
+  // a second writable flag or replays an old acquisition result.
+  syncWriterState = (state) => {
+    const readOnly = state !== 'writer';
+    store.setReadOnly(readOnly);
+    syncReadOnlyUi(readOnly);
+    if (readOnly) {
+      closeModal(false);
+      settle?.discard();
+      ceremony?.close();
+    }
+    if (tabNotice) {
+      tabNotice.hidden = state === 'writer';
+      if (state === 'recovering' || state === 'releasing' || state === 'closed') tabNotice.dataset.blocked = 'true';
+      else delete tabNotice.dataset.blocked;
+    }
+    if (takeOver) takeOver.disabled = !tabs.supportsWriterLock || state !== 'reader';
+  };
+  syncWriterState(tabs.state);
+
+  let calendarRefreshTask: Promise<void> | undefined;
+  let calendarRefreshAgain = false;
+  function runWriterAutoRefresh() {
+    if (store.isReadOnly) return;
+    if (calendarRefreshTask) {
+      calendarRefreshAgain = true;
       return;
     }
-    per = new MemoryPersistence(error.recoveredData);
-    data = await per.load();
-    setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
+    calendarRefreshTask = autoRefresh(store)
+      .then((n) => {
+        if (!n || store.isReadOnly) return;
+        if (!isModalOpen() && !settle.isOpen()) afterImport();
+        else daily();
+      })
+      .finally(() => {
+        calendarRefreshTask = undefined;
+        const rerun = calendarRefreshAgain && !store.isReadOnly;
+        calendarRefreshAgain = false;
+        if (rerun) runWriterAutoRefresh();
+      });
   }
-  const store = new Store(data, per);
-  store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
+
+  const requestTakeover = async (notify = true): Promise<boolean> => {
+    if (!tabs.supportsWriterLock) {
+      if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
+      return false;
+    }
+    try {
+      await tabs.whenStable();
+      const acquired = await tabs.takeOver(idb
+        ? async () => {
+          // Coordinator is preparing here, so Store/UI stay read-only until
+          // the fresh write-capable snapshot succeeds.
+          await readerRefresh.catch(() => {});
+          await idb!.setWriteAccess(true);
+          const fresh = await idb!.load();
+          reloadAppSnapshot(fresh);
+        }
+        : undefined);
+      if (!acquired) {
+        if (notify) toast('另一个标签页仍在写入，请稍后再试', true);
+        return false;
+      }
+      resumeWriterDuties();
+      if (notify) toast('已接管写权限');
+      return true;
+    } catch (error) {
+      await tabs.release().catch(() => {});
+      if (idb) {
+        try { await idb.reopen(false); } catch { /* coordinator remains non-writable */ }
+      }
+      console.error('接管写权限失败', error);
+      if (notify) toast('接管写权限失败：' + (error instanceof Error ? error.message : String(error)), true);
+      return false;
+    }
+  };
+
+  if (takeOver && tabs.supportsWriterLock) takeOver.onclick = () => { void requestTakeover(); };
 
   const applyTheme = () => {
-    const t = store.data.settings.theme;
-    if (t === 'auto') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = t;
+    syncThemeDataset(store.data.settings.theme, document.documentElement.dataset);
     setTimeout(() => {
       renderer.readTheme();
       update();
@@ -73,7 +260,7 @@ async function boot() {
   });
   tracker.bindChange();
 
-  const ceremony = new Ceremony(store, {
+  ceremony = new Ceremony(store, {
     pause: (on) => (renderer.paused = on),
     done: (p, where) => {
       tracker.open(where === 'landmark' ? { kind: 'project', id: p.id } : { kind: 'archive' });
@@ -81,7 +268,7 @@ async function boot() {
     },
   });
 
-  const settle = new SettleSheet(store, {
+  settle = new SettleSheet(store, {
     brick: (pid, from) => flyBrick(pid, from),
     onOpenChange: (o) => {
       dusk = o;
@@ -140,8 +327,15 @@ async function boot() {
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
   function update() {
-    // 积压快照：只在数值变化时写入，写入触发的再次更新不会再写
-    A.recordBacklogSnapshot(store);
+    if (syncThemeDataset(store.data.settings.theme, document.documentElement.dataset)) {
+      // Store notifications include persistence rollback and peer reloads.
+      // Theme is therefore derived from the authoritative Store snapshot, not
+      // only from the UI action that originally requested a theme change.
+      setTimeout(() => {
+        renderer.readTheme();
+        update();
+      }, 30);
+    }
     const today = store.today();
     const now = store.clock();
     updateStats(store);
@@ -171,7 +365,7 @@ async function boot() {
   /** 进入「搬离」阶段的村落：询问重新启动 / 缩小规模 / 正式关闭 */
   const asked = new Set<string>();
   function maybePrompt() {
-    if (isModalOpen() || settle.isOpen() || ceremony.isOpen()) return;
+    if (store.isReadOnly || isModalOpen() || settle.isOpen() || ceremony.isOpen()) return;
     const p = A.projectsNeedingPrompt(store).find((x) => !asked.has(x.id));
     if (!p) return;
     asked.add(p.id);
@@ -180,11 +374,23 @@ async function boot() {
 
   /** 新的一天：归档超过 3 天的未结算日子，记下阶段变化 */
   function daily() {
+    if (store.isReadOnly) return;
     // Replay missed time-passage boundaries before archive lines advance the
     // chronicle boundary used for legacy compatibility.
-    A.refreshStages(store);
-    const archived = A.archiveOldDays(store);
+    const archived = store.batch(() => {
+      A.refreshStages(store);
+      return A.archiveOldDays(store);
+    });
     if (archived.length) toast(`${archived.map(fmtDay).join('、')}没有记录，已归档。不算做了，也不算没做。`);
+  }
+
+  function resumeWriterDuties() {
+    if (store.isReadOnly) return;
+    daily();
+    lastToday = store.today();
+    asked.clear();
+    setTimeout(maybePrompt, 0);
+    runWriterAutoRefresh();
   }
 
   store.subscribe(update);
@@ -194,20 +400,47 @@ async function boot() {
 
   setInterval(() => {
     const t = store.today();
-    if (t !== lastToday) {
-      lastToday = t;
+    if (t !== lastToday && !store.isReadOnly) {
       daily();
+      lastToday = t;
     }
     update();
   }, 60_000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (store.today() !== lastToday) {
-        lastToday = store.today();
+      if (store.today() !== lastToday && !store.isReadOnly) {
         daily();
+        lastToday = store.today();
       }
       update();
     }
+  });
+  let pageSuspension: Promise<void> | undefined;
+  const suspendForCache = () => tabs.relinquish(async () => {
+    // Enter releasing state synchronously, then drain/demote persistence while
+    // the lease is still held. Store/UI writability follows coordinator state.
+    try { await store.flush(); } catch (error) { store.onError(error); }
+    if (idb) {
+      try { await idb.setWriteAccess(false); } catch (error) { store.onError(error); }
+    }
+  });
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) {
+      pageSuspension = suspendForCache();
+      return;
+    }
+    void tabs.close(async () => {
+      try { await store.flush(); } catch (error) { store.onError(error); }
+      await idb?.close();
+    });
+  });
+  window.addEventListener('pageshow', () => {
+    if (!store.isReadOnly) return;
+    void (async () => {
+      if (pageSuspension) await pageSuspension.catch(() => {});
+      pageSuspension = undefined;
+      await requestTakeover(false);
+    })();
   });
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 
@@ -215,11 +448,14 @@ async function boot() {
   $('settleBtn').onclick = () => settle.open();
   $('fogGo').onclick = () => settle.open();
   $('newBtn').onclick = () => openNew(store, 'task');
-  const afterImport = () => {
+  function afterImport() {
     // 导入可能带来早于归档期限的事件日子，马上归档，不要等到明天
     daily();
-    if (unclassifiedGroups(store.data.events).length) setTimeout(() => openClassify(store), 400);
-  };
+    const context = store.captureWriteContext();
+    if (unclassifiedGroups(store.data.events).length) setTimeout(() => {
+      if (context.isCurrent()) openClassify(store);
+    }, 400);
+  }
   $('calBtn').onclick = () => openCalendar(store, afterImport);
   const menu = $('menu');
   $('moreBtn').onclick = (e) => {
@@ -245,18 +481,23 @@ async function boot() {
       download(`yuzhi-backup-${store.today()}.json`, exportBackup(store.data));
       toast('备份已导出');
     } else if (m === 'import') {
+      const context = store.captureWriteContext();
+      const revision = tabs.revision;
       const f = await pickFile($('fileBackup') as HTMLInputElement);
-      if (!f) return;
+      if (!f || !context.isCurrent()) return;
       try {
         const d = parseBackup(await f.text());
+        if (!context.isCurrent()) return;
         const ok = await confirmModal({ title: '用备份替换现在的小岛？', text: `备份里有 ${d.projects.length} 个项目、${d.tasks.length} 件任务、${d.entries.length} 条结算记录。现在这座岛上的数据会被替换。`, ok: '替换', danger: true });
-        if (!ok) return;
+        if (!ok || !context.isCurrent()) return;
         await store.replaceAll(d);
+        if (tabs.revision !== revision || store.isReadOnly) return;
         tracker.open({ kind: 'overview' }, false);
         applyTheme();
         daily();
         toast('备份已导入');
       } catch (err) {
+        if (tabs.revision !== revision || store.isReadOnly) return;
         toast(err instanceof Error ? err.message : String(err), true);
       }
     } else if (m === 'archive') tracker.open({ kind: 'archive' });
@@ -266,7 +507,7 @@ async function boot() {
   applyTheme();
 
   // 第一次打开
-  if (!store.data.projects.length && !store.data.tasks.length && !store.data.sources.length) {
+  if (!store.isReadOnly && !store.data.projects.length && !store.data.tasks.length && !store.data.sources.length) {
     openWelcome({
       project: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
       calendar: () => openCalendar(store, afterImport),
@@ -277,12 +518,8 @@ async function boot() {
     });
   } else setTimeout(maybePrompt, 1200);
 
-  // 后台刷新日历订阅
-  autoRefresh(store).then((n) => {
-    if (!n) return;
-    if (!isModalOpen() && !settle.isOpen()) afterImport();
-    else daily();
-  });
+  // 后台日历 I/O 只属于当前 writer；reader 不发重复网络请求。
+  runWriterAutoRefresh();
 
   // 方便调试
   (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A };

@@ -4,7 +4,7 @@ import { createProject, createTask, settleDay, archiveOldDays, restartProject, t
 import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
 import { lifeEntries } from '../src/logic/operations';
-import { emptyData, type Coll, type Persistence } from '../src/db';
+import { emptyData, type Persistence } from '../src/db';
 import { Store } from '../src/store';
 
 describe('阶段换算', () => {
@@ -294,8 +294,9 @@ describe('阶段历史重放', () => {
   });
 
   it('结算导致的阶段恶化继承 settlement seq，并排在结算之后', () => {
-    const h = makeStore('2026-09-08', '2026-09-01');
+    const h = makeStore('2026-09-01');
     const p = createProject(h.store, '结算恶化');
+    h.setToday('2026-09-08');
     const t = createTask(h.store, { title: '未推进', projectId: p.id, scheduledFor: h.today });
 
     // 9/8 尚未结算时是 pending，不累计荒置；结算为 postponed 后这一天
@@ -314,8 +315,9 @@ describe('阶段历史重放', () => {
   });
 
   it('事实触发的阶段行继承 settlement seq，并保持同日因果顺序', () => {
-    const h = makeStore('2026-09-20', '2026-09-01');
+    const h = makeStore('2026-09-01');
     const p = createProject(h.store, '顺序村落');
+    h.setToday('2026-09-20');
     expect(h.store.villages().get(p.id)!.stage).toBe(2);
 
     const t = createTask(h.store, { title: '推进', projectId: p.id, scheduledFor: h.today });
@@ -433,7 +435,7 @@ describe('阶段历史重放', () => {
 
     markTaskDone(h.store, t.id);
     expect(h.store.villages().get(p.id)!.stage).toBe(0);
-    expect(stageLifeEntries(h.store.data, h.today).some((entry) => entry.projectId === p.id && entry.date === h.today && entry.text.includes('热闹'))).toBe(true);
+    expect(stageLifeEntries(h.store.data, h.today).some((entry) => entry.projectId === p.id && entry.date === h.today && entry.kind === 'stage')).toBe(true);
   });
 
   it('阶段时间线对未变化的数据复用缓存结果', () => {
@@ -449,11 +451,11 @@ describe('阶段历史重放', () => {
     data.projects.push({ id: 'p1', name: '并发村落', createdAt: '2026-09-01', status: 'active', islandSlot: 0 });
     const persist: Persistence = {
       async load() { return data; },
-      async put(coll: Coll) { return coll === 'entries' || coll === 'operations' ? 42 : undefined; },
-      async renameFact() { return 42; },
-      async del() {},
-      async putSettings() {},
-      async replaceAll() {},
+      async batch(writes) {
+        return writes.flatMap((write) => write.kind === 'put' && (write.coll === 'entries' || write.coll === 'operations')
+          ? [{ coll: write.coll, key: (write.item as { id: string }).id, seq: 42 }]
+          : []);
+      },
     };
     const store = new Store(data, persist);
     const entry = {
@@ -474,7 +476,7 @@ describe('阶段历史重放', () => {
     expect(provisional?.factSeq).toBe(1);
 
     await store.flush();
-    expect(entry.seq).toBe(42);
+    expect(data.entries.find((row) => row.id === entry.id)?.seq).toBe(42);
     const authoritative = stageTransitions(data, '2026-09-20').find(
       (row) => row.projectId === 'p1' && row.source === 'facts',
     );

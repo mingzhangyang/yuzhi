@@ -71,6 +71,11 @@ export function openNew(store: Store, kind: 'task' | 'project' = 'task', onProje
 
 /** 日历：订阅链接、上传文件、归类规则 */
 export function openCalendar(store: Store, onImported: () => void) {
+  // 日历对话框里的每个操作都会写入；只读标签页不打开半绑定的对话框
+  if (store.isReadOnly) {
+    toast('此页当前只读。请先接管写权限，再修改小岛。', true);
+    return;
+  }
   const render = () => {
     const srcs = store.data.sources;
     const rules = store.data.rules;
@@ -101,8 +106,10 @@ export function openCalendar(store: Store, onImported: () => void) {
       <div class="sect">归类规则 <small>${rules.length} 条</small></div>
       ${ruleRows || '<p class="empty">第一次遇到一类事件时，你指定一次归属，这里就会多一条规则。</p>'}`;
   };
-  const mount = (box: HTMLElement) => {
+  const mount = (box: HTMLElement, signal: AbortSignal) => {
+    const context = store.captureWriteContext(signal);
     const rerender = () => {
+      if (!context.isCurrent()) return;
       const body = box.querySelector('[data-cal]');
       if (body) {
         body.innerHTML = render();
@@ -113,41 +120,50 @@ export function openCalendar(store: Store, onImported: () => void) {
       const form = box.querySelector<HTMLFormElement>('form[data-f="url"]')!;
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (!context.isCurrent()) return;
         const fd = new FormData(form);
         const btn = form.querySelector<HTMLButtonElement>('button.primary')!;
         btn.disabled = true;
         btn.textContent = '正在读取…';
         try {
-          const n = await addUrlSource(store, String(fd.get('name') ?? ''), String(fd.get('url') ?? ''));
+          const n = await addUrlSource(store, String(fd.get('name') ?? ''), String(fd.get('url') ?? ''), signal);
+          if (!context.isCurrent()) return;
           toast(`接入成功，读到 ${n} 个事件`);
           rerender();
           onImported();
         } catch (err) {
+          if (!context.isCurrent()) return;
           toast(errMsg(err), true);
           btn.disabled = false;
           btn.textContent = '订阅';
         }
       });
       box.querySelector('[data-file]')!.addEventListener('click', async () => {
+        if (!context.isCurrent()) return;
         const f = await pickFile($('fileIcs') as HTMLInputElement);
-        if (!f) return;
+        if (!f || !context.isCurrent()) return;
         try {
-          const n = await addFileSource(store, f);
+          const n = await addFileSource(store, f, signal);
+          if (!context.isCurrent()) return;
           toast(`导入了 ${n} 个事件`);
           rerender();
           onImported();
         } catch (err) {
+          if (!context.isCurrent()) return;
           toast(errMsg(err), true);
         }
       });
       box.querySelectorAll<HTMLElement>('[data-sync]').forEach((b) =>
         b.addEventListener('click', async () => {
+          if (!context.isCurrent()) return;
           b.textContent = '…';
           try {
-            const n = await syncSource(store, b.dataset.sync!);
+            const n = await syncSource(store, b.dataset.sync!, signal);
+            if (!context.isCurrent()) return;
             toast(`刷新完成，${n} 个事件`);
             onImported();
           } catch (err) {
+            if (!context.isCurrent()) return;
             toast(errMsg(err), true);
           }
           rerender();
@@ -266,74 +282,75 @@ export function seedDemo(store: Store) {
     toast(`放示例需要 5 个空位，岛上现在只空着 ${Math.max(0, free)} 个。先关闭几个村落吧。`, true);
     return;
   }
-  const before = structuredClone(store.data);
-  const today = store.today();
-  const back = (pid: string, days: number) => {
-    const p = store.project(pid)!;
-    const date = addDays(today, -days);
-    store.put('projects', { ...p, createdAt: date });
-    for (const op of store.data.operations) if (op.projectId === pid && op.kind === 'project-created') store.put('operations', { ...op, date });
-    for (const c of store.data.chronicle) if (c.text === `岛上立起了新村落「${p.name}」。`) store.put('chronicle', { ...c, date });
-  };
-  const doneOn = (pid: string, title: string, date: ISODate) => {
-    const t = A.createTask(store, { title, projectId: pid, scheduledFor: date });
-    store.put('tasks', { ...store.taskRecord(t.id)!, createdAt: date });
-    for (const op of store.data.operations) if (op.taskId === t.id && op.kind === 'task-created') store.put('operations', { ...op, date });
-    return t;
-  };
   try {
-    const write = A.createProject(store, '写一本小书');
-    back(write.id, 24);
-    const team = A.createProject(store, '团队');
-    back(team.id, 12);
-    const move = A.createProject(store, '搬家');
-    back(move.id, 34);
-    const gym = A.createProject(store, '健身');
-    back(gym.id, 10);
+    store.batch(() => {
+      const today = store.today();
+      const back = (pid: string, days: number) => {
+        const p = store.project(pid)!;
+        const date = addDays(today, -days);
+        store.put('projects', { ...p, createdAt: date });
+        for (const op of store.data.operations) if (op.projectId === pid && op.kind === 'project-created') store.put('operations', { ...op, date });
+        for (const c of store.data.chronicle) if (c.text === `岛上立起了新村落「${p.name}」。`) store.put('chronicle', { ...c, date });
+      };
+      const doneOn = (pid: string, title: string, date: ISODate) => {
+        const t = A.createTask(store, { title, projectId: pid, scheduledFor: date });
+        store.put('tasks', { ...store.taskRecord(t.id)!, createdAt: date });
+        for (const op of store.data.operations) if (op.taskId === t.id && op.kind === 'task-created') store.put('operations', { ...op, date });
+        return t;
+      };
 
-    const settled = new Map<ISODate, Map<string, A.Decision>>();
-    const mark = (date: ISODate, id: string, d: A.Decision) => {
-      if (!settled.has(date)) settled.set(date, new Map());
-      settled.get(date)!.set(`task|${id}`, d);
-    };
-    // 写书：荒了两周多，最近四天认真推进
-    for (let k = 4; k >= 1; k--) mark(addDays(today, -k), doneOn(write.id, `第 ${5 - k} 章初稿`, addDays(today, -k)).id, { outcome: k === 2 ? 'partial' : 'done' });
-    // 团队：前几天很忙，之后安静了几天
-    for (let k = 11; k >= 9; k--) mark(addDays(today, -k), doneOn(team.id, ['整理需求', '和设计对齐', '写周报'][11 - k], addDays(today, -k)).id, { outcome: 'done' });
-    const tPost = doneOn(team.id, '季度复盘', addDays(today, -2));
-    mark(addDays(today, -2), tPost.id, { outcome: 'skipped', reason: 'interrupted' });
-    // 健身：没精力的几天不伤害村落
-    mark(addDays(today, -3), doneOn(gym.id, '慢跑 3 公里', addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
-    for (const [date, m] of [...settled.entries()].sort((a, b) => a[0].localeCompare(b[0]))) A.settleDay(store, date, m);
+      const write = A.createProject(store, '写一本小书');
+      back(write.id, 24);
+      const team = A.createProject(store, '团队');
+      back(team.id, 12);
+      const move = A.createProject(store, '搬家');
+      back(move.id, 34);
+      const gym = A.createProject(store, '健身');
+      back(gym.id, 10);
+
+      const settled = new Map<ISODate, Map<string, A.Decision>>();
+      const mark = (date: ISODate, id: string, d: A.Decision) => {
+        if (!settled.has(date)) settled.set(date, new Map());
+        settled.get(date)!.set(`task|${id}`, d);
+      };
+      // 写书：荒了两周多，最近四天认真推进
+      for (let k = 4; k >= 1; k--) mark(addDays(today, -k), doneOn(write.id, `第 ${5 - k} 章初稿`, addDays(today, -k)).id, { outcome: k === 2 ? 'partial' : 'done' });
+      // 团队：前几天很忙，之后安静了几天
+      for (let k = 11; k >= 9; k--) mark(addDays(today, -k), doneOn(team.id, ['整理需求', '和设计对齐', '写周报'][11 - k], addDays(today, -k)).id, { outcome: 'done' });
+      const tPost = doneOn(team.id, '季度复盘', addDays(today, -2));
+      mark(addDays(today, -2), tPost.id, { outcome: 'skipped', reason: 'interrupted' });
+      // 健身：没精力的几天不伤害村落
+      mark(addDays(today, -3), doneOn(gym.id, '慢跑 3 公里', addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
+      for (const [date, m] of [...settled.entries()].sort((a, b) => a[0].localeCompare(b[0]))) A.settleDay(store, date, m);
 
     // 一个已经落成的项目：立在海岸上
-    const photo = A.createProject(store, '整理旧照片');
-    back(photo.id, 40);
-    for (let k = 0; k < 7; k++) {
-      const d = addDays(today, -38 + k * 4);
-      const t = doneOn(photo.id, ['扫描相册', '去重', '按年份归档', '补写说明', '做一本电子相册', '备份到硬盘', '分享给家人'][k], d);
-      A.settleDay(store, d, new Map([[`task|${t.id}`, { outcome: 'done' }]]));
-    }
-    A.completeProject(store, photo.id, 'landmark');
-    store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
-    for (const op of store.data.operations) if (op.projectId === photo.id && op.kind === 'project-completed') store.put('operations', { ...op, date: addDays(today, -10) });
-    for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes('整理旧照片')) store.put('chronicle', { ...c, date: addDays(today, -10) });
+      const photo = A.createProject(store, '整理旧照片');
+      back(photo.id, 40);
+      for (let k = 0; k < 7; k++) {
+        const d = addDays(today, -38 + k * 4);
+        const t = doneOn(photo.id, ['扫描相册', '去重', '按年份归档', '补写说明', '做一本电子相册', '备份到硬盘', '分享给家人'][k], d);
+        A.settleDay(store, d, new Map([[`task|${t.id}`, { outcome: 'done' }]]));
+      }
+      A.completeProject(store, photo.id, 'landmark');
+      store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
+      for (const op of store.data.operations) if (op.projectId === photo.id && op.kind === 'project-completed') store.put('operations', { ...op, date: addDays(today, -10) });
+      for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes('整理旧照片')) store.put('chronicle', { ...c, date: addDays(today, -10) });
 
-    A.createTask(store, { title: '第 5 章初稿', projectId: write.id, scheduledFor: today });
-    A.createTask(store, { title: '找出版社聊聊', projectId: write.id });
-    A.createTask(store, { title: '准备周会', projectId: team.id, scheduledFor: today });
-    A.createTask(store, { title: '回复客户邮件', projectId: team.id, scheduledFor: today });
-    A.rescheduleTask(store, tPost.id, today);
-    A.createTask(store, { title: '比价搬家公司', projectId: move.id, scheduledFor: addDays(today, -6) });
-    A.createTask(store, { title: '打包书架', projectId: move.id });
-    A.createTask(store, { title: '力量训练', projectId: gym.id, scheduledFor: today });
-    A.createTask(store, { title: '预约牙医' });
-    A.createTask(store, { title: '朋友婚礼的礼物' });
-    A.refreshStages(store);
+      A.createTask(store, { title: '第 5 章初稿', projectId: write.id, scheduledFor: today });
+      A.createTask(store, { title: '找出版社聊聊', projectId: write.id });
+      A.createTask(store, { title: '准备周会', projectId: team.id, scheduledFor: today });
+      A.createTask(store, { title: '回复客户邮件', projectId: team.id, scheduledFor: today });
+      A.rescheduleTask(store, tPost.id, today);
+      A.createTask(store, { title: '比价搬家公司', projectId: move.id, scheduledFor: addDays(today, -6) });
+      A.createTask(store, { title: '打包书架', projectId: move.id });
+      A.createTask(store, { title: '力量训练', projectId: gym.id, scheduledFor: today });
+      A.createTask(store, { title: '预约牙医' });
+      A.createTask(store, { title: '朋友婚礼的礼物' });
+      A.refreshStages(store);
+    });
     toast('放好了四座示例村落');
   } catch (e) {
-    // 中途失败：回到放示例之前，不留半套数据
-    void store.replaceAll(before).catch((err) => store.onError(err));
+    // Store.batch 已恢复数据和缓存；这里只显示业务错误。
     if (e instanceof A.ActionError) toast(e.message, true);
     else throw e;
   }

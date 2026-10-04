@@ -383,8 +383,8 @@ function buildStageTransitions(data: Data, today: ISODate): StageTransition[] {
         }
       }
 
-      const rows = (projectDays.get(date) ?? []).slice().sort((a, b) => a.seq - b.seq);
-      const operations = opDays.get(date) ?? [];
+      const rows: SettlementEntry[] = (projectDays.get(date) ?? []).slice().sort((a: SettlementEntry, b: SettlementEntry) => a.seq - b.seq);
+      const operations: OperationEvent[] = opDays.get(date) ?? [];
       const dayFacts = orderedProjectDayFacts(rows, operations);
       const hasResetOperation = operations.some((event) => event.kind === 'project-restarted' || event.kind === 'project-trimmed');
       const legacyResets = hasResetOperation ? [] : (resets.get(date) ?? []);

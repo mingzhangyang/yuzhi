@@ -27,7 +27,7 @@ describe('Operation facts', () => {
       'project-restarted',
     ]);
     expect(h.store.data.operations.map((event) => event.seq)).toEqual([1, 2, 3, 4]);
-    expect(h.store.data.life).toEqual([]);
+    expect('life' in h.store.data).toBe(false);
 
     const rows = lifeEntries(h.store.data);
     expect(rows.map((row) => row.text)).toEqual([

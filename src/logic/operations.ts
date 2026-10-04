@@ -93,8 +93,8 @@ export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
 }
 
 /**
- * 一生之书 read model：结算 / 阶段兼容行仍来自 life；主动操作来自 operations。
- * v1 迁移出的 operation 保留 legacyLifeId，因此旧 life 行不会重复显示。
+ * 一生之书 read model：结算事实、主动操作事实和阶段重放结果合并展示。
+ * 旧版本 life 行会在迁移阶段转成带快照的 operation，不再保留第二份业务事实。
  */
 export function compareLifeEntries(a: LifeEntry, b: LifeEntry): number {
   const byDate = a.date.localeCompare(b.date);
@@ -106,24 +106,10 @@ export function compareLifeEntries(a: LifeEntry, b: LifeEntry): number {
 }
 
 export function lifeEntries(data: Data, derivedStageEntries: LifeEntry[] = []): LifeEntry[] {
-  const migrated = new Set<string>();
-  for (const event of data.operations) {
-    const id = event.payload?.legacyLifeId;
-    if (typeof id === 'string') migrated.add(id);
-  }
-  const settlementIds = new Set(data.entries.map((entry) => `l|${entry.id}`));
-  const settlementSeq = new Map(data.entries.map((entry) => [`l|${entry.id}`, entry.seq] as const));
-  const compat = data.life
-    .filter((entry) => !migrated.has(entry.id) && !settlementIds.has(entry.id) && entry.kind !== 'stage')
-    .map((entry) => {
-      const factSeq = settlementSeq.get(entry.id);
-      return factSeq === undefined ? entry : { ...entry, factSeq };
-    });
   const operations = data.operations
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq || a.id.localeCompare(b.id));
   return [
-    ...compat,
     ...operations.flatMap(operationLifeEntries),
     ...settlementLifeEntries(data),
     ...derivedStageEntries,

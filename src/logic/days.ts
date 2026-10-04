@@ -1,4 +1,4 @@
-import type { CalendarEvent, Data, ISODate, SettlementEntry, Task } from '../types';
+import type { CalendarEvent, Data, ISODate, SettlementEntry } from '../types';
 import { addDays, dateOfStamp, diffDays } from '../lib/date';
 import { ARCHIVE_AFTER_DAYS } from './config';
 import { taskStates, taskStatesForDates } from './read-model';
@@ -34,7 +34,6 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   const out: SettleItem[] = [];
   const seen = new Set<string>();
   const tasks = taskStates(data, date);
-  const taskById = new Map<string, Task>(tasks.map((t) => [t.id, t]));
 
   for (const ev of eventsOn(data.events, date)) {
     const key = itemKey('event', ev.id);
@@ -53,7 +52,6 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   // 已结算过、但任务已经改期或完成的条目，也保留在这一天
   for (const [key, e] of entries) {
     if (seen.has(key)) continue;
-    const t = e.itemType === 'task' ? taskById.get(e.itemId) : undefined;
     out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: e.projectId, entry: e });
   }
   return out;

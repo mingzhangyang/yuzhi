@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
-import { IdbPersistence, emptyData, exportBackup, parseBackup } from '../src/db';
+import { IdbPersistence, emptyData, exportBackup, parseBackup, type FactSequenceUpdate, type Persistence, type PersistenceWrite } from '../src/db';
 import { Store } from '../src/store';
 import { createProject, createTask } from '../src/actions';
 
@@ -74,14 +74,12 @@ describe('写入失败', () => {
   it('replaceAll 落盘失败时调用方能收到错误，之后的写入照常进行', async () => {
     const errors: unknown[] = [];
     const puts: string[] = [];
-    const per = {
+    const per: Persistence = {
       load: async () => emptyData(),
-      put: async (_c: string, item: object) => void puts.push((item as { id: string }).id),
-      del: async () => {},
-      putSettings: async () => {},
-      renameFact: async () => {},
-      replaceAll: async () => {
-        throw new Error('磁盘满了');
+      batch: async (writes: PersistenceWrite[]): Promise<FactSequenceUpdate[]> => {
+        if (writes.some((write) => write.kind === 'replaceAll')) throw new Error('磁盘满了');
+        for (const write of writes) if (write.kind === 'put') puts.push((write.item as { id: string }).id);
+        return [];
       },
     };
     const store = new Store(emptyData(), per);

@@ -56,7 +56,7 @@ function operation(
 
 /* ---------------- 项目 ---------------- */
 
-export function createProject(store: Store, name: string): Project {
+function createProjectImpl(store: Store, name: string): Project {
   const n = name.trim();
   if (!n) throw new ActionError('给村落起个名字吧');
   const used = new Set(store.activeProjects().map((p) => p.islandSlot));
@@ -77,7 +77,7 @@ export function createProject(store: Store, name: string): Project {
   return p;
 }
 
-export function renameProject(store: Store, id: string, name: string) {
+function renameProjectImpl(store: Store, id: string, name: string) {
   const p = store.project(id);
   const n = name.trim();
   if (!p || !n || n === p.name) return;
@@ -91,7 +91,7 @@ export function renameProject(store: Store, id: string, name: string) {
 }
 
 /** 搬离阶段的三个选择之一：重新启动 */
-export function restartProject(store: Store, id: string) {
+function restartProjectImpl(store: Store, id: string) {
   const p = store.project(id);
   if (!p) return;
   const today = store.today();
@@ -107,7 +107,7 @@ export function restartProject(store: Store, id: string) {
 }
 
 /** 搬离阶段的三个选择之一：缩小规模，放下一部分任务 */
-export function trimProject(store: Store, id: string, dropTaskIds: string[]) {
+function trimProjectImpl(store: Store, id: string, dropTaskIds: string[]) {
   const p = store.project(id);
   if (!p) return;
   const today = store.today();
@@ -124,7 +124,7 @@ export function trimProject(store: Store, id: string, dropTaskIds: string[]) {
 }
 
 /** 搬离阶段的三个选择之一：正式关闭（需要用户确认后调用） */
-export function closeProject(store: Store, id: string, reason: string) {
+function closeProjectImpl(store: Store, id: string, reason: string) {
   const p = store.project(id);
   if (!p || p.status !== 'active') return;
   const today = store.today();
@@ -142,7 +142,7 @@ export function closeProject(store: Store, id: string, reason: string) {
 }
 
 /** 把关闭的项目重新立起来 */
-export function reopenProject(store: Store, id: string) {
+function reopenProjectImpl(store: Store, id: string) {
   const p = store.project(id);
   if (!p || p.status !== 'closed') return;
   const used = new Set(store.activeProjects().map((x) => x.islandSlot));
@@ -161,7 +161,7 @@ export function reopenProject(store: Store, id: string) {
   chronicle(store, today, `${q(p.name)}被重新立起。`, 'recover');
 }
 
-export function snoozePrompt(store: Store, id: string) {
+function snoozePromptImpl(store: Store, id: string) {
   const p = store.project(id);
   if (p) store.put('projects', { ...p, promptSnoozeUntil: addDays(store.today(), PROMPT_SNOOZE_DAYS) });
 }
@@ -175,7 +175,7 @@ export function projectsNeedingPrompt(store: Store): Project[] {
 
 /* ---------------- 任务 ---------------- */
 
-export function createTask(store: Store, o: { title: string; projectId?: string; scheduledFor?: ISODate }): Task {
+function createTaskImpl(store: Store, o: { title: string; projectId?: string; scheduledFor?: ISODate }): Task {
   const title = o.title.trim();
   if (!title) throw new ActionError('写一句要做的事吧');
   const today = store.today();
@@ -196,7 +196,7 @@ export function createTask(store: Store, o: { title: string; projectId?: string;
 }
 
 /** 码头：决定任务住进哪个村落、排在什么时候 */
-export function arrangeTask(store: Store, taskId: string, projectId: string, date?: ISODate) {
+function arrangeTaskImpl(store: Store, taskId: string, projectId: string, date?: ISODate) {
   const t = store.task(taskId);
   const p = store.project(projectId);
   if (!t || !p || p.status !== 'active') return;
@@ -212,14 +212,14 @@ export function arrangeTask(store: Store, taskId: string, projectId: string, dat
 }
 
 /** 码头：婉拒 */
-export function declineTask(store: Store, taskId: string) {
+function declineTaskImpl(store: Store, taskId: string) {
   const t = store.task(taskId);
   if (!t) return;
   const today = store.today();
   operation(store, { date: today, kind: 'task-dropped', projectId: t.projectId, taskId, payload: { source: 'decline' } });
 }
 
-export function rescheduleTask(store: Store, taskId: string, date: ISODate | undefined) {
+function rescheduleTaskImpl(store: Store, taskId: string, date: ISODate | undefined) {
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
   const today = store.today();
@@ -233,7 +233,7 @@ export function rescheduleTask(store: Store, taskId: string, date: ISODate | und
   });
 }
 
-export function moveTask(store: Store, taskId: string, projectId: string | undefined) {
+function moveTaskImpl(store: Store, taskId: string, projectId: string | undefined) {
   const t = store.task(taskId);
   if (!t || t.projectId === projectId) return;
   const today = store.today();
@@ -251,14 +251,31 @@ export function moveTask(store: Store, taskId: string, projectId: string | undef
   });
 }
 
-export function renameTask(store: Store, taskId: string, title: string) {
+/**
+ * 编辑任务的归属和日期是一个用户动作。内部复用领域事实生成逻辑，
+ * 但只由最外层 action 提交一次 persistence transaction。
+ */
+function editTaskPlanImpl(store: Store, taskId: string, projectId: string | undefined, date: ISODate | undefined) {
+  const before = store.task(taskId);
+  if (!before || before.status !== 'open') return;
+
+  if (projectId !== before.projectId) {
+    if (!before.projectId && projectId) arrangeTaskImpl(store, taskId, projectId, date);
+    else moveTaskImpl(store, taskId, projectId);
+  }
+
+  const current = store.task(taskId);
+  if (current && current.scheduledFor !== date) rescheduleTaskImpl(store, taskId, date);
+}
+
+function renameTaskImpl(store: Store, taskId: string, title: string) {
   const t = store.taskRecord(taskId);
   const n = title.trim();
   if (t && n) store.put('tasks', { ...t, title: n });
 }
 
 /** 不重要了：任务移出，不算惩罚 */
-export function dropTask(store: Store, taskId: string, note = '不重要了，移出村落') {
+function dropTaskImpl(store: Store, taskId: string, note = '不重要了，移出村落') {
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
   const today = store.today();
@@ -273,7 +290,7 @@ export function dropTask(store: Store, taskId: string, note = '不重要了，�
 }
 
 /** 在结算之外直接记下「今天做完了」（例如没有日期的任务） */
-export function markTaskDone(store: Store, taskId: string) {
+function markTaskDoneImpl(store: Store, taskId: string) {
   const t = store.task(taskId);
   if (!t || t.status !== 'open' || !t.projectId) return;
   const today = store.today();
@@ -316,7 +333,7 @@ function removeEntry(store: Store, prev: SettlementEntry) {
  * 结算一天：逐条写下结果，小岛随之变化，编年史自动多一行。
  * 没有给出决定的条目不写记录（相当于这一条没记）。
  */
-export function settleDay(store: Store, date: ISODate, decisions: Map<string, Decision>, extraItems: SettleItem[] = []): string {
+function settleDayImpl(store: Store, date: ISODate, decisions: Map<string, Decision>, extraItems: SettleItem[] = []): string {
   // Rebuild the stage immediately before this day's settlement from facts,
   // rather than remembering a fromStage snapshot.
   const beforeData: Data = {
@@ -355,7 +372,7 @@ export function settleDay(store: Store, date: ISODate, decisions: Map<string, De
 }
 
 /** 超过 3 天仍未结算的日子，自动归档为「未记录」：不算做了，也不算没做 */
-export function archiveOldDays(store: Store): ISODate[] {
+function archiveOldDaysImpl(store: Store): ISODate[] {
   const days = daysToArchive(store.data, store.today());
   for (const d of days) {
     store.put('days', { date: d, status: 'unrecorded' });
@@ -365,7 +382,7 @@ export function archiveOldDays(store: Store): ISODate[] {
 }
 
 /** 时间流逝带来的阶段变化：写进一生之书和编年史 */
-export function refreshStages(store: Store): StageChange[] {
+function refreshStagesImpl(store: Store): StageChange[] {
   const today = store.today();
   const changes: StageChange[] = [];
   const legacyBoundary = store.data.operations.find((event) => event.kind === 'migration-boundary')?.date;
@@ -398,7 +415,7 @@ export function refreshStages(store: Store): StageChange[] {
 /* ---------------- 日历归类 ---------------- */
 
 /** 用户为一类事件指定归属；可同时记下一条规则 */
-export function classifyEvents(store: Store, title: string, projectId: string, ruleText?: string) {
+function classifyEventsImpl(store: Store, title: string, projectId: string, ruleText?: string) {
   const target = projectId || CHORES;
   const kw = ruleText?.trim();
   if (kw) {
@@ -414,12 +431,12 @@ export function classifyEvents(store: Store, title: string, projectId: string, r
 }
 
 /** 单独改一条事件的归属 */
-export function setEventProject(store: Store, eventId: string, projectId: string | undefined) {
+function setEventProjectImpl(store: Store, eventId: string, projectId: string | undefined) {
   const e = store.data.events.find((x) => x.id === eventId);
   if (e) store.put('events', { ...e, projectId: projectId || CHORES, classified: true });
 }
 
-export function deleteRule(store: Store, id: string) {
+function deleteRuleImpl(store: Store, id: string) {
   store.del('rules', id);
 }
 
@@ -427,7 +444,7 @@ export function deleteRule(store: Store, id: string) {
  * 把新解析出的事件合并进来：保留已有的归属；
  * 来源里已不存在、且还没结算过的未来事件会被移除。
  */
-export function mergeEvents(store: Store, sourceId: string, incoming: CalendarEvent[], windowStart: string) {
+function mergeEventsImpl(store: Store, sourceId: string, incoming: CalendarEvent[], windowStart: string) {
   const old = new Map(store.data.events.filter((e) => e.sourceId === sourceId).map((e) => [e.id, e] as const));
   const settled = new Set(store.data.entries.filter((e) => e.itemType === 'event').map((e) => e.itemId));
   const keep = new Set<string>();
@@ -471,14 +488,14 @@ function renameEvent(store: Store, ev: CalendarEvent, newId: string) {
   }
 }
 
-export function removeSource(store: Store, sourceId: string) {
+function removeSourceImpl(store: Store, sourceId: string) {
   const settled = new Set(store.data.entries.filter((e) => e.itemType === 'event').map((e) => e.itemId));
   for (const e of store.data.events.filter((x) => x.sourceId === sourceId)) if (!settled.has(e.id)) store.del('events', e.id);
   store.del('sources', sourceId);
 }
 
 /** 结算时把一件别的任务拉进这一天（「今天还做了…」），不算改期 */
-export function pullIntoDay(store: Store, taskId: string, date: ISODate) {
+function pullIntoDayImpl(store: Store, taskId: string, date: ISODate) {
   const t = store.task(taskId);
   if (t && t.status === 'open' && t.projectId && t.scheduledFor !== date) {
     operation(store, {
@@ -513,7 +530,7 @@ export function islandRings(store: Store): number {
  * 没做完的任务随项目一起放下（不算没做），村落腾空，
  * 项目立为海岸上的地标，或收进山顶灯塔里的档案馆。
  */
-export function completeProject(store: Store, id: string, resting: 'landmark' | 'archive'): 'landmark' | 'archive' {
+function completeProjectImpl(store: Store, id: string, resting: 'landmark' | 'archive'): 'landmark' | 'archive' {
   const p = store.project(id);
   if (!p || p.status !== 'active') throw new ActionError('这个项目已经不在岛上了');
   const today = store.today();
@@ -548,7 +565,7 @@ export function completeProject(store: Store, id: string, resting: 'landmark' | 
 }
 
 /** 反悔：地标收进档案馆，或把档案里的项目重新立为地标 */
-export function setResting(store: Store, id: string, resting: 'landmark' | 'archive') {
+function setRestingImpl(store: Store, id: string, resting: 'landmark' | 'archive') {
   const p = store.project(id);
   if (!p || p.status !== 'done' || p.resting === resting) return;
   const today = store.today();
@@ -578,9 +595,94 @@ export function setResting(store: Store, id: string, resting: 'landmark' | 'arch
 }
 
 /** 记下今天的积压数（当天最后一次的值），供积压走势使用 */
-export function recordBacklogSnapshot(store: Store) {
+function recordBacklogSnapshotImpl(store: Store) {
   const today = store.today();
   const n = backlog(store.data, today).total;
   const cur = store.data.snapshots.find((x) => x.date === today);
   if (cur?.backlog !== n) store.put('snapshots', { date: today, backlog: n });
 }
+
+/* ---------------- 原子用户操作入口 ---------------- */
+export const createProject = (...args: Parameters<typeof createProjectImpl>): ReturnType<typeof createProjectImpl> =>
+  args[0].batch(() => createProjectImpl(...args));
+
+export const renameProject = (...args: Parameters<typeof renameProjectImpl>): ReturnType<typeof renameProjectImpl> =>
+  args[0].batch(() => renameProjectImpl(...args));
+
+export const restartProject = (...args: Parameters<typeof restartProjectImpl>): ReturnType<typeof restartProjectImpl> =>
+  args[0].batch(() => restartProjectImpl(...args));
+
+export const trimProject = (...args: Parameters<typeof trimProjectImpl>): ReturnType<typeof trimProjectImpl> =>
+  args[0].batch(() => trimProjectImpl(...args));
+
+export const closeProject = (...args: Parameters<typeof closeProjectImpl>): ReturnType<typeof closeProjectImpl> =>
+  args[0].batch(() => closeProjectImpl(...args));
+
+export const reopenProject = (...args: Parameters<typeof reopenProjectImpl>): ReturnType<typeof reopenProjectImpl> =>
+  args[0].batch(() => reopenProjectImpl(...args));
+
+export const snoozePrompt = (...args: Parameters<typeof snoozePromptImpl>): ReturnType<typeof snoozePromptImpl> =>
+  args[0].batch(() => snoozePromptImpl(...args));
+
+export const createTask = (...args: Parameters<typeof createTaskImpl>): ReturnType<typeof createTaskImpl> =>
+  args[0].batch(() => createTaskImpl(...args));
+
+export const arrangeTask = (...args: Parameters<typeof arrangeTaskImpl>): ReturnType<typeof arrangeTaskImpl> =>
+  args[0].batch(() => arrangeTaskImpl(...args));
+
+export const declineTask = (...args: Parameters<typeof declineTaskImpl>): ReturnType<typeof declineTaskImpl> =>
+  args[0].batch(() => declineTaskImpl(...args));
+
+export const rescheduleTask = (...args: Parameters<typeof rescheduleTaskImpl>): ReturnType<typeof rescheduleTaskImpl> =>
+  args[0].batch(() => rescheduleTaskImpl(...args));
+
+export const moveTask = (...args: Parameters<typeof moveTaskImpl>): ReturnType<typeof moveTaskImpl> =>
+  args[0].batch(() => moveTaskImpl(...args));
+
+export const editTaskPlan = (...args: Parameters<typeof editTaskPlanImpl>): ReturnType<typeof editTaskPlanImpl> =>
+  args[0].batch(() => editTaskPlanImpl(...args));
+
+export const renameTask = (...args: Parameters<typeof renameTaskImpl>): ReturnType<typeof renameTaskImpl> =>
+  args[0].batch(() => renameTaskImpl(...args));
+
+export const dropTask = (...args: Parameters<typeof dropTaskImpl>): ReturnType<typeof dropTaskImpl> =>
+  args[0].batch(() => dropTaskImpl(...args));
+
+export const markTaskDone = (...args: Parameters<typeof markTaskDoneImpl>): ReturnType<typeof markTaskDoneImpl> =>
+  args[0].batch(() => markTaskDoneImpl(...args));
+
+export const settleDay = (...args: Parameters<typeof settleDayImpl>): ReturnType<typeof settleDayImpl> =>
+  args[0].batch(() => settleDayImpl(...args));
+
+export const archiveOldDays = (...args: Parameters<typeof archiveOldDaysImpl>): ReturnType<typeof archiveOldDaysImpl> =>
+  args[0].batch(() => archiveOldDaysImpl(...args));
+
+export const refreshStages = (...args: Parameters<typeof refreshStagesImpl>): ReturnType<typeof refreshStagesImpl> =>
+  args[0].batch(() => refreshStagesImpl(...args));
+
+export const classifyEvents = (...args: Parameters<typeof classifyEventsImpl>): ReturnType<typeof classifyEventsImpl> =>
+  args[0].batch(() => classifyEventsImpl(...args));
+
+export const setEventProject = (...args: Parameters<typeof setEventProjectImpl>): ReturnType<typeof setEventProjectImpl> =>
+  args[0].batch(() => setEventProjectImpl(...args));
+
+export const deleteRule = (...args: Parameters<typeof deleteRuleImpl>): ReturnType<typeof deleteRuleImpl> =>
+  args[0].batch(() => deleteRuleImpl(...args));
+
+export const mergeEvents = (...args: Parameters<typeof mergeEventsImpl>): ReturnType<typeof mergeEventsImpl> =>
+  args[0].batch(() => mergeEventsImpl(...args));
+
+export const removeSource = (...args: Parameters<typeof removeSourceImpl>): ReturnType<typeof removeSourceImpl> =>
+  args[0].batch(() => removeSourceImpl(...args));
+
+export const pullIntoDay = (...args: Parameters<typeof pullIntoDayImpl>): ReturnType<typeof pullIntoDayImpl> =>
+  args[0].batch(() => pullIntoDayImpl(...args));
+
+export const completeProject = (...args: Parameters<typeof completeProjectImpl>): ReturnType<typeof completeProjectImpl> =>
+  args[0].batch(() => completeProjectImpl(...args));
+
+export const setResting = (...args: Parameters<typeof setRestingImpl>): ReturnType<typeof setRestingImpl> =>
+  args[0].batch(() => setRestingImpl(...args));
+
+export const recordBacklogSnapshot = (...args: Parameters<typeof recordBacklogSnapshotImpl>): ReturnType<typeof recordBacklogSnapshotImpl> =>
+  args[0].batch(() => recordBacklogSnapshotImpl(...args));
