@@ -132,7 +132,7 @@ try {
       await waitReadOnly(appPage, false);
 
       const upgrader = await context.newPage();
-      await upgrader.goto(`${baseURL}/favicon.svg?schema-upgrade=1`, { waitUntil: 'load' });
+      await upgrader.goto(`${baseURL}/browser-smoke-secondary.html?schema-upgrade=1`, { waitUntil: 'load' });
       const upgradedVersion = await upgrader.evaluate(() => new Promise((resolve, reject) => {
         const request = indexedDB.open('yuzhi', 9);
         request.onupgradeneeded = () => {};
