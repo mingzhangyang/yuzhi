@@ -25,9 +25,11 @@ export async function syncSource(store: Store, id: string): Promise<number> {
   if (!src?.icsUrl) return 0;
   try {
     const text = await fetchIcs(src.icsUrl);
-    const n = ingest(store, src, text);
-    store.put('sources', { ...store.data.sources.find((s) => s.id === id)!, lastFetchedAt: new Date().toISOString(), lastError: undefined });
-    return n;
+    return store.batch(() => {
+      const n = ingest(store, src, text);
+      store.put('sources', { ...store.data.sources.find((s) => s.id === id)!, lastFetchedAt: new Date().toISOString(), lastError: undefined });
+      return n;
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     store.put('sources', { ...store.data.sources.find((s) => s.id === id)!, lastError: msg });
@@ -44,9 +46,11 @@ export async function addUrlSource(store: Store, name: string, url: string): Pro
   const r = parseIcs(text, src.id, from, to);
   src.name = name.trim() || r.calendarName || '日历';
   src.lastFetchedAt = new Date().toISOString();
-  store.put('sources', src);
-  mergeEvents(store, src.id, r.events, from.toISOString());
-  return r.events.length;
+  return store.batch(() => {
+    store.put('sources', src);
+    mergeEvents(store, src.id, r.events, from.toISOString());
+    return r.events.length;
+  });
 }
 
 export async function addFileSource(store: Store, file: File): Promise<number> {
@@ -56,9 +60,11 @@ export async function addFileSource(store: Store, file: File): Promise<number> {
   const { from, to } = windowNow(store.clock());
   const r = parseIcs(text, src.id, from, to);
   if (r.calendarName) src.name = r.calendarName;
-  store.put('sources', src);
-  mergeEvents(store, src.id, r.events, from.toISOString());
-  return r.events.length;
+  return store.batch(() => {
+    store.put('sources', src);
+    mergeEvents(store, src.id, r.events, from.toISOString());
+    return r.events.length;
+  });
 }
 
 /** 打开时刷新超过 2 小时没更新的订阅 */

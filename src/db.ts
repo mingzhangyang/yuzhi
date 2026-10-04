@@ -16,7 +16,6 @@ export const COLLECTIONS = {
   days: 'date',
   operations: 'id',
   chronicle: 'id',
-  life: 'id',
   snapshots: 'date',
 } as const;
 export type Coll = keyof typeof COLLECTIONS;
@@ -24,8 +23,14 @@ export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 
 const DB_NAME = 'yuzhi';
 const FACT_SEQ_KEY = 'factSeq';
-export const IDB_SCHEMA_VERSION = 4;
-export const DATA_VERSION = 3;
+/**
+ * Schema 6 is a staging schema: it keeps legacy stores available long enough
+ * for the business-data migration to read them. Schema 7 drops those stores
+ * after the migrated data has been durably written.
+ */
+const STAGING_SCHEMA_VERSION = 6;
+export const IDB_SCHEMA_VERSION = 7;
+export const DATA_VERSION = 4;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -68,7 +73,6 @@ export function emptyData(): Data {
     days: [],
     operations: [],
     chronicle: [],
-    life: [],
     snapshots: [],
     settings: defaultSettings(),
   };
@@ -90,6 +94,19 @@ const LEGACY_KIND_MAP: Record<string, string> = {
   drop: 'task-dropped',
   complete: 'project-completed',
 };
+
+const LEGACY_COLLECTIONS = ['life', 'interruptions'] as const;
+const LEGACY_SKIP_REASONS = new Set(['interrupted', 'no_energy', 'not_important', 'postponed']);
+
+function legacyLifeSnapshot(row: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (typeof row.text !== 'string' || typeof row.kind !== 'string') return undefined;
+  if (!ACTIVE_LIFE_KINDS.has(row.kind) || row.kind === 'stage') return undefined;
+  const snapshot: Record<string, unknown> = { kind: row.kind, text: row.text };
+  if (typeof row.projectId === 'string') snapshot.projectId = row.projectId;
+  if (typeof row.taskId === 'string') snapshot.taskId = row.taskId;
+  if (typeof row.reason === 'string' && LEGACY_SKIP_REASONS.has(row.reason)) snapshot.reason = row.reason;
+  return snapshot;
+}
 
 const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
   {
@@ -289,6 +306,53 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       delete data.interruptions;
     },
   },
+  {
+    to: 4,
+    run(data) {
+      const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
+      const life = Array.isArray(data.life) ? data.life : [];
+      const migrated = new Set<string>();
+      let seq = 0;
+      for (const value of operations) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.seq === 'number' && Number.isInteger(row.seq) && row.seq > seq) seq = row.seq;
+        const payload = row.payload;
+        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+          const id = (payload as Record<string, unknown>).legacyLifeId;
+          if (typeof id === 'string') migrated.add(id);
+        }
+      }
+
+      // Phase 2 left the non-derivable part of the old life collection in
+      // place for one compatibility release. Convert those rows to the same
+      // operation-fact shape used by the v1 migration, then remove the
+      // collection entirely. Settlement/stage rows were already discarded by
+      // the v3 step and are reconstructed from facts at read time.
+      for (const value of life) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.id !== 'string' || typeof row.date !== 'string') continue;
+        if (migrated.has(row.id)) continue;
+        const snapshot = legacyLifeSnapshot(row);
+        if (!snapshot) continue;
+        const kind = LEGACY_KIND_MAP[String(row.kind)] ?? 'legacy-life';
+        operations.push({
+          id: `op|legacy-life|${row.id}`,
+          seq: ++seq,
+          date: row.date,
+          kind,
+          ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
+          ...(typeof row.taskId === 'string' ? { taskId: row.taskId } : {}),
+          payload: { legacyLifeId: row.id, legacyKind: row.kind, life: [snapshot] },
+        });
+      }
+      data.operations = operations;
+      delete data.life;
+      delete data.interruptions;
+      delete data.__legacyLifeOrder;
+    },
+  },
 ];
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
@@ -308,29 +372,81 @@ function parseStoredDataVersion(v: unknown): number | undefined {
 
 export interface Persistence {
   load(): Promise<Data>;
-  /** Returns the authoritative persisted seq for fact collections. */
-  put(coll: Coll, item: object): Promise<number | undefined>;
-  /** Returns the preserved authoritative seq for the renamed fact. */
-  renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<number>;
-  del(coll: Coll, key: string): Promise<void>;
-  putSettings(s: Settings): Promise<void>;
-  replaceAll(d: Data): Promise<void>;
+  /** Commit one user action using a single IndexedDB readwrite transaction. */
+  batch(writes: PersistenceWrite[]): Promise<FactSequenceUpdate[]>;
+}
+
+export type PersistenceWrite =
+  | { kind: 'put'; coll: Coll; item: object }
+  | { kind: 'renameFact'; coll: 'entries' | 'operations'; oldKey: string; item: object }
+  | { kind: 'del'; coll: Coll; key: string }
+  | { kind: 'putSettings'; settings: Settings }
+  | { kind: 'replaceAll'; data: Data };
+
+export interface FactSequenceUpdate {
+  coll: 'entries' | 'operations';
+  key: string;
+  seq: number;
 }
 
 export class IdbPersistence implements Persistence {
   private dbp: Promise<IDBPDatabase>;
-  constructor(name = DB_NAME) {
-    this.dbp = openDB(name, IDB_SCHEMA_VERSION, {
-      upgrade(db, oldVersion) {
-        if (oldVersion < 4 && db.objectStoreNames.contains('interruptions')) db.deleteObjectStore('interruptions');
-        for (const c of COLL_NAMES) if (!db.objectStoreNames.contains(c)) db.createObjectStore(c, { keyPath: COLLECTIONS[c] });
-        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
-      },
+  private readonly name: string;
+  private writeAccess: boolean;
+  private versionChangeHandler?: () => void;
+  constructor(name = DB_NAME, writeAccess = true, options: { onVersionChange?: () => void } = {}) {
+    this.name = name;
+    this.writeAccess = writeAccess;
+    this.versionChangeHandler = options.onVersionChange;
+    this.dbp = writeAccess ? this.openWritableDatabase() : this.openDatabase(undefined, false);
+  }
+
+  setWriteAccess(value: boolean) {
+    this.writeAccess = value;
+  }
+
+  close() {
+    void this.dbp.then((db) => db.close());
+  }
+
+  onVersionChange(fn: () => void) {
+    this.versionChangeHandler = fn;
+  }
+
+  private openDatabase(version: number | undefined, allowUpgrade: boolean): Promise<IDBPDatabase> {
+    const notifyVersionChange = () => this.versionChangeHandler?.();
+    return openDB(this.name, version, {
+      upgrade: allowUpgrade
+        ? (db, oldVersion) => {
+          // Legacy object stores are intentionally retained through the
+          // staging schema. load() must read them before the final upgrade
+          // removes them.
+          if (oldVersion < 4 && db.objectStoreNames.contains('interruptions')) db.deleteObjectStore('interruptions');
+          for (const c of COLL_NAMES) if (!db.objectStoreNames.contains(c)) db.createObjectStore(c, { keyPath: COLLECTIONS[c] });
+          if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+        }
+        : undefined,
       blocking(_currentVersion, _blockedVersion, event) {
         // Do not let an old tab keep a future schema upgrade blocked indefinitely.
         (event.target as IDBDatabase | null)?.close();
+        notifyVersionChange();
       },
+      blocked: notifyVersionChange,
     });
+  }
+
+  private async openWritableDatabase(): Promise<IDBPDatabase> {
+    const current = await this.openDatabase(undefined, false);
+    if (current.version >= STAGING_SCHEMA_VERSION) return current;
+    current.close();
+    return this.openDatabase(STAGING_SCHEMA_VERSION, true);
+  }
+
+  private async dropLegacyCollections(db: IDBPDatabase): Promise<IDBPDatabase> {
+    const hasLegacy = LEGACY_COLLECTIONS.some((name) => db.objectStoreNames.contains(name));
+    if (!hasLegacy && db.version >= IDB_SCHEMA_VERSION) return db;
+    db.close();
+    return this.openDatabase(IDB_SCHEMA_VERSION, true);
   }
   async load(): Promise<Data> {
     let db: IDBPDatabase;
@@ -365,13 +481,17 @@ export class IdbPersistence implements Persistence {
     const data = validateCurrentData(migrated.data, '本地数据');
 
     try {
-      if (migrated.version !== fromVersion) {
+      if (this.writeAccess && migrated.version !== fromVersion) {
         await this.writeAll(db, data, migrated.version);
-      } else if (storedVersion === undefined || storedSettings === undefined) {
+      } else if (this.writeAccess && (storedVersion === undefined || storedSettings === undefined)) {
         const tx = db.transaction('meta', 'readwrite');
         if (storedSettings === undefined) await tx.objectStore('meta').put({ ...data.settings }, 'settings');
         if (storedVersion === undefined) await tx.objectStore('meta').put(DATA_VERSION, 'dataVersion');
         await tx.done;
+      }
+      if (this.writeAccess) {
+        this.dbp = this.dropLegacyCollections(db);
+        await this.dbp;
       }
     } catch (error) {
       // Startup persistence failures such as quota/security errors mean the
@@ -382,7 +502,105 @@ export class IdbPersistence implements Persistence {
     }
     return data;
   }
+  async batch(writes: PersistenceWrite[]): Promise<FactSequenceUpdate[]> {
+    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
+    const db = await this.dbp;
+    const tx = db.transaction([...COLL_NAMES, 'meta'], 'readwrite');
+    const meta = tx.objectStore('meta');
+    const seqUpdates: FactSequenceUpdate[] = [];
+    let maxFactSeq: number | undefined;
+
+    const currentMaxFactSeq = async (): Promise<number> => {
+      if (maxFactSeq !== undefined) return maxFactSeq;
+      const saved = await meta.get(FACT_SEQ_KEY);
+      if (typeof saved === 'number' && Number.isInteger(saved) && saved >= 0) {
+        maxFactSeq = saved;
+        return saved;
+      }
+      let largest = 0;
+      for (const coll of ['entries', 'operations'] as const) {
+        for (const fact of await tx.objectStore(coll).getAll() as Array<{ seq?: unknown }>) {
+          if (typeof fact.seq === 'number' && Number.isInteger(fact.seq) && fact.seq > largest) largest = fact.seq;
+        }
+      }
+      maxFactSeq = largest;
+      return largest;
+    };
+
+    try {
+      for (const write of writes) {
+        if (write.kind === 'replaceAll') {
+          const d = structuredClone(write.data);
+          for (const coll of COLL_NAMES) {
+            const store = tx.objectStore(coll);
+            await store.clear();
+            for (const item of d[coll]) await store.put(item as object);
+          }
+          let next = 0;
+          for (const fact of [...d.entries, ...d.operations]) if (fact.seq > next) next = fact.seq;
+          await meta.put({ ...d.settings }, 'settings');
+          await meta.put(DATA_VERSION, 'dataVersion');
+          await meta.put(next, FACT_SEQ_KEY);
+          maxFactSeq = next;
+          continue;
+        }
+
+        if (write.kind === 'putSettings') {
+          await meta.put({ ...write.settings }, 'settings');
+          continue;
+        }
+
+        const store = tx.objectStore(write.coll);
+        if (write.kind === 'del') {
+          await store.delete(write.key);
+          continue;
+        }
+
+        if (write.kind === 'renameFact') {
+          const previous = await store.get(write.oldKey) as Record<string, unknown> | undefined;
+          if (!previous || typeof previous.seq !== 'number' || !Number.isInteger(previous.seq) || previous.seq < 1) {
+            throw new Error(`找不到要重命名的事实：${write.oldKey}`);
+          }
+          const record = structuredClone(write.item) as Record<string, unknown>;
+          const newKey = record[COLLECTIONS[write.coll]];
+          if (typeof newKey !== 'string' || !newKey) throw new Error('事实的新 key 无效');
+          if (newKey !== write.oldKey && await store.get(newKey)) throw new Error(`事实的新 key 已存在：${newKey}`);
+          record.seq = previous.seq;
+          if (newKey !== write.oldKey) await store.delete(write.oldKey);
+          await store.put(record);
+          seqUpdates.push({ coll: write.coll, key: newKey, seq: previous.seq });
+          continue;
+        }
+
+        const record = structuredClone(write.item) as Record<string, unknown>;
+        if (write.coll === 'entries' || write.coll === 'operations') {
+          const key = record[COLLECTIONS[write.coll]];
+          if (typeof key !== 'string' || !key) throw new Error('事实的 key 无效');
+          const existing = await store.get(key) as Record<string, unknown> | undefined;
+          const existingSeq = existing?.seq;
+          if (typeof existingSeq === 'number' && Number.isInteger(existingSeq) && existingSeq >= 1) {
+            record.seq = existingSeq;
+          } else {
+            maxFactSeq = await currentMaxFactSeq() + 1;
+            record.seq = maxFactSeq;
+            await meta.put(maxFactSeq, FACT_SEQ_KEY);
+          }
+          await store.put(record);
+          seqUpdates.push({ coll: write.coll, key, seq: record.seq as number });
+        } else {
+          await store.put(record);
+        }
+      }
+      await tx.done;
+      return seqUpdates;
+    } catch (error) {
+      try { tx.abort(); } catch { /* transaction may already be inactive */ }
+      try { await tx.done; } catch { /* consume the aborted transaction error */ }
+      throw error;
+    }
+  }
   async put(coll: Coll, item: object): Promise<number | undefined> {
+    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
     if (coll === 'entries' || coll === 'operations') {
       return this.putFact(coll, item);
     }
@@ -431,6 +649,7 @@ export class IdbPersistence implements Persistence {
     return seq;
   }
   async renameFact(coll: 'entries' | 'operations', oldKey: string, item: object): Promise<number> {
+    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
     const db = await this.dbp;
     const tx = db.transaction(coll, 'readwrite');
     const store = tx.objectStore(coll);
@@ -459,12 +678,15 @@ export class IdbPersistence implements Persistence {
   }
 
   async del(coll: Coll, key: string) {
+    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
     await (await this.dbp).delete(coll, key);
   }
   async putSettings(s: Settings) {
+    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
     await (await this.dbp).put('meta', { ...s }, 'settings');
   }
   async replaceAll(d: Data) {
+    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
     await this.writeAll(await this.dbp, d, DATA_VERSION);
   }
   private async writeAll(db: IDBPDatabase, d: Data, dataVersion: number) {
@@ -491,15 +713,75 @@ export class MemoryPersistence implements Persistence {
   async load() {
     return structuredClone(this.data);
   }
-  async put() { return undefined; }
-  async renameFact(_coll: 'entries' | 'operations', _oldKey: string, item: object) {
-    const seq = (item as { seq?: unknown }).seq;
-    return typeof seq === 'number' ? seq : 0;
+  async batch(writes: PersistenceWrite[]): Promise<FactSequenceUpdate[]> {
+    const next = structuredClone(this.data);
+    const seqUpdates: FactSequenceUpdate[] = [];
+    const largestSequence = (data: Data) => {
+      let largest = 0;
+      for (const fact of [...data.entries, ...data.operations]) if (fact.seq > largest) largest = fact.seq;
+      return largest;
+    };
+    let maxFactSeq = largestSequence(next);
+    for (const write of writes) {
+      if (write.kind === 'replaceAll') {
+        Object.assign(next, structuredClone(write.data));
+        maxFactSeq = largestSequence(next);
+        continue;
+      }
+      if (write.kind === 'putSettings') {
+        next.settings = { ...write.settings };
+        continue;
+      }
+      const arr = next[write.coll] as unknown as Record<string, unknown>[];
+      const keyField = COLLECTIONS[write.coll];
+      if (write.kind === 'del') {
+        const index = arr.findIndex((row) => row[keyField] === write.key);
+        if (index >= 0) arr.splice(index, 1);
+        continue;
+      }
+      const record = structuredClone(write.item) as Record<string, unknown>;
+      const oldKey = write.kind === 'renameFact' ? write.oldKey : undefined;
+      const targetKey = record[keyField];
+      const index = arr.findIndex((row) => row[keyField] === (oldKey ?? targetKey));
+      if (write.kind === 'renameFact' && index < 0) throw new Error(`找不到要重命名的事实：${write.oldKey}`);
+      if (write.kind === 'renameFact' && targetKey !== write.oldKey && arr.some((row) => row[keyField] === targetKey)) {
+        throw new Error(`事实的新 key 已存在：${String(targetKey)}`);
+      }
+      if (typeof targetKey !== 'string' || !targetKey) throw new Error('记录的 key 无效');
+      if (write.coll === 'entries' || write.coll === 'operations') {
+        const previous = index >= 0 ? arr[index] : undefined;
+        const seq = previous && typeof previous.seq === 'number' && Number.isInteger(previous.seq) && previous.seq >= 1
+          ? previous.seq
+          : write.kind === 'renameFact'
+            ? (record.seq as number)
+            : ++maxFactSeq;
+        record.seq = seq;
+        seqUpdates.push({ coll: write.coll, key: targetKey as string, seq });
+      }
+      if (index >= 0) arr.splice(index, 1);
+      arr.push(record);
+    }
+    this.data = next;
+    return seqUpdates;
   }
-  async del() {}
-  async putSettings() {}
+  async put(coll: Coll, item: object) {
+    const key = (item as Record<string, unknown>)[COLLECTIONS[coll]];
+    const updates = await this.batch([{ kind: 'put', coll, item }]);
+    return coll === 'entries' || coll === 'operations'
+      ? updates.find((update) => update.coll === coll && update.key === key)?.seq
+      : undefined;
+  }
+  async renameFact(coll: 'entries' | 'operations', oldKey: string, item: object) {
+    return (await this.batch([{ kind: 'renameFact', coll, oldKey, item }]))[0]?.seq ?? 0;
+  }
+  async del(coll: Coll, key: string) {
+    await this.batch([{ kind: 'del', coll, key }]);
+  }
+  async putSettings(settings: Settings) {
+    await this.batch([{ kind: 'putSettings', settings }]);
+  }
   async replaceAll(d: Data) {
-    this.data = structuredClone(d);
+    await this.batch([{ kind: 'replaceAll', data: d }]);
   }
 }
 
@@ -595,11 +877,6 @@ const SHAPES: Record<Coll, Shape> = {
     'projectId?': isText, 'taskId?': isText, 'payload?': OPERATION_PAYLOAD,
   },
   chronicle: { id: isText, date: isDate, text: isStr, kind: oneOf('day', 'event', 'quiet', 'recover', 'landmark') },
-  life: {
-    id: isText, date: isDate, 'projectId?': isText, 'taskId?': isText, text: isStr,
-    kind: oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete'),
-    'reason?': REASON,
-  },
   snapshots: { date: isDate, backlog: intIn(0) },
 };
 

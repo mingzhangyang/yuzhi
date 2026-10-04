@@ -199,7 +199,6 @@ export interface Data {
   days: DayRecord[];
   operations: OperationEvent[];
   chronicle: ChronicleLine[];
-  life: LifeEntry[];
   snapshots: BacklogSnapshot[];
   settings: Settings;
 }

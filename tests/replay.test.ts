@@ -65,7 +65,7 @@ describe('Phase 2 fact replay', () => {
     settleDay(h.store, '2026-10-01', new Map([[key, { outcome: 'skipped', reason: 'postponed' }]]));
     expect(h.store.task(t.id)).toMatchObject({ scheduledFor: '2026-10-02', postponeCount: 1 });
     expect(h.store.taskRecord(t.id)).toMatchObject({ scheduledFor: '2026-10-01', status: 'open' });
-    expect(h.store.data.life.some((entry) => entry.id.startsWith('l|2026-10-01|task|'))).toBe(false);
+    expect('life' in h.store.data).toBe(false);
     expect('interruptions' in h.store.data).toBe(false);
 
     h.setToday('2026-10-02');

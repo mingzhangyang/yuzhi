@@ -1,119 +1,280 @@
 import type { Data, ISODate, Settings } from './types';
-import { COLLECTIONS, type Coll, type Persistence } from './db';
+import { COLLECTIONS, type Coll, type FactSequenceUpdate, type Persistence, type PersistenceWrite } from './db';
 import { localDate } from './lib/date';
+import { backlog } from './logic/metrics';
 import { computeAllVillages, markDecayDataChanged, type VillageState } from './logic/decay';
 import { taskState, taskStates } from './logic/read-model';
 
 type Item<C extends Coll> = Data[C][number];
+type PendingBatch = { writes: PersistenceWrite[]; snapshot: Data };
 
 /**
- * 内存里的全部数据 + 写穿到持久层。
- * 数据量很小（个人使用），所以启动时全部载入，之后每次改动逐条写回。
+ * 内存里的全部数据 + 持久层。一个 batch 对应一个 IndexedDB transaction；
+ * 内存允许在写盘期间暂时前移，但只在整批写入完成后通知界面，失败时回到最近一次已提交状态。
  */
 export class Store {
   private listeners = new Set<() => void>();
-  private pending = false;
+  private notifyPending = false;
   private villageCache: { key: string; map: Map<string, VillageState> } | null = null;
   private version = 0;
-  private writes: Promise<unknown> = Promise.resolve();
+  private writeTail: Promise<void> = Promise.resolve();
+  private activeWrites: PersistenceWrite[] | null = null;
+  private pendingBatches = new Set<PendingBatch>();
+  private committedData: Data;
+  private batchChanged = false;
+  private hasBatchFailure = false;
+  private batchFailure: unknown;
+  private lastFailure: unknown;
+  private hasLastFailure = false;
+  private readOnly = false;
   /** 测试时可以替换「今天」 */
   clock: () => Date = () => new Date();
   onError: (e: unknown) => void = (e) => console.error(e);
+  /** Called after a persistence transaction commits, before subscribers run. */
+  onCommitted: () => void = () => {};
 
-  constructor(public data: Data, private persist: Persistence) {}
+  constructor(public data: Data, private persist: Persistence) {
+    this.committedData = structuredClone(data);
+  }
+
+  setReadOnly(value: boolean) {
+    this.readOnly = value;
+  }
+
+  get isReadOnly() {
+    return this.readOnly;
+  }
+
+  /** Replace the in-memory snapshot after a read-only tab observes another tab's commit. */
+  reload(data: Data) {
+    this.data = structuredClone(data);
+    this.committedData = structuredClone(this.data);
+    this.pendingBatches.clear();
+    this.hasBatchFailure = false;
+    this.batchFailure = undefined;
+    this.lastFailure = undefined;
+    this.hasLastFailure = false;
+    this.invalidateData();
+    this.batchChanged = true;
+    this.scheduleNotify();
+  }
+
+  private assertWritable() {
+    if (this.readOnly) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
+  }
 
   today(): ISODate {
     return localDate(this.clock());
   }
 
+  /**
+   * Group synchronous in-memory mutations into one durable commit. Nested calls
+   * share the outer transaction, so composite actions such as settleDay or
+   * seedDemo still produce one persistence transaction.
+   */
+  batch<T>(fn: () => T): T {
+    this.assertWritable();
+    if (this.activeWrites) {
+      const nested = fn();
+      if (nested && typeof nested === 'object' && 'then' in nested) {
+        throw new Error('Store.batch callback must be synchronous');
+      }
+      return nested;
+    }
+
+    if (this.pendingBatches.size === 0) {
+      this.committedData = structuredClone(this.data);
+      this.hasBatchFailure = false;
+      this.batchFailure = undefined;
+    }
+    const before = structuredClone(this.data);
+    const changedBefore = this.batchChanged;
+    const writes: PersistenceWrite[] = [];
+    this.activeWrites = writes;
+
+    let result: T;
+    try {
+      result = fn();
+      if (result && typeof result === 'object' && 'then' in result) {
+        throw new Error('Store.batch callback must be synchronous');
+      }
+      this.updateBacklogSnapshot();
+    } catch (error) {
+      this.activeWrites = null;
+      this.data = before;
+      this.batchChanged = changedBefore;
+      this.invalidateData();
+      throw error;
+    }
+    this.activeWrites = null;
+
+    if (!writes.length) {
+      if (this.pendingBatches.size === 0 && this.batchChanged) {
+        this.batchChanged = false;
+        this.scheduleNotify();
+      }
+      return result;
+    }
+
+    const pending: PendingBatch = { writes, snapshot: structuredClone(this.data) };
+    this.pendingBatches.add(pending);
+    const commit = this.writeTail.then(async () => {
+      if (this.hasBatchFailure) throw this.batchFailure;
+      const sequenceUpdates = await this.persist.batch(writes);
+      this.applySequenceUpdates(sequenceUpdates);
+      this.committedData = structuredClone(pending.snapshot);
+      try { this.onCommitted(); } catch (error) { this.onError(error); }
+    });
+    this.writeTail = commit
+      .catch((error) => {
+        if (!this.hasBatchFailure) {
+          this.hasBatchFailure = true;
+          this.batchFailure = error;
+          this.lastFailure = error;
+          this.hasLastFailure = true;
+          this.data = structuredClone(this.committedData);
+          this.invalidateData();
+          this.batchChanged = true;
+          try { this.onError(error); } catch { /* a reporting hook must not block transaction cleanup */ }
+        }
+      })
+      .then(() => {
+        this.pendingBatches.delete(pending);
+        if (this.pendingBatches.size === 0) {
+          if (this.hasBatchFailure) {
+            this.data = structuredClone(this.committedData);
+            this.hasBatchFailure = false;
+            this.batchFailure = undefined;
+          }
+          if (this.batchChanged) {
+            this.batchChanged = false;
+            this.scheduleNotify();
+          }
+        }
+      });
+    return result;
+  }
+
+  private updateBacklogSnapshot() {
+    const date = this.today();
+    const value = backlog(this.data, date).total;
+    const current = this.data.snapshots.find((snapshot) => snapshot.date === date);
+    if (current?.backlog !== value) this.put('snapshots', { date, backlog: value });
+  }
+
+  private applySequenceUpdates(updates: FactSequenceUpdate[]) {
+    const apply = (data: Data, update: FactSequenceUpdate) => {
+      const keyField = COLLECTIONS[update.coll];
+      const row = (data[update.coll] as unknown as Record<string, unknown>[]).find((item) => item[keyField] === update.key);
+      if (row) row.seq = update.seq;
+    };
+    for (const update of updates) {
+      apply(this.data, update);
+      for (const batch of this.pendingBatches) apply(batch.snapshot, update);
+    }
+    if (updates.length) this.invalidateData();
+  }
+
   put<C extends Coll>(coll: C, item: Item<C>): void {
+    const writes = this.activeWrites;
+    if (!writes) {
+      this.batch(() => this.put(coll, item));
+      return;
+    }
+    const stored = structuredClone(item);
     const key = COLLECTIONS[coll];
     const arr = this.data[coll] as unknown as Record<string, unknown>[];
-    const rec = item as unknown as Record<string, unknown>;
+    const rec = stored as unknown as Record<string, unknown>;
     const i = arr.findIndex((x) => x[key] === rec[key]);
     if (i >= 0) arr[i] = rec;
     else arr.push(rec);
-    this.queue(async () => {
-      const authoritativeSeq = await this.persist.put(coll, item as object);
-      if (
-        (coll === 'entries' || coll === 'operations') &&
-        authoritativeSeq !== undefined &&
-        rec.seq !== authoritativeSeq
-      ) {
-        rec.seq = authoritativeSeq;
-        // Persistence may allocate a different cross-tab sequence than the
-        // provisional local value. Invalidate replay caches only after the
-        // authoritative value has been applied to in-memory data.
-        this.changed();
-      }
-    });
+    writes.push({ kind: 'put', coll, item: stored as object });
     this.changed();
   }
 
   renameFact<C extends 'entries' | 'operations'>(coll: C, oldKey: string, item: Item<C>): void {
+    const writes = this.activeWrites;
+    if (!writes) {
+      this.batch(() => this.renameFact(coll, oldKey, item));
+      return;
+    }
     const key = COLLECTIONS[coll];
     const arr = this.data[coll] as unknown as Record<string, unknown>[];
-    const rec = item as unknown as Record<string, unknown>;
+    const rec = structuredClone(item) as unknown as Record<string, unknown>;
     const i = arr.findIndex((x) => x[key] === oldKey);
     if (i >= 0) arr[i] = rec;
     else arr.push(rec);
-    this.queue(async () => {
-      const authoritativeSeq = await this.persist.renameFact(coll, oldKey, item as object);
-      if (rec.seq !== authoritativeSeq) {
-        rec.seq = authoritativeSeq;
-        this.changed();
-      }
-    });
+    writes.push({ kind: 'renameFact', coll, oldKey, item: rec });
     this.changed();
   }
 
   del<C extends Coll>(coll: C, keyValue: string): void {
+    const writes = this.activeWrites;
+    if (!writes) {
+      this.batch(() => this.del(coll, keyValue));
+      return;
+    }
     const key = COLLECTIONS[coll];
     const arr = this.data[coll] as unknown as Record<string, unknown>[];
     const i = arr.findIndex((x) => x[key] === keyValue);
     if (i >= 0) arr.splice(i, 1);
-    this.queue(() => this.persist.del(coll, keyValue));
-    this.changed();
+    writes.push({ kind: 'del', coll, key: keyValue });
+    if (i >= 0) this.changed();
   }
 
   saveSettings(patch: Partial<Settings>): void {
+    const writes = this.activeWrites;
+    if (!writes) {
+      this.batch(() => this.saveSettings(patch));
+      return;
+    }
     this.data.settings = { ...this.data.settings, ...patch };
-    const s = this.data.settings;
-    this.queue(() => this.persist.putSettings(s));
+    writes.push({ kind: 'putSettings', settings: { ...this.data.settings } });
     this.changed();
   }
 
   async replaceAll(d: Data): Promise<void> {
-    this.data = d;
-    this.changed();
-    await this.queue(() => this.persist.replaceAll(d));
+    this.batch(() => {
+      this.data = structuredClone(d);
+      this.activeWrites!.push({ kind: 'replaceAll', data: structuredClone(d) });
+      this.changed();
+    });
+    await this.flush();
   }
 
-  /** 等所有写入落盘 */
-  flush(): Promise<unknown> {
-    return this.writes;
+  /** 等所有写入落盘；失败时恢复内存并向调用方报告 */
+  async flush(): Promise<void> {
+    await this.writeTail;
+    if (this.hasLastFailure) {
+      const error = this.lastFailure;
+      this.lastFailure = undefined;
+      this.hasLastFailure = false;
+      throw error;
+    }
   }
 
-  /**
-   * 串行写入。队列本身吞掉错误（交给 onError），后续写入照常进行；
-   * 返回的是这一次写入本身，失败时会 reject，等待它的调用方能知道。
-   */
-  private queue(fn: () => Promise<void>): Promise<void> {
-    const op = this.writes.then(fn);
-    this.writes = op.catch((e) => this.onError(e));
-    return op;
-  }
-
-  /** 标记数据已变化，并在本轮任务结束后通知界面 */
-  changed(): void {
+  private invalidateData(): void {
     markDecayDataChanged(this.data);
     this.version++;
-    if (this.pending) return;
-    this.pending = true;
+  }
+
+  private scheduleNotify() {
+    if (this.notifyPending) return;
+    this.notifyPending = true;
     queueMicrotask(() => {
-      this.pending = false;
-      for (const l of this.listeners) l();
+      this.notifyPending = false;
+      for (const listener of this.listeners) listener();
     });
+  }
+
+  /** Mark data changed. Inside a batch this invalidates caches immediately but delays UI notification. */
+  changed(): void {
+    this.invalidateData();
+    if (this.activeWrites) {
+      this.batchChanged = true;
+      return;
+    }
+    this.scheduleNotify();
   }
 
   subscribe(fn: () => void): () => void {

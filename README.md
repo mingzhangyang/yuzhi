@@ -44,7 +44,9 @@ src/
   types.ts            数据模型（交接文档第 14 节，加了几处必要字段）
   db.ts               IndexedDB（idb）读写、JSON 备份导出/导入
   store.ts            内存数据 + 写穿持久层 + 变化通知 + 村落状态缓存
-  actions.ts          所有改动数据的操作：项目、任务、码头、结算、归档、关闭/重启/缩小、归类
+  actions.ts          领域 action 的公共入口（所有入口统一走 Store.batch）
+  actions/            项目、任务、结算、日历、落成和共享 action surface
+  single-writer.ts    多标签页写权限协调（Web Locks + BroadcastChannel）
   logic/              纯规则，不碰 DOM，都有测试
     config.ts         所有可调数值（阶段天数、推迟阈值、做了一部分的权重……）
     days.ts           每天的结算条目、未结算日子、3 天归档
@@ -62,6 +64,8 @@ worker/index.ts       Cloudflare Worker 入口（静态资源 + /api/ics）
 functions/api/ics.ts  Cloudflare Pages Function
 tests/                单元测试
 ```
+
+数据层将 `entries` / `operations` 作为唯一事实来源；一生之书、打断记录、阶段和任务状态均由 read model 重放得到。旧版 `life` / `interruptions` 集合会在业务迁移成功后删除。每个用户动作使用一个持久化 batch，多个标签页中只有 Web Locks 的 writer 可以写入，其他标签页只读并可在 writer 释放后接管。
 
 ## 已完成（对应交接文档第 16 节开发顺序 1–9）
 

@@ -196,6 +196,7 @@ describe('数据迁移基础设施', () => {
           for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
             if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
           }
+          if (!db.objectStoreNames.contains('life')) db.createObjectStore('life', { keyPath: 'id' });
           if (!db.objectStoreNames.contains('interruptions')) db.createObjectStore('interruptions', { keyPath: 'id' });
           if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
         },
@@ -248,7 +249,7 @@ describe('数据迁移基础设施', () => {
     expect(parsed.operations.find((event) => event.kind === 'migration-boundary')).toMatchObject({ date: '2026-10-01' });
     expect(parsed.operations.find((event) => event.kind === 'project-created')).toMatchObject({ seq: 1, projectId: 'p1' });
     expect(parsed.entries.map((entry) => entry.seq)).toEqual([2, 3]);
-    expect(parsed.life.some((entry) => ['done', 'partial', 'skip', 'stage'].includes(entry.kind))).toBe(false);
+    expect('life' in parsed).toBe(false);
     const migratedLife = lifeEntries(parsed);
     expect(migratedLife).toHaveLength(3);
     expect(migratedLife.filter((entry) => entry.text === '立项，村落「团队」在岛上落成')).toHaveLength(1);

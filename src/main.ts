@@ -16,10 +16,40 @@ import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
 import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
 import { unclassifiedGroups } from './logic/classify';
+import { SingleWriterCoordinator } from './single-writer';
 
 async function boot() {
   initModal();
-  let per: Persistence = new IdbPersistence();
+  let appStore: Store | undefined;
+  let idb: IdbPersistence | undefined;
+  const tabs = new SingleWriterCoordinator({
+    onRoleChange: (role) => {
+      if (!appStore || !idb) return;
+      idb.setWriteAccess(role === 'writer');
+      appStore.setReadOnly(role !== 'writer');
+      if (role === 'writer') {
+        void idb.load().then((fresh) => appStore?.reload(fresh)).catch((error) => appStore?.onError(error));
+      }
+      const notice = document.querySelector<HTMLElement>('#tabNotice');
+      if (notice) notice.hidden = role === 'writer';
+    },
+    onPeerCommit: () => {
+      if (!appStore || !idb || tabs.role === 'writer') return;
+      void idb.load().then((fresh) => appStore?.reload(fresh)).catch((error) => appStore?.onError(error));
+    },
+    onVersionChange: () => {
+      idb?.close();
+      appStore?.setReadOnly(true);
+      const notice = document.querySelector<HTMLElement>('#tabNotice');
+      if (notice) {
+        notice.hidden = false;
+        notice.dataset.blocked = 'true';
+      }
+    },
+  });
+  const canWrite = await tabs.acquire();
+  idb = new IdbPersistence(undefined, canWrite, { onVersionChange: () => tabs.notifyVersionChange() });
+  let per: Persistence = idb;
   let data: Data;
   try {
     data = await per.load();
@@ -45,6 +75,16 @@ async function boot() {
     setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
   }
   const store = new Store(data, per);
+  appStore = store;
+  store.setReadOnly(!canWrite);
+  store.onCommitted = () => tabs.announceCommit();
+  const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
+  if (tabNotice) tabNotice.hidden = canWrite;
+  const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
+  if (takeOver) takeOver.onclick = async () => {
+    if (await tabs.takeOver()) toast('已接管写权限');
+    else toast('另一个标签页仍在写入，请稍后再试', true);
+  };
   store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
 
   const applyTheme = () => {
@@ -140,8 +180,6 @@ async function boot() {
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
   function update() {
-    // 积压快照：只在数值变化时写入，写入触发的再次更新不会再写
-    A.recordBacklogSnapshot(store);
     const today = store.today();
     const now = store.clock();
     updateStats(store);
@@ -180,10 +218,13 @@ async function boot() {
 
   /** 新的一天：归档超过 3 天的未结算日子，记下阶段变化 */
   function daily() {
+    if (store.isReadOnly) return;
     // Replay missed time-passage boundaries before archive lines advance the
     // chronicle boundary used for legacy compatibility.
-    A.refreshStages(store);
-    const archived = A.archiveOldDays(store);
+    const archived = store.batch(() => {
+      A.refreshStages(store);
+      return A.archiveOldDays(store);
+    });
     if (archived.length) toast(`${archived.map(fmtDay).join('、')}没有记录，已归档。不算做了，也不算没做。`);
   }
 
@@ -208,6 +249,10 @@ async function boot() {
       }
       update();
     }
+  });
+  window.addEventListener('pagehide', () => { void tabs.close(); }, { once: true });
+  window.addEventListener('pageshow', () => {
+    if (store.isReadOnly) void tabs.takeOver();
   });
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 
