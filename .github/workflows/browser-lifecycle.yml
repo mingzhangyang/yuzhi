@@ -1,0 +1,59 @@
+name: Browser lifecycle smoke
+
+on:
+  pull_request:
+    paths:
+      - 'src/app-session.ts'
+      - 'src/single-writer.ts'
+      - 'src/store.ts'
+      - 'src/db.ts'
+      - 'src/main.ts'
+      - 'tests/ics.test.ts'
+      - 'browser-tests/**'
+      - '.github/workflows/browser-lifecycle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Verify calendar fixtures across supported timezones
+        run: |
+          for tz in UTC Asia/Shanghai America/New_York; do
+            echo "== TZ=$tz =="
+            TZ="$tz" npm test -- tests/ics.test.ts --reporter=dot
+          done
+
+      - run: npm run build
+
+      - name: Install browser smoke driver
+        run: npm install --no-save --package-lock=false playwright@1.63.0
+
+      - name: Run real Chrome lifecycle smoke
+        env:
+          BASE_URL: http://127.0.0.1:4173
+          PW_CHANNEL: chrome
+        run: |
+          google-chrome --version
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/yuzhi-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true; cat /tmp/yuzhi-preview.log' EXIT
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:4173/ > /dev/null
+          node browser-tests/lifecycle-smoke.mjs
