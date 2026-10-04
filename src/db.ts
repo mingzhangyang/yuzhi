@@ -396,11 +396,13 @@ export class IdbPersistence implements Persistence {
   private dbp: Promise<IDBPDatabase>;
   private readonly name: string;
   private writeAccess: boolean;
+  private requestedWriteAccess: boolean;
   private versionChangeHandler?: () => void;
   private accessTail: Promise<void> = Promise.resolve();
   constructor(name = DB_NAME, writeAccess = true, options: { onVersionChange?: () => void } = {}) {
     this.name = name;
     this.writeAccess = writeAccess;
+    this.requestedWriteAccess = writeAccess;
     this.versionChangeHandler = options.onVersionChange;
     this.dbp = writeAccess ? this.openWritableDatabase() : this.openDatabase(undefined, false);
   }
@@ -419,12 +421,21 @@ export class IdbPersistence implements Persistence {
   }
 
   async setWriteAccess(value: boolean) {
-    if (this.writeAccess === value) return;
+    // Compare against the requested mode, not only the currently-open
+    // connection. A true -> false request may arrive while true is still
+    // queued; dropping the second request would leave a writable connection
+    // behind after the Store has become read-only.
+    if (this.requestedWriteAccess === value) {
+      await this.accessTail;
+      return;
+    }
+    this.requestedWriteAccess = value;
     await this.queueReconnect(value);
   }
 
   /** Reopen even when the logical access mode is unchanged (for versionchange recovery). */
-  async reopen(writeAccess = this.writeAccess) {
+  async reopen(writeAccess = this.requestedWriteAccess) {
+    this.requestedWriteAccess = writeAccess;
     await this.queueReconnect(writeAccess);
   }
 
@@ -455,11 +466,16 @@ export class IdbPersistence implements Persistence {
         }
         : undefined,
       blocking(_currentVersion, _blockedVersion, event) {
-        // Do not let an old tab keep a future schema upgrade blocked indefinitely.
-        (event.target as IDBDatabase | null)?.close();
-        notifyVersionChange();
+        // "blocking" means this open connection is preventing another tab's
+        // upgrade. Let the application drain pending writes before closing.
+        // Persistence instances without a lifecycle handler still fail safe by
+        // closing immediately.
+        if (this.versionChangeHandler) notifyVersionChange();
+        else (event.target as IDBDatabase | null)?.close();
       },
-      blocked: notifyVersionChange,
+      // "blocked" is the opposite direction: this tab is the upgrader waiting
+      // for an older connection. Do not demote the writer that owns the upgrade.
+      blocked() {},
     });
   }
 

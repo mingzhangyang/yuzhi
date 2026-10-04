@@ -150,6 +150,21 @@ describe('read-only persistence', () => {
     await reader.close();
   });
 
+  it('快速 write -> read 切换按请求顺序串行，不会遗留可写连接', async () => {
+    const name = `yuzhi-access-flip-${Date.now()}-${Math.random()}`;
+    const persistence = new IdbPersistence(name, false);
+    await persistence.load();
+
+    const promote = persistence.setWriteAccess(true);
+    const demote = persistence.setWriteAccess(false);
+    await Promise.all([promote, demote]);
+
+    await expect(persistence.batch([
+      { kind: 'put', coll: 'projects', item: { id: 'late', name: '不应写入', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } },
+    ])).rejects.toThrow('只读');
+    await persistence.close();
+  });
+
   it('只读 Store 拒绝 action', () => {
     const store = new Store(emptyData(), new IdbPersistence('unused-readonly', false));
     store.setReadOnly(true);

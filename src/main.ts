@@ -55,8 +55,19 @@ async function boot() {
       }
       const current = idb;
       versionChangeRecovery = (async () => {
+        if (appStore) {
+          try { await appStore.flush(); } catch (error) { appStore.onError(error); }
+        }
+        if (current) {
+          // Close only after pending actions have drained. Reopen as a reader,
+          // refresh the authoritative snapshot, and only then surrender the
+          // writer lease so a new writer cannot race the refresh.
+          await current.close();
+          await current.reopen(false);
+          const fresh = await current.load();
+          if (appStore) appStore.reload(fresh);
+        }
         await tabs.release();
-        if (current) await current.reopen(false);
       })().catch((error) => appStore?.onError(error));
     },
   });
@@ -81,6 +92,8 @@ async function boot() {
           </section>`,
         );
       }
+      await idb?.close();
+      await tabs.close();
       return;
     }
     idb = undefined;
@@ -122,8 +135,10 @@ async function boot() {
       }
       const acquired = await tabs.takeOver(idb
         ? async () => {
-          // The lock is held, but the Store remains read-only until this
-          // reconnect + authoritative reload has completed.
+          // The lock is held, but the Store remains read-only until any
+          // in-flight reader refresh finishes and a fresh authoritative load
+          // succeeds on the write-capable connection.
+          await readerRefresh.catch(() => {});
           await idb!.setWriteAccess(true);
           const fresh = await idb!.load();
           appStore!.reload(fresh);
@@ -137,6 +152,7 @@ async function boot() {
       return true;
     } catch (error) {
       appStore?.setReadOnly(true);
+      await tabs.release();
       if (idb) {
         try { await idb.reopen(false); } catch { /* keep the failed tab read-only */ }
       }

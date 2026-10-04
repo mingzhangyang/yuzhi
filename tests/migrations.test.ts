@@ -213,6 +213,35 @@ describe('数据迁移基础设施', () => {
     staged.close();
   });
 
+  it('修复曾到达 schema 7 但遗留 legacy stores 的数据库', async () => {
+    const name = dbName('repair-schema-7');
+    const raw = await openDB(name, IDB_SCHEMA_VERSION - 1, {
+      upgrade(db) {
+        for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
+          if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
+        }
+        if (!db.objectStoreNames.contains('life')) db.createObjectStore('life', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('interruptions')) db.createObjectStore('interruptions', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+      },
+    });
+    await raw.put('meta', {
+      workStart: '09:00',
+      workEnd: '18:00',
+      firstDay: '2026-10-01',
+      theme: 'auto',
+    }, 'settings');
+    await raw.put('meta', DATA_VERSION, 'dataVersion');
+    raw.close();
+
+    await new IdbPersistence(name).load();
+    const repaired = await openDB(name);
+    expect(repaired.version).toBe(IDB_SCHEMA_VERSION);
+    expect(Array.from(repaired.objectStoreNames)).not.toContain('life');
+    expect(Array.from(repaired.objectStoreNames)).not.toContain('interruptions');
+    repaired.close();
+  });
+
   it('v1 IndexedDB 原地升级对同日 life 使用稳定 id fallback，不依赖写入顺序', async () => {
     const rows = [...v1OperationHistoryFixture.life];
     const seed = async (name: string, lifeRows: typeof rows) => {
