@@ -121,6 +121,7 @@ describe('原子批次写入', () => {
 
     const replacing = store.replaceAll(replacement);
     await firstStarted;
+    expect(() => createProject(store, '不应插入替换边界')).toThrow('正在替换全部数据');
     releaseFirst();
     await replacing;
 

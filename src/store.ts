@@ -28,6 +28,8 @@ export class Store {
   private hasBatchFailure = false;
   private batchFailure: unknown;
   private readOnly = false;
+  /** Full-snapshot replacement is an exclusive barrier over the write queue. */
+  private replacementInProgress = false;
   /** 测试时可以替换「今天」 */
   clock: () => Date = () => new Date();
   onError: (e: unknown) => void = (e) => console.error(e);
@@ -60,8 +62,9 @@ export class Store {
     this.scheduleNotify();
   }
 
-  private assertWritable() {
+  private assertWritable(allowReplacement = false) {
     if (this.readOnly) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
+    if (this.replacementInProgress && !allowReplacement) throw new Error('正在替换全部数据，请等待导入完成');
   }
 
   today(): ISODate {
@@ -74,7 +77,11 @@ export class Store {
    * seedDemo still produce one persistence transaction.
    */
   batch<T>(fn: () => T): T {
-    this.assertWritable();
+    return this.batchInternal(fn, false);
+  }
+
+  private batchInternal<T>(fn: () => T, allowReplacement: boolean): T {
+    this.assertWritable(allowReplacement);
     if (this.activeWrites) {
       const nested = fn();
       if (nested && typeof nested === 'object' && 'then' in nested) {
@@ -261,19 +268,25 @@ export class Store {
     this.assertWritable();
     if (this.activeWrites) throw new Error('Store.replaceAll cannot run inside Store.batch');
     const replacement = structuredClone(d);
+    this.replacementInProgress = true;
 
-    // Replacement is an exclusive queue boundary. Waiting until there are no
-    // pending batches prevents earlier fact-sequence reconciliation from
-    // mutating the replacement snapshot after its durable payload was captured.
-    await this.drainPendingWrites();
-    this.assertWritable();
+    try {
+      // Replacement is an exclusive queue boundary. New business batches are
+      // rejected from this point until the replacement commits, so nothing can
+      // slip into the gap between draining the old queue and capturing the new
+      // durable snapshot.
+      await this.drainPendingWrites();
+      this.assertWritable(true);
 
-    this.batch(() => {
-      this.data = structuredClone(replacement);
-      this.activeWrites!.push({ kind: 'replaceAll', data: structuredClone(replacement) });
-      this.changed();
-    });
-    await this.flush();
+      this.batchInternal(() => {
+        this.data = structuredClone(replacement);
+        this.activeWrites!.push({ kind: 'replaceAll', data: structuredClone(replacement) });
+        this.changed();
+      }, true);
+      await this.flush();
+    } finally {
+      this.replacementInProgress = false;
+    }
   }
 
   /** 等调用时已经排队的写入落盘；同一代的所有 waiter 都观察到同一个结果。 */
