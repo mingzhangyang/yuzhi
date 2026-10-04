@@ -449,7 +449,12 @@ export class IdbPersistence implements Persistence {
   }
 
   private openDatabase(version: number | undefined, allowUpgrade: boolean): Promise<IDBPDatabase> {
-    const notifyVersionChange = () => this.versionChangeHandler?.();
+    const notifyVersionChange = () => {
+      const handler = this.versionChangeHandler;
+      if (!handler) return false;
+      handler();
+      return true;
+    };
     return openDB(this.name, version, {
       upgrade: allowUpgrade
         ? (db, oldVersion, newVersion) => {
@@ -470,8 +475,7 @@ export class IdbPersistence implements Persistence {
         // upgrade. Let the application drain pending writes before closing.
         // Persistence instances without a lifecycle handler still fail safe by
         // closing immediately.
-        if (this.versionChangeHandler) notifyVersionChange();
-        else (event.target as IDBDatabase | null)?.close();
+        if (!notifyVersionChange()) (event.target as IDBDatabase | null)?.close();
       },
       // "blocked" is the opposite direction: this tab is the upgrader waiting
       // for an older connection. Do not demote the writer that owns the upgrade.

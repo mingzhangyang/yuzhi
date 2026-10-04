@@ -55,19 +55,23 @@ async function boot() {
       }
       const current = idb;
       versionChangeRecovery = (async () => {
-        if (appStore) {
-          try { await appStore.flush(); } catch (error) { appStore.onError(error); }
+        try {
+          if (appStore) {
+            try { await appStore.flush(); } catch (error) { appStore.onError(error); }
+          }
+          if (current) {
+            // Close only after pending actions have drained. Reopen as a reader
+            // and refresh the authoritative snapshot before surrendering the
+            // writer lease so another writer cannot race this refresh.
+            await current.close();
+            await current.reopen(false);
+            const fresh = await current.load();
+            if (appStore) appStore.reload(fresh);
+          }
+        } finally {
+          // Never strand the single-writer lease if close/reopen/load fails.
+          await tabs.release();
         }
-        if (current) {
-          // Close only after pending actions have drained. Reopen as a reader,
-          // refresh the authoritative snapshot, and only then surrender the
-          // writer lease so a new writer cannot race the refresh.
-          await current.close();
-          await current.reopen(false);
-          const fresh = await current.load();
-          if (appStore) appStore.reload(fresh);
-        }
-        await tabs.release();
       })().catch((error) => appStore?.onError(error));
     },
   });
