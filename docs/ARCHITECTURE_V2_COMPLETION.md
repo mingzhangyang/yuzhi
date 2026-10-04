@@ -56,7 +56,7 @@ The canonical Git marker for this milestone is:
 architecture-v2-complete
 ```
 
-It must point to the `master` commit that contains this completion record. That tag defines the exact repository state at which Architecture v2 was formally closed.
+It must point to the default-branch commit that contains this completion record. That tag defines the exact repository state at which Architecture v2 was formally closed and remains valid if the default branch is renamed.
 
 ## What happens next
 
