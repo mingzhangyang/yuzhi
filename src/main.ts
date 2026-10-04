@@ -17,6 +17,7 @@ import { pendingDays } from './logic/days';
 import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
 import { unclassifiedGroups } from './logic/classify';
 import { SingleWriterCoordinator } from './single-writer';
+import { syncThemeDataset } from './ui/theme';
 
 async function boot() {
   initModal();
@@ -27,12 +28,9 @@ async function boot() {
   let readerRefresh: Promise<void> = Promise.resolve();
   let versionChangeRecovery: Promise<void> | undefined;
   let setAppReadOnly = (readOnly: boolean) => appStore?.setReadOnly(readOnly);
-  let syncReloadedTheme = (_previousTheme: Data['settings']['theme']) => {};
   const reloadAppSnapshot = (fresh: Data) => {
     if (!appStore) return;
-    const previousTheme = appStore.data.settings.theme;
     appStore.reload(fresh);
-    if (previousTheme !== fresh.settings.theme) syncReloadedTheme(previousTheme);
   };
   const tabs = new SingleWriterCoordinator({
     onRoleChange: (role) => {
@@ -253,9 +251,7 @@ async function boot() {
   if (takeOver && tabs.supportsWriterLock) takeOver.onclick = () => { void requestTakeover(); };
 
   const applyTheme = () => {
-    const t = store.data.settings.theme;
-    if (t === 'auto') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = t;
+    syncThemeDataset(store.data.settings.theme, document.documentElement.dataset);
     setTimeout(() => {
       renderer.readTheme();
       update();
@@ -267,7 +263,6 @@ async function boot() {
     `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span>`;
 
   const renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
-  syncReloadedTheme = () => applyTheme();
   let dusk = false;
   const tracker = new Tracker(store, {
     openNewProject: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
@@ -346,6 +341,15 @@ async function boot() {
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
   function update() {
+    if (syncThemeDataset(store.data.settings.theme, document.documentElement.dataset)) {
+      // Store notifications include persistence rollback and peer reloads.
+      // Theme is therefore derived from the authoritative Store snapshot, not
+      // only from the UI action that originally requested a theme change.
+      setTimeout(() => {
+        renderer.readTheme();
+        update();
+      }, 30);
+    }
     const today = store.today();
     const now = store.clock();
     updateStats(store);

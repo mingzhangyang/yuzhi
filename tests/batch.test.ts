@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { IdbPersistence, MemoryPersistence, emptyData } from '../src/db';
 import { Store } from '../src/store';
 import { createProject, createTask, editTaskPlan } from '../src/actions';
+import { syncThemeDataset } from '../src/ui/theme';
 
 const dbName = (label: string) => `yuzhi-batch-${label}-${Date.now()}-${Math.random()}`;
 
@@ -80,6 +81,81 @@ describe('原子批次写入', () => {
     const durable = await persistence.load();
     const durableStore = new Store(durable, persistence);
     expect(durableStore.task(task.id)).toMatchObject({ projectId: from.id, scheduledFor: '2026-10-04' });
+  });
+
+  it('replaceAll 等待写队列真正排空，事实序号不会跨替换边界串改', async () => {
+    let markStarted!: () => void;
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { markStarted = resolve; });
+
+    class DelayedFirstPersistence extends MemoryPersistence {
+      private first = true;
+      async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        if (this.first) {
+          this.first = false;
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+            markStarted();
+          });
+        }
+        return super.batch(writes);
+      }
+    }
+
+    const persistence = new DelayedFirstPersistence();
+    const store = new Store(emptyData(), persistence);
+    store.put('operations', {
+      id: 'shared-fact',
+      seq: 99,
+      date: '2026-10-01',
+      kind: 'legacy-life',
+    });
+
+    const replacement = emptyData();
+    replacement.operations = [{
+      id: 'shared-fact',
+      seq: 77,
+      date: '2026-10-01',
+      kind: 'legacy-life',
+    }];
+
+    const replacing = store.replaceAll(replacement);
+    await firstStarted;
+    releaseFirst();
+    await replacing;
+
+    expect(store.data.operations).toEqual(replacement.operations);
+    expect((await persistence.load()).operations).toEqual(replacement.operations);
+  });
+
+  it('设置写盘失败后，Store 通知会把主题恢复到已提交状态', async () => {
+    class FailNextPersistence extends MemoryPersistence {
+      failNext = false;
+      async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        if (this.failNext) {
+          this.failNext = false;
+          throw new Error('主题保存失败');
+        }
+        return super.batch(writes);
+      }
+    }
+
+    const persistence = new FailNextPersistence();
+    const store = new Store(emptyData(), persistence);
+    store.onError = () => {};
+    const dataset: { theme?: string } = {};
+    store.subscribe(() => { syncThemeDataset(store.data.settings.theme, dataset); });
+
+    persistence.failNext = true;
+    store.saveSettings({ theme: 'dark' });
+    syncThemeDataset(store.data.settings.theme, dataset);
+    expect(dataset.theme).toBe('dark');
+
+    await expect(store.flush()).rejects.toThrow('主题保存失败');
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(store.data.settings.theme).toBe('auto');
+    expect(dataset.theme).toBeUndefined();
   });
 
   it('中途写入失败时 IndexedDB 整批回滚', async () => {

@@ -245,10 +245,32 @@ export class Store {
     this.changed();
   }
 
+  /**
+   * Drain every batch that is still pending while this barrier is waiting.
+   * Unlike flush(), which intentionally snapshots one generation for ordinary
+   * callers, replacement must begin from a fully committed queue boundary.
+   */
+  private async drainPendingWrites(): Promise<void> {
+    while (this.pendingBatches.size > 0) {
+      const generation = this.flushTail;
+      await generation;
+    }
+  }
+
   async replaceAll(d: Data): Promise<void> {
+    this.assertWritable();
+    if (this.activeWrites) throw new Error('Store.replaceAll cannot run inside Store.batch');
+    const replacement = structuredClone(d);
+
+    // Replacement is an exclusive queue boundary. Waiting until there are no
+    // pending batches prevents earlier fact-sequence reconciliation from
+    // mutating the replacement snapshot after its durable payload was captured.
+    await this.drainPendingWrites();
+    this.assertWritable();
+
     this.batch(() => {
-      this.data = structuredClone(d);
-      this.activeWrites!.push({ kind: 'replaceAll', data: structuredClone(d) });
+      this.data = structuredClone(replacement);
+      this.activeWrites!.push({ kind: 'replaceAll', data: structuredClone(replacement) });
       this.changed();
     });
     await this.flush();
