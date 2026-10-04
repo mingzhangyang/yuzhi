@@ -148,18 +148,23 @@ def main() -> None:
         meta_tmp = META_FILE.with_name(f'.{META_FILE.name}.tmp')
         meta_tmp.write_text(meta_text, encoding='utf-8')
 
-        # 全部成功后再替换：旧目录先挪到备份位置，新目录就位后再丢弃备份
+        # 全部成功后再替换：旧目录先挪到备份位置，新目录与元数据都就位后才丢弃备份；
+        # 任何一步失败都把新目录挪走、恢复旧目录，保证图片与元数据始终配套
         backup = Path(tmp) / 'previous'
+        installed = False
         try:
             if OUT_DIR.exists():
                 OUT_DIR.rename(backup)
             staging.rename(OUT_DIR)
-        except OSError:
+            installed = True
+            os.replace(meta_tmp, META_FILE)
+        except BaseException:
+            if installed:
+                OUT_DIR.rename(Path(tmp) / 'failed')
             if backup.exists() and not OUT_DIR.exists():
                 backup.rename(OUT_DIR)
             meta_tmp.unlink(missing_ok=True)
             raise
-        os.replace(meta_tmp, META_FILE)
     print(f'wrote {count} sprites to {OUT_DIR.relative_to(ROOT)}')
 
 
