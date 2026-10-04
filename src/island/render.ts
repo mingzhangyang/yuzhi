@@ -34,12 +34,16 @@ export interface VillageView {
   extra: number;
   openCount: number;
   agenda?: AgendaView;
+  /** 今天结算为做了 / 做了一部分的日程数；只用于烧窑转场 */
+  firedToday?: number;
 }
 
 export interface AgendaView {
   phase: 'later' | 'soon' | 'live' | 'ended';
   title?: string;
   until?: string;
+  /** 即将开始那一场的开始时间 */
+  start?: string;
   later: number;
   ended: number;
   banners: string[];
@@ -549,8 +553,16 @@ export class IslandRenderer {
     return this.iso(center.i - 0.72, center.j - 0.72);
   }
 
+  /** 告示牌只在有场次可数时立起来；只有全天条幅时不立牌 */
+  private hasNoticeBoard(agenda: AgendaView): boolean {
+    return agenda.phase === 'soon' || agenda.phase === 'ended' || (agenda.phase === 'later' && agenda.later > 0);
+  }
+
+  /** 杂务的此刻层只在进行中画扫帚，锚点就是扫帚的位置 */
   private choresAgendaAnchor(): [number, number] {
-    return this.iso(this.map.chores.i + 0.45, this.map.chores.j - 0.18);
+    const [x, y] = this.iso(this.map.chores.i, this.map.chores.j);
+    const tw = this.view.tw;
+    return [x + tw * 0.36, y + tw * 0.03];
   }
 
   private lighthouseBannerAnchor(): [number, number] {
@@ -562,7 +574,8 @@ export class IslandRenderer {
     return this.iso(m.dock.i + 0.95 + index * 0.55, m.dock.j + m.pierLen + 0.75 + index * 0.28);
   }
 
-  private agendaHitAt(pt: { x: number; y: number }): Hit {
+  /** 漂流瓶在海上，不和陆地上的东西重叠，可以最先判断 */
+  private driftHitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
     const bottleRadius = Math.max(14, this.view.tw * 0.42);
@@ -570,15 +583,29 @@ export class IslandRenderer {
       const [x, y] = this.driftBottleAnchor(k);
       if (Math.hypot(pt.x - x, pt.y - y) < bottleRadius) return { kind: 'drift', title: s.drifting[k].title };
     }
+    return null;
+  }
+
+  /**
+   * 告示牌、条幅、扫帚：只认画出来的那一小块，不能盖住村落中心和杂务小屋本身，
+   * 否则点村落、点小人、点小屋都会变成看日程说明。
+   */
+  private agendaHitAt(pt: { x: number; y: number }): Hit {
+    const s = this.scene;
+    if (!s) return null;
+    const drift = this.driftHitAt(pt);
+    if (drift) return drift;
+    const tw = this.view.tw;
+    const r = Math.max(8, tw * 0.22);
     for (const v of s.villages) {
       if (!v.agenda) continue;
       const [x, y] = this.villageAgendaAnchor(v);
-      if (Math.hypot(pt.x - x, pt.y - y) < Math.max(18, this.view.tw * 0.65)) return { kind: 'agenda', target: v.projectId };
+      if (this.hasNoticeBoard(v.agenda) && Math.hypot(pt.x - x, pt.y - y) < r) return { kind: 'agenda', target: v.projectId };
+      if (v.agenda.banners.length && Math.abs(pt.x - x) < tw * 0.34 && Math.abs(pt.y - (y - tw * 0.28)) < tw * 0.12) return { kind: 'agenda', target: v.projectId };
     }
-    const chores = s.chores;
-    if (chores.live || chores.later || chores.ended) {
+    if (s.chores.live) {
       const [x, y] = this.choresAgendaAnchor();
-      if (Math.hypot(pt.x - x, pt.y - y) < Math.max(18, this.view.tw * 0.65)) return { kind: 'agenda', target: CHORES };
+      if (Math.hypot(pt.x - x, pt.y - y) < Math.max(7, tw * 0.16)) return { kind: 'agenda', target: CHORES };
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
@@ -637,8 +664,8 @@ export class IslandRenderer {
   hitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
-    const agendaHit = this.agendaHitAt(pt);
-    if (agendaHit) return agendaHit;
+    const drift = this.driftHitAt(pt);
+    if (drift) return drift;
     const s0 = Math.max(5, this.view.tw * 0.2);
     let best: Walker | null = null;
     let bd = Math.max(16, s0 * 1.4);
@@ -651,6 +678,8 @@ export class IslandRenderer {
       }
     }
     if (best) return { kind: 'task', id: best.id };
+    const agendaHit = this.agendaHitAt(pt);
+    if (agendaHit) return agendaHit;
     const { fi, fj } = this.tileCoords(pt);
     const m = this.map;
     const near = (t: Tile, r: number) => Math.hypot(t.i - fi, t.j - fj) < r;
@@ -807,14 +836,13 @@ export class IslandRenderer {
     }
 
     for (const v of s.villages) {
-      if (!v.agenda) continue;
+      if (!v.agenda || (!this.hasNoticeBoard(v.agenda) && !v.agenda.banners.length)) continue;
       const [x, y] = this.villageAgendaAnchor(v);
       add({ kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda }, null, x, y);
     }
-    if (s.chores.live || s.chores.later || s.chores.ended) {
+    if (s.chores.live) {
       const [x, y] = this.choresAgendaAnchor();
-      const phase: AgendaView['phase'] = s.chores.live ? 'live' : s.chores.ended ? 'ended' : 'later';
-      add({ kind: 'agenda', target: CHORES, targetName: '杂务', phase, title: s.chores.live?.title, until: s.chores.live?.until, later: s.chores.later, ended: s.chores.ended, banners: [] }, null, x, y);
+      add({ kind: 'agenda', target: CHORES, targetName: '杂务', phase: 'live', title: s.chores.live.title, until: s.chores.live.until, later: s.chores.later, ended: s.chores.ended, banners: [] }, null, x, y);
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
@@ -2005,12 +2033,12 @@ export class IslandRenderer {
     c.fillStyle = '#f4e2b7';
     c.fillRect(x - w * 0.3, y - h * 0.16, w * 0.6, Math.max(1, tw * 0.018));
     c.fillRect(x - w * 0.3, y + h * 0.12, w * 0.42, Math.max(1, tw * 0.018));
-    const count = agenda.phase === 'ended' ? agenda.ended : agenda.phase === 'later' ? agenda.later : agenda.soon?.length ?? 1;
+    const count = agenda.phase === 'ended' ? agenda.ended : agenda.phase === 'later' ? agenda.later : agenda.soon?.length ?? 0;
     c.fillStyle = '#fff6dc';
     c.font = `700 ${Math.max(8, tw * 0.16)}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.fillText(String(Math.max(1, count)), x + w * 0.28, y - h * 0.04);
+    if (count > 0) c.fillText(String(count), x + w * 0.28, y - h * 0.04);
   }
 
   private drawUnfiredBricks(x: number, y: number, tw: number, count: number) {
@@ -2754,7 +2782,7 @@ export class IslandRenderer {
           this.drawWell(x, y, tw, vv, t);
           if (vv.agenda) {
             const [ax, ay] = this.villageAgendaAnchor(vv);
-            if (vv.agenda.phase !== 'live' || vv.agenda.banners.length) this.drawNoticeBoard(ax, ay, tw, vv.agenda);
+            if (this.hasNoticeBoard(vv.agenda)) this.drawNoticeBoard(ax, ay, tw, vv.agenda);
             if (vv.agenda.ended) this.drawUnfiredBricks(x, y, tw, vv.agenda.ended);
             for (const [k, title] of vv.agenda.banners.slice(0, BANNERS_MAX).entries()) this.drawBanner(ax + (k - 0.5) * tw * 0.34, ay - tw * 0.28, tw, title, vv.roof);
           }
@@ -2895,8 +2923,8 @@ export class IslandRenderer {
           ? ` · ${vv.agenda.title ?? '日程'} 将开始`
           : vv.agenda?.phase === 'ended'
             ? ` · 待结算 ${vv.agenda.ended}`
-            : vv.agenda?.phase === 'later'
-              ? ` · 稍后 ${vv.agenda.later || vv.agenda.banners.length} 场`
+            : vv.agenda?.phase === 'later' && vv.agenda.later > 0
+              ? ` · 稍后 ${vv.agenda.later} 场`
               : '';
       this.label(x, y0 - tw * 1.05, `${vv.name} ${vv.openCount}人${agendaTxt}${stageTxt}`, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
     }

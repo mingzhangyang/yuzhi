@@ -221,6 +221,8 @@ async function boot() {
     });
     setTimeout(() => {
       b.remove();
+      // 砖落地时村落亮一下；任务和日程都一样。之后的盖房、烧窑提示由场景差分另行产生。
+      renderer.pulse(pid);
     }, 780);
   }
 

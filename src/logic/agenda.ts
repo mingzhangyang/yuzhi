@@ -25,6 +25,8 @@ export interface Agenda {
   allDay: string[];
   /** 下一个会改变此刻层的时间边界。 */
   nextChange: Date | null;
+  /** 今天结算为「做了 / 做了一部分」的日程数，按项目或 CHORES 分组；只给转场层判断烧窑用。 */
+  fired: Map<string, number>;
 }
 
 type EventWithTime = { event: CalendarEvent; start: number; end: number; day: ISODate };
@@ -149,8 +151,16 @@ export function agendaAt(data: Data, now: Date): Agenda {
     slot.soon.sort((a, b) => a.start.localeCompare(b.start));
   }
 
+  const fired = new Map<string, number>();
+  for (const entry of data.entries) {
+    if (entry.itemType !== 'event' || entry.date !== today || !entry.projectId) continue;
+    if (entry.outcome !== 'done' && entry.outcome !== 'partial') continue;
+    fired.set(entry.projectId, (fired.get(entry.projectId) ?? 0) + 1);
+  }
+
   return {
     slots,
+    fired,
     drifting: driftingTitles(data, today, settled),
     lighthouseBanners,
     allDay,

@@ -53,6 +53,16 @@ describe('此刻层 agendaAt', () => {
     expect(result.slots.get(p.id)?.ended ?? 0).toBe(0);
     expect(JSON.stringify(h.store.data)).toBe(before);
   });
+
+  it('只把今天结算成做了 / 做了一部分的日程计入 fired', () => {
+    const h = makeStore('2026-10-04');
+    const p = createProject(h.store, '烧窑');
+    const entry = (id: string, outcome: 'done' | 'partial' | 'skipped', date = '2026-10-04') =>
+      ({ id: `${date}|event|${id}`, seq: 1, date, itemType: 'event' as const, itemId: id, outcome, projectId: p.id, title: id });
+    h.store.data.entries.push(entry('a', 'done'), entry('b', 'partial'), entry('c', 'skipped'), entry('d', 'done', '2026-10-03'));
+    const result = agendaAt(h.store.data, new Date('2026-10-04T20:00:00'));
+    expect(result.fired.get(p.id)).toBe(2);
+  });
 });
 
 describe('柴堆档位', () => {

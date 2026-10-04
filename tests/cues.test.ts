@@ -52,10 +52,26 @@ describe('场景提示差分', () => {
     ]));
   });
 
-  it('结束数减少时产生烧窑提示', () => {
-    const old = scene({ villages: [{ slot: 0, projectId: 'p', name: '团队', roof: '#a00', stage: 0, houses: 1, walkers: [], extra: 0, openCount: 0, agenda: { phase: 'ended', later: 0, ended: 1, banners: [] } }] });
-    const next = scene({ villages: [{ slot: 0, projectId: 'p', name: '团队', roof: '#a00', stage: 0, houses: 1, walkers: [], extra: 0, openCount: 0, agenda: { phase: 'later', later: 0, ended: 0, banners: [] } }] });
+  const village = (o: Partial<Scene['villages'][number]>): Scene['villages'][number] => ({
+    slot: 0, projectId: 'p', name: '团队', roof: '#a00', stage: 0, houses: 1, walkers: [], extra: 0, openCount: 0, ...o,
+  });
+
+  it('日程结算成做了时产生烧窑提示', () => {
+    const old = scene({ villages: [village({ agenda: { phase: 'ended', later: 0, ended: 1, banners: [] }, firedToday: 0 })] });
+    const next = scene({ villages: [village({ firedToday: 1 })] });
     expect(diffScene(old, next)).toContainEqual({ kind: 'kiln', projectId: 'p' });
+  });
+
+  it('日程结算成没做时砖坯只淡出，不产生烧窑提示', () => {
+    const old = scene({ villages: [village({ agenda: { phase: 'ended', later: 0, ended: 1, banners: [] }, firedToday: 0 })] });
+    const next = scene({ villages: [village({ firedToday: 0 })] });
+    expect(diffScene(old, next).filter((cue) => cue.kind === 'kiln')).toEqual([]);
+  });
+
+  it('跨过午夜计数归零时不产生烧窑提示', () => {
+    const old = scene({ villages: [village({ firedToday: 0 })] });
+    const next = scene({ date: '2026-10-05', villages: [village({ firedToday: 2 })] });
+    expect(diffScene(old, next).filter((cue) => cue.kind === 'kiln')).toEqual([]);
   });
 });
 

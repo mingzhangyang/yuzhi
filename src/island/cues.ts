@@ -62,7 +62,8 @@ export function diffScene(prev: Scene | null, next: Scene): Cue[] {
     if (!old) continue;
     if (village.houses > old.houses) cues.push({ kind: 'house-built', projectId: village.projectId });
     if (village.stage !== old.stage) cues.push({ kind: 'stage-changed', projectId: village.projectId, from: old.stage, to: village.stage });
-    if (prev.date === next.date && (old.agenda?.ended ?? 0) > (village.agenda?.ended ?? 0)) cues.push({ kind: 'kiln', projectId: village.projectId });
+    // 只有结算成「做了 / 做了一部分」才烧成砖；结算成「没做」时砖坯只是淡出。
+    if (prev.date === next.date && (village.firedToday ?? 0) > (old.firedToday ?? 0)) cues.push({ kind: 'kiln', projectId: village.projectId });
 
     const oldSoon = new Set((old.agenda?.soon ?? []).map((item) => item.eventId));
     for (const item of village.agenda?.soon ?? []) {

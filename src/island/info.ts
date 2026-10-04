@@ -30,6 +30,7 @@ export type InfoTarget =
       phase: 'later' | 'soon' | 'live' | 'ended';
       title?: string;
       until?: string;
+      start?: string;
       later: number;
       ended: number;
       banners: string[];
@@ -153,7 +154,7 @@ function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
     lines.push(`${t.title ? `「${t.title}」` : name}进行中${timeOf(t.until) ? `，到 ${timeOf(t.until)}` : ''}。`);
     lines.push('结算时确认做了，才会烧成一块砖。');
   } else if (t.phase === 'soon') {
-    lines.push(`${t.title ? `「${t.title}」` : name}即将开始${timeOf(t.until) ? `，${timeOf(t.until)}开始` : ''}。`);
+    lines.push(`${t.title ? `「${t.title}」` : name}即将开始${timeOf(t.start) ? `，${timeOf(t.start)} 开始` : ''}。`);
     lines.push('这是此刻的提醒，还没有产生任何后果。');
   } else if (t.phase === 'ended') {
     lines.push(`${name}今天有 ${t.ended} 场已经结束，等待晚间结算。`);

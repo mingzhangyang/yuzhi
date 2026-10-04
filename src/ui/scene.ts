@@ -46,6 +46,7 @@ function agendaViewOf(slot: AgendaSlot | undefined): AgendaView | undefined {
     phase,
     title: live?.title ?? soon?.title,
     until: live?.end,
+    start: live ? undefined : soon?.start,
     later: slot.later,
     ended: slot.ended,
     banners: slot.banners,
@@ -110,6 +111,7 @@ export function buildScene(
       extra: open.length - shown,
       openCount: open.length,
       agenda: agendaViewOf(agenda.slots.get(p.id)),
+      firedToday: agenda.fired.get(p.id) ?? 0,
     });
   }
   const g = granary(store.data, today);
