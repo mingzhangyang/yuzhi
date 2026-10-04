@@ -504,9 +504,9 @@ async function boot() {
     });
   } else setTimeout(maybePrompt, 1200);
 
-  // 方便调试与真实浏览器生命周期验收。session 暴露的是现有应用边界，
-  // 不另建测试专用权限状态。
-  (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A, session };
+  // 方便调试与真实浏览器验收（生命周期、地图点击）。session 暴露的是现有应用边界，
+  // 不另建测试专用权限状态；renderer / tracker 只供脚本读取坐标和当前视图。
+  (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A, session, renderer, tracker };
 }
 
 boot();

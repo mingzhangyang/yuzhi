@@ -7,7 +7,7 @@
  * 地块（连同小路和地面纹理）画进一张离屏缓存，只有视图或季节变化时才重画；
  * 树、房子、小人、海浪和天气每帧绘制。
  */
-import { BANNERS_MAX } from '../logic/config';
+import { BANNERS_MAX, DRIFT_BOTTLES_MAX } from '../logic/config';
 import type { Stage } from '../logic/config';
 import { CHORES } from '../types';
 import type { ISODate } from '../types';
@@ -565,13 +565,55 @@ export class IslandRenderer {
     return [x + tw * 0.36, y + tw * 0.03];
   }
 
+  /**
+   * 灯塔条幅挂在廊台外侧：塔身在山顶上方总是露出来，挂在旁边既不被前面的山挡住，
+   * 也不盖住塔身（塔身要留给「档案馆」的点击）。
+   */
   private lighthouseBannerAnchor(): [number, number] {
-    return this.iso(this.map.lighthouse.i + 0.05, this.map.lighthouse.j - 1.08);
+    const [x, y] = this.iso(this.map.lighthouse.i, this.map.lighthouse.j);
+    const tw = this.view.tw;
+    return [x + tw * 0.7, y - tw * 1.3];
+  }
+
+  private isOpenWater(i: number, j: number): boolean {
+    const m = this.map;
+    for (const [di, dj] of [[0, 0], [0.45, 0], [-0.45, 0], [0, 0.45], [0, -0.45]]) if (m.at(Math.round(i + di), Math.round(j + dj))) return false;
+    return true;
+  }
+
+  /**
+   * 漂流瓶的位置：沿栈桥两侧找确实是海面、又离「码头」标签足够远的地方，
+   * 避免瓶子画在陆地上或被标签盖住。地图不变时结果不变。
+   */
+  private driftBottleSpots(): [number, number][] {
+    const m = this.map;
+    const [di, dj] = m.pierDir;
+    const [pi, pj] = [-dj, di];
+    const tw = this.view.tw;
+    const [lx, ly0] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
+    const ly = ly0 + tw * 0.2;
+    const spots: [number, number][] = [];
+    for (const side of [1, -1]) {
+      for (const t of [0.8, 1.6, 2.4, 3.2]) {
+        for (const off of [1.1, 1.7]) {
+          const i = m.dock.i + di * t + side * pi * off;
+          const j = m.dock.j + dj * t + side * pj * off;
+          if (!this.isOpenWater(i, j)) continue;
+          const [x, y] = this.iso(i, j);
+          if (Math.hypot(x - lx, y - ly) < tw * 1.1) continue;
+          if (spots.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < tw * 0.45)) continue;
+          spots.push([x, y]);
+          break;
+        }
+      }
+    }
+    // 极端地形下找不到合适位置时，退回原来的固定排布
+    for (let k = spots.length; k < DRIFT_BOTTLES_MAX; k++) spots.push(this.iso(m.dock.i + 0.95 + k * 0.55, m.dock.j + m.pierLen + 0.75 + k * 0.28));
+    return spots;
   }
 
   private driftBottleAnchor(index: number): [number, number] {
-    const m = this.map;
-    return this.iso(m.dock.i + 0.95 + index * 0.55, m.dock.j + m.pierLen + 0.75 + index * 0.28);
+    return this.driftBottleSpots()[index] ?? this.driftBottleSpots()[0];
   }
 
   /** 漂流瓶在海上，不和陆地上的东西重叠，可以最先判断 */
@@ -609,7 +651,9 @@ export class IslandRenderer {
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
-      if (Math.hypot(pt.x - x, pt.y - y) < Math.max(20, this.view.tw * 0.72)) return { kind: 'agenda', target: '__lighthouse__' };
+      const [lx] = this.iso(this.map.lighthouse.i, this.map.lighthouse.j);
+      // 条幅区域，但塔身两侧 0.25 格留给档案馆
+      if (Math.abs(pt.x - (x - tw * 0.16)) < tw * 0.42 && Math.abs(pt.y - y) < tw * 0.2 && Math.abs(pt.x - lx) >= tw * 0.25) return { kind: 'agenda', target: '__lighthouse__' };
     }
     return null;
   }
