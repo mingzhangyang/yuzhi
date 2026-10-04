@@ -24,69 +24,78 @@ async function waitFor(fn, message, limit = timeout) {
   throw new Error(message + '; last=' + (last instanceof Error ? last.message : JSON.stringify(last)));
 }
 
-const created = await fetch(cdpBase + '/json/new?' + encodeURIComponent('about:blank'), { method: 'PUT' });
-if (!created.ok) throw new Error('cannot create CDP target: ' + created.status + ' ' + await created.text());
-const target = await created.json();
+async function createClient() {
+  const created = await fetch(cdpBase + '/json/new?' + encodeURIComponent('about:blank'), { method: 'PUT' });
+  if (!created.ok) throw new Error('cannot create CDP target: ' + created.status + ' ' + await created.text());
+  const target = await created.json();
 
-const socket = new WebSocket(target.webSocketDebuggerUrl);
-await new Promise((resolve, reject) => {
-  socket.addEventListener('open', resolve, { once: true });
-  socket.addEventListener('error', reject, { once: true });
-});
-
-let seq = 0;
-const pending = new Map();
-const listeners = new Map();
-
-socket.addEventListener('message', (event) => {
-  const message = JSON.parse(String(event.data));
-  if (message.id) {
-    const waiter = pending.get(message.id);
-    if (!waiter) return;
-    pending.delete(message.id);
-    if (message.error) waiter.reject(new Error(message.error.message));
-    else waiter.resolve(message.result);
-    return;
-  }
-  const handlers = listeners.get(message.method);
-  if (!handlers) return;
-  for (const handler of handlers) handler(message.params);
-});
-
-function on(method, handler) {
-  const handlers = listeners.get(method) ?? new Set();
-  handlers.add(handler);
-  listeners.set(method, handlers);
-  return () => handlers.delete(handler);
-}
-
-function send(method, params = {}) {
-  const id = ++seq;
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params }));
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
   });
-}
 
-async function evaluate(expression, awaitPromise = false) {
-  const result = await send('Runtime.evaluate', {
-    expression,
-    awaitPromise,
-    returnByValue: true,
+  let seq = 0;
+  const pending = new Map();
+  const listeners = new Map();
+
+  socket.addEventListener('message', (event) => {
+    const message = JSON.parse(String(event.data));
+    if (message.id) {
+      const waiter = pending.get(message.id);
+      if (!waiter) return;
+      pending.delete(message.id);
+      if (message.error) waiter.reject(new Error(message.error.message));
+      else waiter.resolve(message.result);
+      return;
+    }
+    const handlers = listeners.get(message.method);
+    if (!handlers) return;
+    for (const handler of handlers) handler(message.params);
   });
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
-  }
-  return result.result?.value;
+
+  const send = (method, params = {}) => {
+    const id = ++seq;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+  };
+
+  const evaluate = async (expression, awaitPromise = false) => {
+    const result = await send('Runtime.evaluate', {
+      expression,
+      awaitPromise,
+      returnByValue: true,
+    });
+    if (result.exceptionDetails) {
+      throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
+    }
+    return result.result?.value;
+  };
+
+  const on = (method, handler) => {
+    const handlers = listeners.get(method) ?? new Set();
+    handlers.add(handler);
+    listeners.set(method, handlers);
+    return () => handlers.delete(handler);
+  };
+
+  const close = async () => {
+    try { await send('Page.close'); } catch {}
+    socket.close();
+  };
+
+  await send('Page.enable');
+  await send('Runtime.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: "(() => { const key = (name) => 'yuzhi-bfcache:' + name + ':' + location.pathname; addEventListener('pagehide', (event) => sessionStorage.setItem(key('pagehide'), String(event.persisted))); addEventListener('pageshow', (event) => sessionStorage.setItem(key('pageshow'), String(event.persisted))); })();",
+  });
+
+  return { send, evaluate, on, close };
 }
 
-async function diagnostics(notRestored) {
-  return evaluate(
-    "({ href: location.href, pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })",
-  ).then((state) => ({ state, cdpNotRestored: notRestored }));
-}
-
-async function writeDurableProject(id, name) {
+async function writeDurableProject(evaluate, id, name) {
   const expression =
     "(async () => {" +
     "const id=" + JSON.stringify(id) + ";" +
@@ -110,25 +119,20 @@ async function writeDurableProject(id, name) {
   await evaluate(expression, true);
 }
 
-const notRestored = [];
-on('Page.backForwardCacheNotUsed', (params) => notRestored.push(params));
+async function runAttempt(attempt) {
+  const client = await createClient();
+  const { send, evaluate, on } = client;
+  const notRestored = [];
+  on('Page.backForwardCacheNotUsed', (params) => notRestored.push(params));
 
-try {
-  await send('Page.enable');
-  await send('Runtime.enable');
+  const diagnostics = async () => {
+    const state = await evaluate(
+      "({ href: location.href, pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })",
+    );
+    return { state, cdpNotRestored: notRestored };
+  };
 
-  await send('Page.addScriptToEvaluateOnNewDocument', {
-    source: "(() => { const key = (name) => 'yuzhi-bfcache:' + name + ':' + location.pathname; addEventListener('pagehide', (event) => sessionStorage.setItem(key('pagehide'), String(event.persisted))); addEventListener('pageshow', (event) => sessionStorage.setItem(key('pageshow'), String(event.persisted))); })();",
-  });
-
-  const version = await send('Browser.getVersion');
-  console.log('[bfcache-cdp] browser=' + version.product);
-
-  let restored = false;
-  let lastEviction;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const attemptNotRestoredStart = notRestored.length;
+  try {
     const durableId = 'bfcache-durable-' + attempt + '-' + Date.now();
     const durableName = 'BFCache durable refresh ' + attempt;
 
@@ -158,15 +162,14 @@ try {
 
     const pagehidePersisted = await evaluate("sessionStorage.getItem('yuzhi-bfcache:pagehide:/')");
     if (pagehidePersisted !== 'true') {
-      const evidence = await diagnostics(notRestored.slice(attemptNotRestoredStart));
       throw new Error(
-        'application did not enter BFCache on attempt ' + attempt + ': ' + JSON.stringify(evidence),
+        'application did not enter BFCache on attempt ' + attempt + ': ' + JSON.stringify(await diagnostics()),
       );
     }
 
     // The app document is frozen now. Mutate IndexedDB through the same-origin
     // secondary document; the BFCache document cannot see this in memory.
-    await writeDurableProject(durableId, durableName);
+    await writeDurableProject(evaluate, durableId, durableName);
 
     await send('Page.navigateToHistoryEntry', { entryId: appEntry.id });
     await waitFor(
@@ -181,24 +184,37 @@ try {
         6000,
       );
     } catch (error) {
-      // pagehide.persisted=true proves the application was eligible and was
-      // actually inserted into BFCache. Failure to restore after that point is
-      // a post-entry browser eviction, not an app eligibility failure. Retry a
-      // bounded number of times, but never convert pagehide.persisted=false or
-      // a product not-restored reason into success.
-      lastEviction = {
-        error: error instanceof Error ? error.message : String(error),
-        evidence: await diagnostics(notRestored.slice(attemptNotRestoredStart)),
+      // pagehide.persisted=true proves this target entered BFCache. If Chrome
+      // evicts it afterwards without reporting an app eligibility blocker,
+      // retry in a fresh target so the retry cannot inherit lifecycle state
+      // from the evicted document.
+      const evidence = await diagnostics();
+      if (notRestored.length > 0) {
+        throw new Error(
+          (error instanceof Error ? error.message : String(error)) +
+          '; browser reported not-restored reasons=' + JSON.stringify(evidence),
+        );
+      }
+      return {
+        status: 'evicted',
+        evidence: {
+          error: error instanceof Error ? error.message : String(error),
+          ...evidence,
+        },
       };
-      console.warn('[bfcache-cdp] cached page was evicted before restore on attempt ' + attempt + ': ' + JSON.stringify(lastEviction));
-      if (attempt < maxAttempts) continue;
-      break;
     }
 
-    await waitFor(
-      () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
-      'restored page did not resume writer duties',
-    );
+    try {
+      await waitFor(
+        () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
+        'restored page did not resume writer duties',
+      );
+    } catch (error) {
+      throw new Error(
+        (error instanceof Error ? error.message : String(error)) +
+        '; restored state=' + JSON.stringify(await diagnostics()),
+      );
+    }
 
     const evidence = await evaluate(
       "({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, durablePresent: window.yuzhi.store.data.projects.some((project) => project.id === " + JSON.stringify(durableId) + ") })",
@@ -211,22 +227,47 @@ try {
       'restored page did not observe the project written to IndexedDB while it was cached',
     );
 
+    return { status: 'restored', evidence };
+  } finally {
+    await client.close();
+  }
+}
+
+const versionClient = await createClient();
+try {
+  const version = await versionClient.send('Browser.getVersion');
+  console.log('[bfcache-cdp] browser=' + version.product);
+} finally {
+  await versionClient.close();
+}
+
+let restored = false;
+let lastEviction;
+
+for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  const result = await runAttempt(attempt);
+  if (result.status === 'restored') {
     console.log(
       '[bfcache-cdp] ok attempt=' + attempt +
-      ' pagehide.persisted=' + evidence.pagehidePersisted +
-      ' pageshow.persisted=' + evidence.pageshowPersisted +
+      ' pagehide.persisted=' + result.evidence.pagehidePersisted +
+      ' pageshow.persisted=' + result.evidence.pageshowPersisted +
       ' durableRefresh=true',
     );
     restored = true;
     break;
   }
 
-  if (!restored) {
-    throw new Error(
-      'Chrome evicted all ' + maxAttempts + ' pages after confirmed BFCache entry; last=' + JSON.stringify(lastEviction),
-    );
-  }
-} finally {
-  try { await send('Page.close'); } catch {}
-  socket.close();
+  lastEviction = result.evidence;
+  console.warn(
+    '[bfcache-cdp] cached page was evicted before restore on attempt ' + attempt +
+    ': ' + JSON.stringify(lastEviction),
+  );
+  if (attempt < maxAttempts) await sleep(100);
+}
+
+if (!restored) {
+  throw new Error(
+    'Chrome evicted all ' + maxAttempts + ' fresh BFCache targets after confirmed cache entry; last=' +
+    JSON.stringify(lastEviction),
+  );
 }
