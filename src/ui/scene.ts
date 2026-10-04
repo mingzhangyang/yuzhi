@@ -5,7 +5,7 @@ import { BRICKS_PER_HOUSE, MAX_WALKERS } from '../logic/config';
 import { granary, progressWeight } from '../logic/metrics';
 import { pendingDays } from '../logic/days';
 import { islandRings } from '../actions';
-import { addDays, dateOfStamp, seasonOf } from '../lib/date';
+import { addDays, dateOfStamp, localDate, seasonOf } from '../lib/date';
 
 /** 村落的屋顶颜色，按槽位固定 */
 export const ROOFS = ['#b5553d', '#4c6a84', '#3f7a86', '#8656a6', '#c08a2a', '#5d8a4a', '#a8622a', '#6b5ca5'];
@@ -26,9 +26,9 @@ export function houseCount(store: Store, projectId: string): number {
   return Math.min(10, 1 + Math.floor(bricks / BRICKS_PER_HOUSE));
 }
 
-export function buildScene(store: Store, selected: Selection | null, dusk: boolean): Scene {
-  const today = store.today();
-  const villages = store.villages();
+export function buildScene(store: Store, selected: Selection | null, dusk: boolean, now: Date = store.clock()): Scene {
+  const today = localDate(now);
+  const villages = store.villages(today);
   const views: VillageView[] = [];
   for (const p of store.activeProjects()) {
     const v = villages.get(p.id);
@@ -51,7 +51,9 @@ export function buildScene(store: Store, selected: Selection | null, dusk: boole
   const pending = pendingDays(store.data, today).length;
   return {
     season: seasonOf(today),
-    light: lightNow(store.clock(), dusk),
+    light: lightNow(now, dusk),
+    date: today,
+    hour: now.getHours() + now.getMinutes() / 60,
     villages: views,
     dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
     choresCount: store.data.events.filter((e) => e.projectId === CHORES && !e.allDay && dateOfStamp(e.start) > addDays(today, -7) && dateOfStamp(e.start) <= today).length,

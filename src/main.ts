@@ -1,7 +1,7 @@
 import './styles.css';
 import { exportBackup, parseBackup } from './db';
 import { AppSession } from './app-session';
-import { IslandRenderer, type Selection } from './island/render';
+import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
 import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
@@ -13,7 +13,8 @@ import { openCalendar, openClassify, openNew, openSettings, openWelcome, seedDem
 import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
-import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
+import { SEASONS, fmtDay, localDate, relDay, seasonOf, weekday } from './lib/date';
+import { FESTIVAL_NAMES, festivalsOf, weatherOf } from './island/ambience';
 import { unclassifiedGroups } from './logic/classify';
 import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
@@ -239,15 +240,75 @@ async function boot() {
     }
   };
 
-  renderer.onTap = (hit) => {
+  /* 景物说明：指针与键盘共享 renderer 里的同一套景物语义。 */
+  const infoBox = $('mapinfo');
+  const infoAnnounce = $('mapAnnounce');
+  const mapCanvas = $('map') as HTMLCanvasElement;
+  const hideInfo = () => {
+    if (infoBox.hidden) return;
+    infoBox.hidden = true;
+    setText(infoAnnounce, '');
+    renderer.clearFocus();
+  };
+  const showInspection = (r: SceneryInspection | null) => {
+    if (!r) return hideInfo();
+    const { info } = r;
+    setHTML(
+      infoBox,
+      `<div class="mi-head"><b>${esc(info.title)}</b>${info.sub ? `<small>${esc(info.sub)}</small>` : ''}<button type="button" class="mi-x" aria-label="关闭">×</button></div>` +
+        info.lines.map((l) => `<p>${esc(l)}</p>`).join(''),
+    );
+    infoBox.hidden = false;
+    // 播报通道永久留在可访问性树里；可视卡片可以自由 hidden/unhidden。
+    setText(infoAnnounce, [info.title, info.sub, ...info.lines].filter(Boolean).join('。'));
+    // 卡片放在景物上方；太靠上就放到下方，左右不超出地图
+    const wrap = $('mapwrap');
+    const W = wrap.clientWidth;
+    const bw = infoBox.offsetWidth;
+    const bh = infoBox.offsetHeight;
+    const below = r.y - bh - 12 < 8;
+    infoBox.classList.toggle('below', below);
+    const left = Math.min(Math.max(8, r.x - bw / 2), W - bw - 8);
+    infoBox.style.left = `${left}px`;
+    infoBox.style.top = `${below ? Math.min(r.y + 14, wrap.clientHeight - bh - 8) : r.y - bh - 12}px`;
+    infoBox.style.setProperty('--arrow', `${Math.min(Math.max(14, r.x - left), bw - 14)}px`);
+    infoBox.querySelector<HTMLButtonElement>('.mi-x')!.onclick = hideInfo;
+  };
+  const showInfo = (pt: { x: number; y: number }) => showInspection(renderer.inspect(pt));
+
+  mapCanvas.addEventListener('pointerdown', hideInfo);
+  mapCanvas.addEventListener('keydown', (e) => {
+    let step: 1 | -1 | null = null;
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowDown') step = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') step = -1;
+    if (step) {
+      e.preventDefault();
+      $('tip').style.opacity = '0';
+      showInspection(renderer.browseScenery(step));
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideInfo();
+  });
+
+  renderer.onTap = (hit, pt) => {
     $('tip').style.opacity = '0';
-    if (!hit) return;
+    if (!hit) return showInfo(pt);
     if (hit.kind === 'project' || hit.kind === 'task') tracker.open({ kind: hit.kind, id: hit.id });
     else tracker.open({ kind: hit.kind });
   };
-  $('zin').onclick = () => renderer.zoomBy(1.35);
-  $('zout').onclick = () => renderer.zoomBy(1 / 1.35);
-  $('zfit').onclick = () => renderer.resetView();
+  $('zin').onclick = () => {
+    hideInfo();
+    renderer.zoomBy(1.35);
+  };
+  $('zout').onclick = () => {
+    hideInfo();
+    renderer.zoomBy(1 / 1.35);
+  };
+  $('zfit').onclick = () => {
+    hideInfo();
+    renderer.resetView();
+  };
 
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
@@ -261,11 +322,12 @@ async function boot() {
         update();
       }, 30);
     }
-    const today = store.today();
+    // 地图场景和顶部日期/天气共用同一个时间快照，避免午夜边界出现互相矛盾的状态。
     const now = store.clock();
+    const today = localDate(now);
     updateStats(store);
     tracker.render();
-    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk));
+    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now));
 
     const pend = pendingDays(store.data, today);
     const light = lightNow(now, dusk);
@@ -274,7 +336,9 @@ async function boot() {
     setHTML(sb, `${light === 'day' ? '结算' : '晚间结算'}${pend.length ? `<span class="dot">${pend.length}</span>` : ''}`);
     const wb = $('weather');
     const lt = { day: '白天', dusk: '黄昏', night: '夜里' }[light];
-    setText(wb, `${SEASONS[seasonOf(today)]}季 · ${lt}${pend.length ? ` · 海雾 ${pend.length} 天` : ''}`);
+    const sky = { clear: '晴', cloudy: '多云', rain: '小雨', snow: '小雪' }[weatherOf(today, seasonOf(today))];
+    const fest = festivalsOf(today).map((f) => ' · ' + FESTIVAL_NAMES[f]).join('');
+    setText(wb, `${SEASONS[seasonOf(today)]}季 · ${lt} · ${sky}${fest}${pend.length ? ` · 海雾 ${pend.length} 天` : ''}`);
     wb.classList.toggle('dusk', light !== 'day' || pend.length > 0);
     $('fogbar').hidden = !pend.length;
     if (pend.length) setHTML($('fogTxt'), `<b>海雾笼罩着小岛</b><span>${pend.map((d) => esc(relDay(d, today))).join('、')}还没结算。补上记录，雾就散了；超过 3 天会自动归档为「未记录」。</span>`);
