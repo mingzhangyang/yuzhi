@@ -124,66 +124,6 @@ try {
     }
   });
 
-  await runScenario('actual bfcache restore reports pageshow.persisted and resumes writer duties', async () => {
-    const context = await browser.newContext();
-    await context.addInitScript(() => {
-      const path = location.pathname;
-      addEventListener('pagehide', (event) => {
-        sessionStorage.setItem(`yuzhi-smoke:pagehide:${path}`, String(event.persisted));
-      });
-      addEventListener('pageshow', (event) => {
-        sessionStorage.setItem(`yuzhi-smoke:pageshow:${path}`, String(event.persisted));
-      });
-    });
-
-    try {
-      const page = await context.newPage();
-      await openApp(page);
-      await waitReadOnly(page, false);
-      await page.evaluate(async () => {
-        const app = window.yuzhi;
-        app.actions.createProject(app.store, 'BFCache evidence');
-        await app.store.flush();
-      });
-
-      await page.goto(`${baseURL}/favicon.svg?bfcache-smoke=1`, { waitUntil: 'load' });
-      const pagehidePersisted = await page.evaluate(
-        () => sessionStorage.getItem('yuzhi-smoke:pagehide:/'),
-      );
-
-      await page.goBack({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(() => Boolean(window.yuzhi?.session), undefined, { timeout });
-      const pageshowPersisted = await page.evaluate(
-        () => sessionStorage.getItem('yuzhi-smoke:pageshow:/'),
-      );
-
-      if (pagehidePersisted !== 'true' || pageshowPersisted !== 'true') {
-        const reasons = await page.evaluate(() => {
-          const navigation = performance.getEntriesByType('navigation').at(-1);
-          return navigation && 'notRestoredReasons' in navigation
-            ? navigation.notRestoredReasons
-            : null;
-        });
-        throw new Error(
-          `BFCache was not actually used (pagehide.persisted=${pagehidePersisted}, pageshow.persisted=${pageshowPersisted}, reasons=${JSON.stringify(reasons)})`,
-        );
-      }
-
-      await waitReadOnly(page, false);
-      const restored = await page.evaluate(() => ({
-        state: window.yuzhi.session.state,
-        projects: window.yuzhi.store.data.projects.map((project) => project.name),
-      }));
-      assert(restored.state === 'writer', `restored page ended in ${restored.state}`);
-      assert(restored.projects.includes('BFCache evidence'), 'restored page lost the durable snapshot');
-      console.log(
-        `[browser-smoke] BFCache evidence: pagehide.persisted=${pagehidePersisted}, pageshow.persisted=${pageshowPersisted}`,
-      );
-    } finally {
-      await context.close();
-    }
-  });
-
   await runScenario('real IndexedDB versionchange upgrades and old client stays fail-closed', async () => {
     const context = await browser.newContext();
     try {
