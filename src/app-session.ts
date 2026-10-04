@@ -1,13 +1,25 @@
-import { IdbPersistence, type StorageUnavailableError } from './db';
+import {
+  IdbPersistence,
+  type Persistence,
+  type StorageUnavailableError,
+} from './db';
 import { initializePersistence } from './persistence-startup';
 import { SingleWriterCoordinator, type SingleWriterOptions, type WriterState } from './single-writer';
 import { Store } from './store';
 
 type CoordinatorOptions = Omit<SingleWriterOptions, 'onStateChange' | 'onPeerCommit' | 'onVersionChange'>;
 
+export interface SessionPersistence extends Persistence {
+  setWriteAccess(value: boolean): Promise<void>;
+  reopen(writeAccess?: boolean): Promise<void>;
+  close(): Promise<void>;
+}
+
 export interface AppSessionOptions {
   databaseName?: string;
   coordinator?: CoordinatorOptions;
+  /** Test seam for lifecycle ordering; production uses IdbPersistence. */
+  persistenceFactory?: (writeAccess: boolean, onVersionChange: () => void) => SessionPersistence;
 }
 
 /**
@@ -20,12 +32,14 @@ export interface AppSessionOptions {
  */
 export class AppSession {
   private readonly tabs: SingleWriterCoordinator;
-  private idb?: IdbPersistence;
+  private idb?: SessionPersistence;
   private currentStore?: Store;
   private readonly stateListeners = new Set<(state: WriterState) => void>();
   private writerActivation?: () => void;
   private readerRefresh: Promise<void> = Promise.resolve();
   private pageSuspension?: Promise<void>;
+  private closing = false;
+  private closeTask?: Promise<void>;
 
   private constructor(private readonly options: AppSessionOptions) {
     this.tabs = new SingleWriterCoordinator({
@@ -67,9 +81,10 @@ export class AppSession {
   private async initialize(): Promise<StorageUnavailableError | undefined> {
     await this.tabs.acquire();
 
-    const idb = new IdbPersistence(this.options.databaseName, this.tabs.isWritable, {
-      onVersionChange: () => { void this.tabs.notifyVersionChange(); },
-    });
+    const notifyVersionChange = () => { void this.tabs.notifyVersionChange(); };
+    const idb = this.options.persistenceFactory
+      ? this.options.persistenceFactory(this.tabs.isWritable, notifyVersionChange)
+      : new IdbPersistence(this.options.databaseName, this.tabs.isWritable, { onVersionChange: notifyVersionChange });
     this.idb = idb;
 
     const initialized = await initializePersistence(idb, () => this.tabs.runAgainstStableState(async (writable) => {
@@ -128,12 +143,13 @@ export class AppSession {
    * started in an older reader generation from overwriting a newer lifecycle.
    */
   async refreshReader(): Promise<void> {
+    if (this.closing) return;
     const task = this.readerRefresh
       .catch(() => {})
       .then(async () => {
         const store = this.currentStore;
         const current = this.idb;
-        if (!store || !current || this.tabs.state !== 'reader') return;
+        if (this.closing || !store || !current || this.tabs.state !== 'reader') return;
         await this.tabs.runIfCurrent(() => current.load(), (fresh) => store.reload(fresh));
       })
       .catch((error) => this.report(error));
@@ -156,18 +172,25 @@ export class AppSession {
   }
 
   async requestTakeover(): Promise<boolean> {
-    if (!this.tabs.supportsWriterLock) return false;
+    if (this.closing || this.tabs.state === 'closed' || !this.tabs.supportsWriterLock) return false;
 
     try {
       await this.tabs.whenStable();
+      if (this.closing || this.tabs.state === 'closed') return false;
+
       const acquired = await this.tabs.takeOver(this.idb
         ? async () => {
           // Finish or invalidate any reader refresh before reopening writable.
           await this.readerRefresh.catch(() => {});
+          if (this.closing || this.tabs.state !== 'preparing') return;
+
           const current = this.idb;
           if (!current) return;
           await current.setWriteAccess(true);
+          if (this.closing || this.tabs.state !== 'preparing') return;
+
           const fresh = await current.load();
+          if (this.closing || this.tabs.state !== 'preparing') return;
           this.store.reload(fresh);
         }
         : undefined);
@@ -175,7 +198,10 @@ export class AppSession {
     } catch (error) {
       await this.tabs.release().catch(() => {});
       const current = this.idb;
-      if (current) {
+      // A failed takeover may restore reader persistence only while the
+      // session is still live. The check and reopen enqueue are deliberately
+      // adjacent: once final close marks closing, no later recovery may reopen.
+      if (current && !this.closing && this.tabs.state !== 'closed') {
         try { await current.reopen(false); } catch (reopenError) { this.report(reopenError); }
       }
       throw error;
@@ -211,6 +237,7 @@ export class AppSession {
    * was frozen; takeover then performs its own write-capable refresh as well.
    */
   async resumeFromCache(): Promise<boolean> {
+    if (this.closing) return false;
     const suspension = this.pageSuspension;
     if (suspension) await suspension.catch(() => {});
     this.pageSuspension = undefined;
@@ -240,14 +267,23 @@ export class AppSession {
     }
   }
 
-  async close(): Promise<void> {
-    await this.tabs.close(async () => {
+  close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
+
+    // Terminal state is published before coordinator.close() can yield, so
+    // takeover failure recovery cannot enqueue a persistence reopen behind the
+    // final close.
+    this.closing = true;
+    const task = this.tabs.close(async () => {
       const store = this.currentStore;
       if (store) {
         try { await store.flush(); } catch (error) { this.report(error); }
       }
       await this.idb?.close();
     });
+    this.closeTask = task;
+    task.catch(() => {});
+    return task;
   }
 
   /**

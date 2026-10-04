@@ -318,9 +318,13 @@ export class SingleWriterCoordinator {
     this.closed = true;
     this.setState('closed');
     try {
-      // Closing can overlap a bfcache/versionchange drain. Do not release its
-      // lease or close its channel before those already accepted writes finish.
+      // Final close is a terminal lifecycle barrier. Besides an existing
+      // demotion, it must also wait for acquisition preparation that already
+      // entered the lease before shutdown revoked the state. Otherwise caller
+      // cleanup could close persistence first and the stale preparation could
+      // reopen it afterwards.
       await this.demotionTask?.catch(() => {});
+      await this.acquireTask?.catch(() => {});
       await prepare?.();
     } finally {
       await this.releaseLease();

@@ -1,9 +1,9 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AppSession } from '../src/app-session';
-import { emptyData } from '../src/db';
+import { AppSession, type SessionPersistence } from '../src/app-session';
+import { emptyData, type FactSequenceUpdate, type PersistenceWrite } from '../src/db';
 import { Store } from '../src/store';
-import type { ChannelMessage } from '../src/single-writer';
+import { SingleWriterCoordinator, type ChannelMessage } from '../src/single-writer';
 
 class FakeChannel {
   static peers = new Set<FakeChannel>();
@@ -48,6 +48,57 @@ const channelFactory = (name: string) => {
   void name;
   return new FakeChannel();
 };
+
+class ControlledPersistence implements SessionPersistence {
+  readonly operations: string[] = [];
+  private writeAccess: boolean;
+  private promotionGate?: Promise<void>;
+  private finishPromotion?: () => void;
+  private markPromotionStarted?: () => void;
+  promotionStarted: Promise<void> = Promise.resolve();
+
+  constructor(writeAccess: boolean) {
+    this.writeAccess = writeAccess;
+  }
+
+  blockNextPromotion() {
+    this.promotionStarted = new Promise<void>((resolve) => { this.markPromotionStarted = resolve; });
+    this.promotionGate = new Promise<void>((resolve) => { this.finishPromotion = resolve; });
+    return () => this.finishPromotion?.();
+  }
+
+  async load() {
+    this.operations.push('load');
+    return emptyData();
+  }
+
+  async batch(_writes: PersistenceWrite[]): Promise<FactSequenceUpdate[]> {
+    if (!this.writeAccess) throw new Error('只读');
+    return [];
+  }
+
+  async setWriteAccess(value: boolean) {
+    this.operations.push(`access:${value}:start`);
+    if (value && this.promotionGate) {
+      this.markPromotionStarted?.();
+      await this.promotionGate;
+      this.promotionGate = undefined;
+      this.finishPromotion = undefined;
+      this.markPromotionStarted = undefined;
+    }
+    this.writeAccess = value;
+    this.operations.push(`access:${value}:end`);
+  }
+
+  async reopen(writeAccess = this.writeAccess) {
+    this.operations.push(`reopen:${writeAccess}`);
+    this.writeAccess = writeAccess;
+  }
+
+  async close() {
+    this.operations.push('close');
+  }
+}
 
 beforeEach(() => {
   FakeChannel.peers.clear();
@@ -134,6 +185,49 @@ describe('AppSession', () => {
 
     await writer.close();
     await reader.close();
+  });
+
+  it('close 与 takeover preparation 竞态时，final close 之后不会再重开持久层', async () => {
+    const locks = new FakeLocks();
+    const blocker = new SingleWriterCoordinator({
+      ownerId: 'session-close-blocker',
+      locks,
+      channelFactory,
+    });
+    expect(await blocker.acquire()).toBe(true);
+
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'session-close-reader', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+    expect(session.state).toBe('reader');
+
+    await blocker.release();
+    persistence.operations.length = 0;
+    const finishPromotion = persistence.blockNextPromotion();
+
+    const takeover = session.requestTakeover();
+    await persistence.promotionStarted;
+    expect(session.state).toBe('preparing');
+
+    const closing = session.close();
+    expect(session.state).toBe('closed');
+
+    finishPromotion();
+    expect(await takeover).toBe(false);
+    await closing;
+
+    const promotionEnd = persistence.operations.indexOf('access:true:end');
+    const closeIndex = persistence.operations.indexOf('close');
+    expect(promotionEnd).toBeGreaterThanOrEqual(0);
+    expect(closeIndex).toBeGreaterThan(promotionEnd);
+    expect(persistence.operations.some((operation) => operation.startsWith('reopen:'))).toBe(false);
+
+    await blocker.close();
   });
 
   it('Store.reload 在写队列未静默时拒绝切换快照', async () => {
