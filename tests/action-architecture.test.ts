@@ -1,3 +1,4 @@
+import { parseAst } from 'vite';
 import { describe, expect, it } from 'vitest';
 import barrel from '../src/actions.ts?raw';
 
@@ -71,47 +72,21 @@ function withoutComments(source: string): string {
   return out;
 }
 
-/**
- * The barrel deliberately uses semicolon-terminated module declarations.
- * Splitting only on semicolons outside strings means implementation statements
- * cannot hide behind a particular function/variable spelling.
- */
-function topLevelStatements(source: string): string[] {
-  const code = withoutComments(source);
-  const statements: string[] = [];
-  let start = 0;
-  let quote: "'" | '"' | '`' | undefined;
+type Program = ReturnType<typeof parseAst>;
+type Statement = Program['body'][number];
 
-  for (let i = 0; i < code.length; i++) {
-    const char = code[i];
-
-    if (quote) {
-      if (char === '\\') i++;
-      else if (char === quote) quote = undefined;
-      continue;
-    }
-
-    if (char === "'" || char === '"' || char === '`') {
-      quote = char;
-      continue;
-    }
-
-    if (char === ';') {
-      const statement = code.slice(start, i).trim();
-      if (statement) statements.push(statement);
-      start = i + 1;
-    }
-  }
-
-  const tail = code.slice(start).trim();
-  if (tail) statements.push(tail);
-  return statements;
+function moduleSource(statement: Statement): string | undefined {
+  if (!('source' in statement)) return undefined;
+  const source = statement.source;
+  if (!source || typeof source !== 'object' || !('value' in source)) return undefined;
+  return typeof source.value === 'string' ? source.value : undefined;
 }
 
-function isDomainReExport(statement: string): boolean {
-  const named = /^export\s+(?:type\s+)?\{[\s\S]*\}\s+from\s+(['"])\.\/actions\/[^'"]+\1$/;
-  const star = /^export\s+\*\s+(?:as\s+[A-Za-z_$][\w$]*\s+)?from\s+(['"])\.\/actions\/[^'"]+\1$/;
-  return named.test(statement) || star.test(statement);
+function isDomainReExport(statement: Statement): boolean {
+  return (
+    (statement.type === 'ExportNamedDeclaration' || statement.type === 'ExportAllDeclaration')
+    && moduleSource(statement)?.startsWith('./actions/') === true
+  );
 }
 
 function publicBarrelReferences(source: string): string[] {
@@ -138,18 +113,23 @@ describe('action architecture boundaries', () => {
   });
 
   it('the public action module contains only top-level domain re-exports', () => {
-    const statements = topLevelStatements(barrel);
-    expect(statements.length).toBeGreaterThan(0);
-    expect(statements.filter((statement) => !isDomainReExport(statement))).toEqual([]);
+    const program = parseAst(barrel, null, 'actions.ts');
+    expect(program.body.length).toBeGreaterThan(0);
+    expect(program.body.filter((statement) => !isDomainReExport(statement))).toEqual([]);
 
-    // Prove implementation shapes cannot pass merely because their spelling
-    // differs from a blacklist.
-    expect(
-      topLevelStatements(
-        "export { createProject } from './actions/projects'; const createProjectImpl = () => 1;",
-      ).filter((statement) => !isDomainReExport(statement)),
-    ).toEqual(['const createProjectImpl = () => 1']);
+    const semicolonlessBypass = parseAst(
+      "export { a } from './actions/a'\nconst hidden = sideEffect()\nexport { b } from './actions/b';",
+      null,
+      'probe.ts',
+    );
+    expect(semicolonlessBypass.body.map((statement) => statement.type)).toEqual([
+      'ExportNamedDeclaration',
+      'VariableDeclaration',
+      'ExportNamedDeclaration',
+    ]);
+    expect(semicolonlessBypass.body.filter((statement) => !isDomainReExport(statement))).toHaveLength(1);
 
-    expect(isDomainReExport("export const createProject = () => 1")).toBe(false);
+    const executableExport = parseAst("export const createProject = () => 1", null, 'probe.ts');
+    expect(executableExport.body.filter((statement) => !isDomainReExport(statement))).toHaveLength(1);
   });
 });
