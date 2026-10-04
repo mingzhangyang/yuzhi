@@ -1,20 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import barrel from '../src/actions.ts?raw';
-import calendarSource from '../src/actions/calendar.ts?raw';
-import completionSource from '../src/actions/completion.ts?raw';
-import projectsSource from '../src/actions/projects.ts?raw';
-import settlementSource from '../src/actions/settlement.ts?raw';
-import sharedSource from '../src/actions/shared.ts?raw';
-import tasksSource from '../src/actions/tasks.ts?raw';
 
-const domainSources = [
-  ['calendar.ts', calendarSource],
-  ['completion.ts', completionSource],
-  ['projects.ts', projectsSource],
-  ['settlement.ts', settlementSource],
-  ['shared.ts', sharedSource],
-  ['tasks.ts', tasksSource],
-] as const;
+const domainSources = import.meta.glob('../src/actions/*.ts', {
+  eager: true,
+  import: 'default',
+  query: '?raw',
+}) as Record<string, string>;
 
 /**
  * Remove comments without touching quoted module specifiers. This keeps the
@@ -131,7 +122,10 @@ function publicBarrelReferences(source: string): string[] {
 
 describe('action architecture boundaries', () => {
   it('domain modules never depend on the public action barrel, with or without .ts', () => {
-    const violations = domainSources.flatMap(([fileName, source]) =>
+    const files = Object.entries(domainSources);
+    expect(files.length).toBeGreaterThan(0);
+
+    const violations = files.flatMap(([fileName, source]) =>
       publicBarrelReferences(source).map((specifier) => `${fileName}: ${specifier}`),
     );
 
