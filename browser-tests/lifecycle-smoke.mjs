@@ -142,6 +142,7 @@ try {
           db.close();
           resolve(version);
         };
+        request.onblocked = () => reject(new Error('schema upgrade blocked by an old IndexedDB connection'));
         request.onerror = () => reject(request.error ?? new Error('schema upgrade failed'));
       }));
       assert(upgradedVersion === 9, `external schema upgrade reached ${upgradedVersion}, expected 9`);
