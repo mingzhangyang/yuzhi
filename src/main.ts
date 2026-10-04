@@ -105,7 +105,7 @@ async function boot() {
   appStore = store;
 
   const syncReadOnlyUi = (readOnly: boolean) => {
-    for (const id of ['newBtn', 'settleBtn', 'fogGo']) {
+    for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
       const button = document.getElementById(id) as HTMLButtonElement | null;
       if (button) button.disabled = readOnly;
     }

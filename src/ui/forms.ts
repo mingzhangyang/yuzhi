@@ -71,6 +71,11 @@ export function openNew(store: Store, kind: 'task' | 'project' = 'task', onProje
 
 /** 日历：订阅链接、上传文件、归类规则 */
 export function openCalendar(store: Store, onImported: () => void) {
+  // 日历对话框里的每个操作都会写入；只读标签页不打开半绑定的对话框
+  if (store.isReadOnly) {
+    toast('此页当前只读。请先接管写权限，再修改小岛。', true);
+    return;
+  }
   const render = () => {
     const srcs = store.data.sources;
     const rules = store.data.rules;
