@@ -40,15 +40,45 @@ jobs:
       - name: Install browser smoke driver
         run: npm install --no-save --package-lock=false playwright@1.63.0
 
-      - name: Run real Chrome lifecycle smoke
+      - name: Run real Chrome lifecycle validation
         env:
           BASE_URL: http://127.0.0.1:4173
+          CDP_URL: http://127.0.0.1:9222
           PW_CHANNEL: chrome
         run: |
+          set -eu
+
+          preview_pid=
+          chrome_pid=
+
+          cleanup() {
+            status=$?
+            if [ -n "$chrome_pid" ]; then
+              kill "$chrome_pid" 2>/dev/null || true
+              wait "$chrome_pid" 2>/dev/null || true
+            fi
+            if [ -n "$preview_pid" ]; then
+              kill "$preview_pid" 2>/dev/null || true
+              wait "$preview_pid" 2>/dev/null || true
+            fi
+            echo "== preview log =="
+            cat /tmp/yuzhi-preview.log 2>/dev/null || true
+            echo "== cdp chrome log =="
+            cat /tmp/yuzhi-cdp.log 2>/dev/null || true
+            exit "$status"
+          }
+          trap cleanup EXIT INT TERM
+
           google-chrome --version
-          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/yuzhi-preview.log 2>&1 &
+
+          # Start Vite directly so the recorded PID owns the actual server
+          # process instead of an npm wrapper that can leave a child behind.
+          node ./node_modules/vite/bin/vite.js preview \
+            --host 127.0.0.1 \
+            --port 4173 \
+            > /tmp/yuzhi-preview.log 2>&1 &
           preview_pid=$!
-          trap 'kill "$preview_pid" 2>/dev/null || true; cat /tmp/yuzhi-preview.log' EXIT
+
           for i in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
               break
@@ -56,13 +86,9 @@ jobs:
             sleep 0.25
           done
           curl --fail --silent http://127.0.0.1:4173/ > /dev/null
+
           node browser-tests/lifecycle-smoke.mjs
 
-      - name: Verify BFCache with direct Chrome DevTools Protocol
-        env:
-          BASE_URL: http://127.0.0.1:4173
-          CDP_URL: http://127.0.0.1:9222
-        run: |
           rm -rf /tmp/yuzhi-cdp-profile
           google-chrome \
             --headless=new \
@@ -73,7 +99,7 @@ jobs:
             --user-data-dir=/tmp/yuzhi-cdp-profile \
             about:blank > /tmp/yuzhi-cdp.log 2>&1 &
           chrome_pid=$!
-          trap 'kill "$chrome_pid" 2>/dev/null || true; cat /tmp/yuzhi-cdp.log' EXIT
+
           for i in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:9222/json/version > /dev/null; then
               break
@@ -81,4 +107,5 @@ jobs:
             sleep 0.25
           done
           curl --fail --silent http://127.0.0.1:9222/json/version > /dev/null
+
           node browser-tests/bfcache-cdp.mjs
