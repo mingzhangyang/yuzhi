@@ -45,8 +45,9 @@ async function boot() {
         .catch((error) => appStore?.onError(error));
     },
     onVersionChange: () => {
-      // A versionchange closes the current connection. Stop new actions first,
-      // release the writer lease, then reopen as a reader after the upgrader.
+      // A versionchange means this connection is blocking another upgrade.
+      // Stop new actions immediately; the recovery path drains writes, closes
+      // and refreshes the reader snapshot before releasing the writer lease.
       appStore?.setReadOnly(true);
       const notice = document.querySelector<HTMLElement>('#tabNotice');
       if (notice) {

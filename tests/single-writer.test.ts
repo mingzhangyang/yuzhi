@@ -152,6 +152,10 @@ describe('read-only persistence', () => {
 
   it('快速 write -> read 切换按请求顺序串行，不会遗留可写连接', async () => {
     const name = `yuzhi-access-flip-${Date.now()}-${Math.random()}`;
+    const seed = new IdbPersistence(name, true);
+    await seed.load();
+    await seed.close();
+
     const persistence = new IdbPersistence(name, false);
     await persistence.load();
 
