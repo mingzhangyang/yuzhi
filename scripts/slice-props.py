@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -96,10 +98,8 @@ def clean(rgba: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return out
 
 
-def main() -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for old in OUT_DIR.glob('*.webp'):
-        old.unlink()
+def render(staging: Path) -> str:
+    """把全部道具写进 staging 目录，返回 prop-sprites.ts 的内容。"""
     meta: list[str] = []
     for file, (category, ids) in SHEETS.items():
         rgba = np.array(Image.open(SRC_DIR / file).convert('RGBA'))
@@ -111,7 +111,7 @@ def main() -> None:
             h = round(crop.height * SCALE)
             img = Image.new('RGBA', (w + PAD * 2, h + PAD * 2))
             img.paste(crop.resize((w, h), Image.LANCZOS), (PAD, PAD))
-            img.save(OUT_DIR / f'{sprite_id}.webp', quality=86, alpha_quality=100, method=6)
+            img.save(staging / f'{sprite_id}.webp', quality=86, alpha_quality=100, method=6)
             # 锚点：内容底边中点（不含透明留白）
             ax = (PAD + w / 2) / img.width
             ay = (PAD + h) / img.height
@@ -120,7 +120,7 @@ def main() -> None:
                 f'anchorX: {ax:.3f}, anchorY: {ay:.3f} }},'
             )
 
-    META_FILE.write_text(
+    return (
         '// 由 scripts/slice-props.py 生成，请勿手动修改。\n'
         "export type PropCategory = 'harbor' | 'nature';\n\n"
         'export interface PropSpriteMeta {\n'
@@ -132,10 +132,35 @@ def main() -> None:
         '}\n\n'
         'export const PROP_SPRITES = {\n' + '\n'.join(meta) + '\n'
         '} as const satisfies Record<string, PropSpriteMeta>;\n\n'
-        'export type PropId = keyof typeof PROP_SPRITES;\n',
-        encoding='utf-8',
+        'export type PropId = keyof typeof PROP_SPRITES;\n'
     )
-    print(f'wrote {len(meta)} sprites to {OUT_DIR.relative_to(ROOT)}')
+
+
+def main() -> None:
+    # 先在同一文件系统的临时目录里生成全部结果；任何一张原稿出错都不会动到现有素材
+    OUT_DIR.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=OUT_DIR.parent, prefix='.props-') as tmp:
+        staging = Path(tmp) / 'props'
+        staging.mkdir()
+        meta_text = render(staging)
+        count = len(list(staging.glob('*.webp')))
+        # 元数据也先写到目标旁边的临时文件，换目录后用 os.replace 原子落位
+        meta_tmp = META_FILE.with_name(f'.{META_FILE.name}.tmp')
+        meta_tmp.write_text(meta_text, encoding='utf-8')
+
+        # 全部成功后再替换：旧目录先挪到备份位置，新目录就位后再丢弃备份
+        backup = Path(tmp) / 'previous'
+        try:
+            if OUT_DIR.exists():
+                OUT_DIR.rename(backup)
+            staging.rename(OUT_DIR)
+        except OSError:
+            if backup.exists() and not OUT_DIR.exists():
+                backup.rename(OUT_DIR)
+            meta_tmp.unlink(missing_ok=True)
+            raise
+        os.replace(meta_tmp, META_FILE)
+    print(f'wrote {count} sprites to {OUT_DIR.relative_to(ROOT)}')
 
 
 if __name__ == '__main__':
