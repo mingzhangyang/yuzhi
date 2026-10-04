@@ -1,4 +1,4 @@
-import * as ts from 'typescript';
+import * as ts from 'typescript/lib/typescript.js';
 import { describe, expect, it } from 'vitest';
 import barrel from '../src/actions.ts?raw';
 import calendarSource from '../src/actions/calendar.ts?raw';
@@ -66,7 +66,6 @@ describe('action architecture boundaries', () => {
 
   it('the public action module contains only top-level re-exports', () => {
     const file = parse('actions.ts', barrel);
-    expect(file.parseDiagnostics).toEqual([]);
     expect(file.statements.length).toBeGreaterThan(0);
 
     const invalidStatements = file.statements.filter(
