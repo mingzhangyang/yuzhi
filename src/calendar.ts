@@ -41,7 +41,7 @@ export async function syncSource(store: Store, id: string): Promise<number> {
     if (store.isReadOnly) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     const current = store.data.sources.find((s) => s.id === id);
-    if (current) store.put('sources', { ...current, lastError: msg });
+    if (current?.icsUrl === src.icsUrl) store.put('sources', { ...current, lastError: msg });
     throw e;
   }
 }
