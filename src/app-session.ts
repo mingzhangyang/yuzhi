@@ -38,7 +38,9 @@ export class AppSession {
   private writerActivation?: () => void;
   private readerRefresh: Promise<void> = Promise.resolve();
   private pageSuspension?: Promise<void>;
-  private resumeTask?: Promise<boolean>;
+  private resumeTask?: { generation: number; promise: Promise<boolean> };
+  private lifecycleGeneration = 0;
+  private lifecycleTarget: 'active' | 'suspended' = 'active';
   private closing = false;
   private closeTask?: Promise<void>;
 
@@ -172,37 +174,43 @@ export class AppSession {
     }
   }
 
-  async requestTakeover(): Promise<boolean> {
-    if (this.closing || !this.tabs.supportsWriterLock) return false;
+  private isActiveLifecycle(generation: number) {
+    return !this.closing
+      && this.lifecycleTarget === 'active'
+      && this.lifecycleGeneration === generation;
+  }
+
+  async requestTakeover(expectedGeneration = this.lifecycleGeneration): Promise<boolean> {
+    if (!this.isActiveLifecycle(expectedGeneration) || !this.tabs.supportsWriterLock) return false;
 
     try {
       await this.tabs.whenStable();
-      if (this.closing) return false;
+      if (!this.isActiveLifecycle(expectedGeneration)) return false;
 
       const acquired = await this.tabs.takeOver(this.idb
         ? async () => {
           // Finish or invalidate any reader refresh before reopening writable.
           await this.readerRefresh.catch(() => {});
-          if (this.closing || this.tabs.state !== 'preparing') return;
+          if (!this.isActiveLifecycle(expectedGeneration) || this.tabs.state !== 'preparing') return;
 
           const current = this.idb;
           if (!current) return;
           await current.setWriteAccess(true);
-          if (this.closing || this.tabs.state !== 'preparing') return;
+          if (!this.isActiveLifecycle(expectedGeneration) || this.tabs.state !== 'preparing') return;
 
           const fresh = await current.load();
-          if (this.closing || this.tabs.state !== 'preparing') return;
+          if (!this.isActiveLifecycle(expectedGeneration) || this.tabs.state !== 'preparing') return;
           this.store.reload(fresh);
         }
         : undefined);
-      return acquired;
+      return acquired && this.isActiveLifecycle(expectedGeneration);
     } catch (error) {
       await this.tabs.release().catch(() => {});
       const current = this.idb;
-      // A failed takeover may restore reader persistence only while the
-      // session is still live. The check and reopen enqueue are deliberately
-      // adjacent: once final close marks closing, no later recovery may reopen.
-      if (current && !this.closing) {
+      // Failed takeover may restore reader persistence only for the exact
+      // lifecycle generation that requested it. A later suspend/close must
+      // never be undone by this recovery path.
+      if (current && this.isActiveLifecycle(expectedGeneration)) {
         try { await current.reopen(false); } catch (reopenError) { this.report(reopenError); }
       }
       throw error;
@@ -228,7 +236,12 @@ export class AppSession {
    */
   suspendForCache(): Promise<void> {
     if (this.closing) return Promise.resolve();
-    if (this.pageSuspension) return this.pageSuspension;
+
+    // Every suspend signal is a new lifecycle intent, even when an older
+    // suspension is still draining. Advancing the generation invalidates any
+    // resume that was waiting on, or started after, an earlier suspension.
+    this.lifecycleTarget = 'suspended';
+    this.lifecycleGeneration++;
 
     const task = (async () => {
       await this.tabs.relinquish(() => this.drainAndClosePersistence());
@@ -241,35 +254,52 @@ export class AppSession {
 
   /**
    * Restore notification/persistence resources, reconcile durable state, then
-   * reacquire the writer lease. Concurrent pageshow/resume/visibility events
-   * share one task so they cannot reopen persistence twice.
+   * reacquire the writer lease. A resume belongs to exactly one lifecycle
+   * generation; any later suspend makes every remaining phase stale.
    */
   resumeFromCache(): Promise<boolean> {
     if (this.closing) return Promise.resolve(false);
-    if (this.resumeTask) return this.resumeTask;
+    if (this.lifecycleTarget === 'active' && this.resumeTask) return this.resumeTask.promise;
+
+    this.lifecycleTarget = 'active';
+    const generation = ++this.lifecycleGeneration;
 
     const task = (async () => {
       const suspension = this.pageSuspension;
       if (suspension) await suspension.catch(() => {});
-      if (this.closing) return false;
+      if (!this.isActiveLifecycle(generation)) return false;
 
-      this.pageSuspension = undefined;
+      if (this.pageSuspension === suspension) this.pageSuspension = undefined;
       this.tabs.resumeNotifications();
 
       const current = this.idb;
-      if (current) await current.reopen(false);
-      if (this.closing) return false;
+      if (current) {
+        await current.reopen(false);
+        if (!this.isActiveLifecycle(generation)) {
+          // A suspend may arrive while reopen is queued. Close again after the
+          // stale reopen settles so the departing page cannot keep an IDB
+          // resource alive even if suspend cleanup raced ahead of it.
+          try { await current.close(); } catch (error) { this.report(error); }
+          return false;
+        }
+      }
 
       if (this.tabs.state === 'reader') await this.refreshReader();
-      if (this.closing) return false;
+      if (!this.isActiveLifecycle(generation)) {
+        if (current) {
+          try { await current.close(); } catch (error) { this.report(error); }
+        }
+        return false;
+      }
       if (this.tabs.state !== 'reader') return this.tabs.state === 'writer';
-      return this.requestTakeover();
+      return this.requestTakeover(generation);
     })();
 
-    this.resumeTask = task;
+    const entry = { generation, promise: task };
+    this.resumeTask = entry;
     void task.then(
-      () => { if (this.resumeTask === task) this.resumeTask = undefined; },
-      () => { if (this.resumeTask === task) this.resumeTask = undefined; },
+      () => { if (this.resumeTask === entry) this.resumeTask = undefined; },
+      () => { if (this.resumeTask === entry) this.resumeTask = undefined; },
     );
     return task;
   }
@@ -301,6 +331,8 @@ export class AppSession {
     // takeover failure recovery cannot enqueue a persistence reopen behind the
     // final close.
     this.closing = true;
+    this.lifecycleTarget = 'suspended';
+    this.lifecycleGeneration++;
     const task = this.tabs.close(async () => {
       const store = this.currentStore;
       if (store) {
