@@ -202,6 +202,40 @@ describe('AppSession', () => {
     await session.close();
   });
 
+  it('完成后的重复 resume 是幂等的，不会把 writer persistence 重新降成只读', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'idempotent-resume', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+
+    await session.suspendForCache();
+    expect(await session.resumeFromCache()).toBe(true);
+    expect(session.state).toBe('writer');
+    expect(session.store.isReadOnly).toBe(false);
+
+    persistence.operations.length = 0;
+    expect(await session.resumeFromCache()).toBe(true);
+    expect(persistence.operations).toEqual([]);
+
+    session.store.batch(() => {
+      session.store.put('projects', {
+        id: 'after-second-resume',
+        name: '重复恢复后仍可写',
+        createdAt: '2026-10-04',
+        status: 'active',
+        islandSlot: 0,
+      });
+    });
+    await expect(session.store.flush()).resolves.toBeUndefined();
+
+    await session.close();
+  });
+
   it('resume 等待旧 suspension 时再次 suspend，会使旧 resume 失效且不会重开资源', async () => {
     const locks = new FakeLocks();
     let persistence!: ControlledPersistence;
