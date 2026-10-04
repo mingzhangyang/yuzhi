@@ -55,7 +55,11 @@ class ControlledPersistence implements SessionPersistence {
   private promotionGate?: Promise<void>;
   private finishPromotion?: () => void;
   private markPromotionStarted?: () => void;
+  private closeGate?: Promise<void>;
+  private finishClose?: () => void;
+  private markCloseStarted?: () => void;
   promotionStarted: Promise<void> = Promise.resolve();
+  closeStarted: Promise<void> = Promise.resolve();
 
   constructor(writeAccess: boolean) {
     this.writeAccess = writeAccess;
@@ -65,6 +69,12 @@ class ControlledPersistence implements SessionPersistence {
     this.promotionStarted = new Promise<void>((resolve) => { this.markPromotionStarted = resolve; });
     this.promotionGate = new Promise<void>((resolve) => { this.finishPromotion = resolve; });
     return () => this.finishPromotion?.();
+  }
+
+  blockNextClose() {
+    this.closeStarted = new Promise<void>((resolve) => { this.markCloseStarted = resolve; });
+    this.closeGate = new Promise<void>((resolve) => { this.finishClose = resolve; });
+    return () => this.finishClose?.();
   }
 
   async load() {
@@ -97,6 +107,13 @@ class ControlledPersistence implements SessionPersistence {
 
   async close() {
     this.operations.push('close');
+    if (this.closeGate) {
+      this.markCloseStarted?.();
+      await this.closeGate;
+      this.closeGate = undefined;
+      this.finishClose = undefined;
+      this.markCloseStarted = undefined;
+    }
   }
 }
 
@@ -181,6 +198,40 @@ describe('AppSession', () => {
     expect(FakeChannel.peers.size).toBe(1);
     expect(persistence.operations[0]).toBe('reopen:false');
     expect(persistence.operations).toContain('access:true:start');
+
+    await session.close();
+  });
+
+  it('resume 等待旧 suspension 时再次 suspend，会使旧 resume 失效且不会重开资源', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'overlap-lifecycle', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+
+    expect(session.state).toBe('writer');
+    persistence.operations.length = 0;
+
+    const finishClose = persistence.blockNextClose();
+    const firstSuspend = session.suspendForCache();
+    await persistence.closeStarted;
+    expect(session.store.isReadOnly).toBe(true);
+
+    const staleResume = session.resumeFromCache();
+    const secondSuspend = session.suspendForCache();
+
+    finishClose();
+    await Promise.all([firstSuspend, secondSuspend]);
+    expect(await staleResume).toBe(false);
+
+    expect(session.state).toBe('reader');
+    expect(session.store.isReadOnly).toBe(true);
+    expect(FakeChannel.peers.size).toBe(0);
+    expect(persistence.operations.some((operation) => operation.startsWith('reopen:'))).toBe(false);
 
     await session.close();
   });
