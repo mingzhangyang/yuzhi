@@ -123,10 +123,15 @@ try {
   // The preserved document becomes observable through Runtime before Chrome
   // necessarily dispatches the restored pageshow event. Wait on the lifecycle
   // evidence itself instead of treating URL restoration as the event barrier.
-  await waitFor(
-    () => evaluate("sessionStorage.getItem('yuzhi-bfcache:pageshow:/') === 'true'"),
-    'restored pageshow did not report persisted=true',
-  );
+  try {
+    await waitFor(
+      () => evaluate("sessionStorage.getItem('yuzhi-bfcache:pageshow:/') === 'true'"),
+      'restored pageshow did not report persisted=true',
+    );
+  } catch (error) {
+    const diagnostics = await evaluate("({ href: location.href, pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })");
+    throw new Error((error instanceof Error ? error.message : String(error)) + '; diagnostics=' + JSON.stringify(diagnostics) + '; cdpNotRestored=' + JSON.stringify(notRestored));
+  }
   await waitFor(
     () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
     'restored page did not resume writer duties',
