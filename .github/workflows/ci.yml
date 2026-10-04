@@ -20,4 +20,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Verify calendar fixtures across supported timezones
+        run: |
+          for tz in UTC Asia/Shanghai America/New_York; do
+            echo "== TZ=$tz =="
+            TZ="$tz" npm test -- tests/ics.test.ts --reporter=dot
+          done
       - run: npm run build
