@@ -49,9 +49,12 @@ export function buildScene(store: Store, selected: Selection | null, dusk: boole
   }
   const g = granary(store.data, today);
   const pending = pendingDays(store.data, today).length;
+  const now = store.clock();
   return {
     season: seasonOf(today),
-    light: lightNow(store.clock(), dusk),
+    light: lightNow(now, dusk),
+    date: today,
+    hour: now.getHours() + now.getMinutes() / 60,
     villages: views,
     dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
     choresCount: store.data.events.filter((e) => e.projectId === CHORES && !e.allDay && dateOfStamp(e.start) > addDays(today, -7) && dateOfStamp(e.start) <= today).length,

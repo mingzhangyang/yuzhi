@@ -14,6 +14,7 @@ import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
 import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
+import { FESTIVAL_NAMES, festivalsOf, weatherOf } from './island/ambience';
 import { unclassifiedGroups } from './logic/classify';
 import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
@@ -274,7 +275,9 @@ async function boot() {
     setHTML(sb, `${light === 'day' ? '结算' : '晚间结算'}${pend.length ? `<span class="dot">${pend.length}</span>` : ''}`);
     const wb = $('weather');
     const lt = { day: '白天', dusk: '黄昏', night: '夜里' }[light];
-    setText(wb, `${SEASONS[seasonOf(today)]}季 · ${lt}${pend.length ? ` · 海雾 ${pend.length} 天` : ''}`);
+    const sky = { clear: '晴', cloudy: '多云', rain: '小雨', snow: '小雪' }[weatherOf(today, seasonOf(today))];
+    const fest = festivalsOf(today).map((f) => ' · ' + FESTIVAL_NAMES[f]).join('');
+    setText(wb, `${SEASONS[seasonOf(today)]}季 · ${lt} · ${sky}${fest}${pend.length ? ` · 海雾 ${pend.length} 天` : ''}`);
     wb.classList.toggle('dusk', light !== 'day' || pend.length > 0);
     $('fogbar').hidden = !pend.length;
     if (pend.length) setHTML($('fogTxt'), `<b>海雾笼罩着小岛</b><span>${pend.map((d) => esc(relDay(d, today))).join('、')}还没结算。补上记录，雾就散了；超过 3 天会自动归档为「未记录」。</span>`);
