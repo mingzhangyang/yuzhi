@@ -165,7 +165,7 @@ async function boot() {
     syncReadOnlyUi(readOnly);
     if (readOnly) {
       closeModal(false);
-      settle?.close();
+      settle?.discard();
       ceremony?.close();
     }
     if (tabNotice) {

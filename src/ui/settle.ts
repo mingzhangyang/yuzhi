@@ -73,6 +73,17 @@ export class SettleSheet {
     this.hooks.onOpenChange(false);
   }
 
+  /**
+   * 失去写权限时调用：草稿和拉进来的任务属于旧的写者快照，
+   * 接管后重新加载的数据上不能再提交它们。普通关闭仍保留草稿。
+   */
+  discard() {
+    this.cancelDrag();
+    this.drafts.clear();
+    this.pulled.clear();
+    if (this.isOpen()) this.close();
+  }
+
   private draft(): Map<string, A.Decision> {
     let d = this.drafts.get(this.date);
     if (!d) {
