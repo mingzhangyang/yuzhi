@@ -38,6 +38,7 @@ export class AppSession {
   private writerActivation?: () => void;
   private readerRefresh: Promise<void> = Promise.resolve();
   private pageSuspension?: Promise<void>;
+  private resumeTask?: Promise<boolean>;
   private closing = false;
   private closeTask?: Promise<void>;
 
@@ -208,43 +209,69 @@ export class AppSession {
     }
   }
 
-  private async drainAndDemotePersistence() {
+  private async drainAndClosePersistence() {
     const store = this.currentStore;
     if (store) {
       try { await store.flush(); } catch (error) { this.report(error); }
     }
     const current = this.idb;
     if (current) {
-      try { await current.setWriteAccess(false); } catch (error) { this.report(error); }
+      try { await current.close(); } catch (error) { this.report(error); }
     }
   }
 
   /**
-   * bfcache suspension synchronously revokes new actions through coordinator
-   * state, then drains accepted writes before the lease is released.
+   * Navigation/freeze suspension synchronously revokes new actions, drains all
+   * already accepted writes while the lease is still held, then drops every
+   * resource that can keep a page out of BFCache. The notification channel is
+   * closed only after the final commit has had a chance to broadcast.
    */
   suspendForCache(): Promise<void> {
+    if (this.closing) return Promise.resolve();
     if (this.pageSuspension) return this.pageSuspension;
-    const task = this.tabs.relinquish(() => this.drainAndDemotePersistence());
+
+    const task = (async () => {
+      await this.tabs.relinquish(() => this.drainAndClosePersistence());
+      this.tabs.suspendNotifications();
+    })();
     this.pageSuspension = task;
     task.catch(() => {});
     return task;
   }
 
   /**
-   * A restored/visible reader always rechecks durable state. This compensates
-   * for BroadcastChannel notifications that may have been missed while the page
-   * was frozen; takeover then performs its own write-capable refresh as well.
+   * Restore notification/persistence resources, reconcile durable state, then
+   * reacquire the writer lease. Concurrent pageshow/resume/visibility events
+   * share one task so they cannot reopen persistence twice.
    */
-  async resumeFromCache(): Promise<boolean> {
-    if (this.closing) return false;
-    const suspension = this.pageSuspension;
-    if (suspension) await suspension.catch(() => {});
-    this.pageSuspension = undefined;
+  resumeFromCache(): Promise<boolean> {
+    if (this.closing) return Promise.resolve(false);
+    if (this.resumeTask) return this.resumeTask;
 
-    if (this.tabs.state === 'reader') await this.refreshReader();
-    if (this.tabs.state !== 'reader') return this.tabs.state === 'writer';
-    return this.requestTakeover();
+    const task = (async () => {
+      const suspension = this.pageSuspension;
+      if (suspension) await suspension.catch(() => {});
+      if (this.closing) return false;
+
+      this.pageSuspension = undefined;
+      this.tabs.resumeNotifications();
+
+      const current = this.idb;
+      if (current) await current.reopen(false);
+      if (this.closing) return false;
+
+      if (this.tabs.state === 'reader') await this.refreshReader();
+      if (this.closing) return false;
+      if (this.tabs.state !== 'reader') return this.tabs.state === 'writer';
+      return this.requestTakeover();
+    })();
+
+    this.resumeTask = task;
+    void task.then(
+      () => { if (this.resumeTask === task) this.resumeTask = undefined; },
+      () => { if (this.resumeTask === task) this.resumeTask = undefined; },
+    );
+    return task;
   }
 
   private async recoverFromVersionChange() {
@@ -291,27 +318,50 @@ export class AppSession {
    * final resource release is performed by close()/pagehide.
    */
   bindBrowserLifecycle(win: Window = window, doc: Document = document): () => void {
+    const supportsPageSwap = 'onpageswap' in win;
+    const suspend = () => {
+      void this.suspendForCache().catch((error) => this.report(error));
+    };
+    const resume = () => {
+      void this.resumeFromCache().catch((error) => this.report(error));
+    };
+
+    // pageswap runs early enough in modern Chrome/Safari to release Web Locks
+    // and close IndexedDB before BFCache eligibility is finalized.
+    const onPageSwap = () => suspend();
     const onPageHide = (event: PageTransitionEvent) => {
       if (event.persisted) {
-        void this.suspendForCache();
+        suspend();
         return;
       }
       void this.close().catch((error) => this.report(error));
     };
-    const onPageShow = () => {
-      if (!this.currentStore?.isReadOnly) return;
-      void this.resumeFromCache().catch((error) => this.report(error));
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted && !this.pageSuspension) return;
+      resume();
     };
     const onVisibilityChange = () => {
-      if (doc.visibilityState !== 'visible' || this.tabs.state !== 'reader') return;
-      void this.refreshReader();
+      if (doc.visibilityState === 'hidden') {
+        // Browsers without pageswap use visibilitychange as the last reliable
+        // pre-pagehide signal. This may also demote a background tab, which is
+        // safe; a later visible transition resumes that same session.
+        if (!supportsPageSwap) suspend();
+        return;
+      }
+      if (this.pageSuspension || this.resumeTask) {
+        resume();
+        return;
+      }
+      if (this.tabs.state === 'reader') void this.refreshReader();
     };
 
+    if (supportsPageSwap) win.addEventListener('pageswap', onPageSwap);
     win.addEventListener('pagehide', onPageHide);
     win.addEventListener('pageshow', onPageShow);
     doc.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
+      if (supportsPageSwap) win.removeEventListener('pageswap', onPageSwap);
       win.removeEventListener('pagehide', onPageHide);
       win.removeEventListener('pageshow', onPageShow);
       doc.removeEventListener('visibilitychange', onVisibilityChange);
