@@ -53,6 +53,35 @@ describe('原子批次写入', () => {
     expect(store.task(task.id)).toMatchObject({ projectId: to.id, scheduledFor: '2026-10-10' });
   });
 
+  it('组合任务保存落盘失败时归属和日期一起回滚', async () => {
+    class FailNextPersistence extends MemoryPersistence {
+      failNext = false;
+      async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        if (this.failNext) {
+          this.failNext = false;
+          throw new Error('组合保存失败');
+        }
+        return super.batch(writes);
+      }
+    }
+    const persistence = new FailNextPersistence();
+    const store = new Store(emptyData(), persistence);
+    store.onError = () => {};
+    const from = createProject(store, '原村落');
+    const to = createProject(store, '新村落');
+    const task = createTask(store, { title: '原子编辑', projectId: from.id, scheduledFor: '2026-10-04' });
+    await store.flush();
+
+    persistence.failNext = true;
+    editTaskPlan(store, task.id, to.id, '2026-10-10');
+    await expect(store.flush()).rejects.toThrow('组合保存失败');
+
+    expect(store.task(task.id)).toMatchObject({ projectId: from.id, scheduledFor: '2026-10-04' });
+    const durable = await persistence.load();
+    const durableStore = new Store(durable, persistence);
+    expect(durableStore.task(task.id)).toMatchObject({ projectId: from.id, scheduledFor: '2026-10-04' });
+  });
+
   it('中途写入失败时 IndexedDB 整批回滚', async () => {
     const name = dbName('idb-rollback');
     const persistence = new IdbPersistence(name);
