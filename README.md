@@ -43,6 +43,7 @@ npm run preview:pages    # 本地预览（wrangler pages dev）
 src/
   types.ts            数据模型（交接文档第 14 节，加了几处必要字段）
   db.ts               IndexedDB（idb）读写、JSON 备份导出/导入
+  persistence-startup.ts 启动持久层所有权转移、失败清理与受控内存降级
   store.ts            内存数据 + 写穿持久层 + 变化通知 + 村落状态缓存
   actions.ts          领域 action 的公共入口（所有入口统一走 Store.batch）
   actions/            项目、任务、结算、日历、落成和共享 action surface

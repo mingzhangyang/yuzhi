@@ -26,6 +26,81 @@ class FakeLocks {
 const channelFactory = () => new FakeChannel();
 
 describe('single writer', () => {
+  it.each(['relinquish', 'close', 'versionchange'] as const)('%s 撤销新写入后仍广播最后提交，reader 自动刷新', async (transition) => {
+    const name = `yuzhi-drain-${transition}-${Date.now()}-${Math.random()}`;
+    const persistence = new IdbPersistence(name);
+    const initial = await persistence.load();
+    const readerPersistence = new IdbPersistence(name, false);
+    const reader = new Store(await readerPersistence.load(), readerPersistence);
+    reader.setReadOnly(true);
+    let finishWrite!: () => void;
+    let writeStarted!: () => void;
+    const held = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const started = new Promise<void>((resolve) => { writeStarted = resolve; });
+    const store = new Store(initial, {
+      load: () => persistence.load(),
+      batch: async (writes) => {
+        writeStarted();
+        await held;
+        return persistence.batch(writes);
+      },
+    });
+    const locks = new FakeLocks();
+    const drain = async () => { await store.flush(); await persistence.close(); };
+    const writerTab = new SingleWriterCoordinator({
+      ownerId: `draining-${transition}`, locks, channelFactory,
+      onStateChange: (state) => store.setReadOnly(state !== 'writer'),
+      onVersionChange: drain,
+    });
+    let commits = 0;
+    let refresh = Promise.resolve();
+    const readerTab = new SingleWriterCoordinator({
+      ownerId: `passive-${transition}`, locks, channelFactory,
+      onPeerCommit: () => {
+        commits++;
+        refresh = refresh.then(async () => reader.reload(await readerPersistence.load()));
+      },
+    });
+    store.onCommitted = () => writerTab.announceCommit();
+    expect(await writerTab.acquire()).toBe(true);
+    store.batch(() => store.put('projects', { id: 'last', name: '最后提交', createdAt: '2026-10-01', status: 'active', islandSlot: 0 }));
+    await started;
+    const draining = transition === 'versionchange' ? writerTab.notifyVersionChange() : writerTab[transition](drain);
+    expect(store.isReadOnly).toBe(true);
+    expect(commits).toBe(0);
+    expect(await readerTab.acquire()).toBe(false);
+    finishWrite();
+    await draining;
+    await refresh;
+    expect(commits).toBe(1);
+    expect(reader.data.projects).toEqual(store.data.projects);
+    writerTab.announceCommit();
+    expect(commits).toBe(1); // No notifications once the lease is gone.
+    expect(await readerTab.acquire()).toBe(true);
+    await readerTab.close();
+    await writerTab.close();
+    await readerPersistence.close();
+  });
+
+  it('close 与既有 drain 重叠时等待 drain 后才释放 lease 和 channel', async () => {
+    const locks = new FakeLocks();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let commits = 0;
+    const writer = new SingleWriterCoordinator({ ownerId: 'overlap-writer', locks, channelFactory });
+    const reader = new SingleWriterCoordinator({ ownerId: 'overlap-reader', locks, channelFactory, onPeerCommit: () => commits++ });
+    await writer.acquire();
+    const draining = writer.relinquish(async () => { await gate; writer.announceCommit(); });
+    const closing = writer.close();
+    expect(writer.isWritable).toBe(false);
+    expect(await reader.acquire()).toBe(false);
+    finish();
+    await Promise.all([draining, closing]);
+    expect(commits).toBe(1);
+    expect(await reader.acquire()).toBe(true);
+    await reader.close();
+  });
+
   it('同一时间只允许一个 writer，释放后 reader 可以接管', async () => {
     const locks = new FakeLocks();
     const a = new SingleWriterCoordinator({ ownerId: 'a', locks, channelFactory });

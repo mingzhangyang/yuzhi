@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import type { Data, Settings } from './types';
+import type { Data, LifeKind, OperationKind, Settings } from './types';
 import { CHORES } from './types';
 import { localDate } from './lib/date';
 import { MAX_VILLAGES } from './logic/config';
@@ -89,8 +89,16 @@ type RawData = Record<string, unknown> & {
 
 /** Business-data migrations. IndexedDB object-store changes stay in upgrade(). */
 const ACTIVE_LIFE_KINDS = new Set(['start', 'task', 'close', 'restart', 'trim', 'drop', 'event', 'complete']);
-const LEGACY_KIND_MAP: Record<string, string> = {
+// This is a preservation policy, not the v2 active-operation selection above.
+// Every non-stage history kind needs a durable representation before life is
+// removed, including settlement snapshots whose source fact no longer exists.
+const LEGACY_KIND_MAP: Record<Exclude<LifeKind, 'stage'>, OperationKind> = {
   start: 'project-created',
+  task: 'legacy-life',
+  done: 'legacy-life',
+  partial: 'legacy-life',
+  skip: 'legacy-life',
+  event: 'legacy-life',
   close: 'project-closed',
   restart: 'project-restarted',
   trim: 'project-trimmed',
@@ -103,7 +111,7 @@ const LEGACY_SKIP_REASONS = new Set(['interrupted', 'no_energy', 'not_important'
 
 function legacyLifeSnapshot(row: Record<string, unknown>): Record<string, unknown> | undefined {
   if (typeof row.text !== 'string' || typeof row.kind !== 'string') return undefined;
-  if (!ACTIVE_LIFE_KINDS.has(row.kind) || row.kind === 'stage') return undefined;
+  if (!Object.hasOwn(LEGACY_KIND_MAP, row.kind)) return undefined;
   const snapshot: Record<string, unknown> = { kind: row.kind, text: row.text };
   if (typeof row.projectId === 'string') snapshot.projectId = row.projectId;
   if (typeof row.taskId === 'string') snapshot.taskId = row.taskId;
@@ -173,7 +181,7 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
           id: `op|legacy-life|${row.id}`,
           seq: ++seq,
           date: row.date,
-          kind: LEGACY_KIND_MAP[row.kind] ?? 'legacy-life',
+          kind: LEGACY_KIND_MAP[row.kind as keyof typeof LEGACY_KIND_MAP],
           ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
           ...(typeof row.taskId === 'string' ? { taskId: row.taskId } : {}),
           payload: { legacyLifeId: row.id, legacyKind: row.kind, life: [lifeSnapshot] },
@@ -337,8 +345,9 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       // Phase 2 left the non-derivable part of the old life collection in
       // place for one compatibility release. Convert those rows to the same
       // operation-fact shape used by the v1 migration, then remove the
-      // collection entirely. Settlement/stage rows were already discarded by
-      // the v3 step and are reconstructed from facts at read time.
+      // collection entirely. Only settlement rows with surviving source facts
+      // and stage rows were discarded by v3. Orphan settlement snapshots must
+      // survive as historical operations; they do not invent settlement facts.
       for (const value of life) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
         const row = value as Record<string, unknown>;
@@ -346,7 +355,7 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
         if (migrated.has(row.id)) continue;
         const snapshot = legacyLifeSnapshot(row);
         if (!snapshot) continue;
-        const kind = LEGACY_KIND_MAP[String(row.kind)] ?? 'legacy-life';
+        const kind = LEGACY_KIND_MAP[row.kind as keyof typeof LEGACY_KIND_MAP];
         operations.push({
           id: `op|legacy-life|${row.id}`,
           seq: ++seq,
@@ -796,19 +805,27 @@ export class IdbPersistence implements Persistence {
   }
   private async writeAll(db: IDBPDatabase, d: Data, dataVersion: number) {
     const tx = db.transaction([...COLL_NAMES, 'meta'], 'readwrite');
-    for (const c of COLL_NAMES) {
-      const st = tx.objectStore(c);
-      await st.clear();
-      for (const item of (d as unknown as Record<Coll, object[]>)[c]) await st.put(structuredClone(item));
+    try {
+      for (const c of COLL_NAMES) {
+        const st = tx.objectStore(c);
+        await st.clear();
+        for (const item of (d as unknown as Record<Coll, object[]>)[c]) await st.put(structuredClone(item));
+      }
+      const meta = tx.objectStore('meta');
+      let maxFactSeq = 0;
+      for (const entry of d.entries) if (entry.seq > maxFactSeq) maxFactSeq = entry.seq;
+      for (const event of d.operations) if (event.seq > maxFactSeq) maxFactSeq = event.seq;
+      await meta.put({ ...d.settings }, 'settings');
+      await meta.put(dataVersion, 'dataVersion');
+      await meta.put(maxFactSeq, FACT_SEQ_KEY);
+      await tx.done;
+    } catch (error) {
+      // A failed migration must roll back before startup closes this connection
+      // and hands the validated snapshot to a transient persistence instance.
+      try { tx.abort(); } catch { /* transaction may already be inactive */ }
+      try { await tx.done; } catch { /* consume the aborted transaction error */ }
+      throw error;
     }
-    const meta = tx.objectStore('meta');
-    let maxFactSeq = 0;
-    for (const entry of d.entries) if (entry.seq > maxFactSeq) maxFactSeq = entry.seq;
-    for (const event of d.operations) if (event.seq > maxFactSeq) maxFactSeq = event.seq;
-    await meta.put({ ...d.settings }, 'settings');
-    await meta.put(dataVersion, 'dataVersion');
-    await meta.put(maxFactSeq, FACT_SEQ_KEY);
-    await tx.done;
   }
 }
 

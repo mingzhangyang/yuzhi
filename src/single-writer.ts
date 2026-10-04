@@ -59,6 +59,7 @@ export class SingleWriterCoordinator {
   private readonly onPeerCommit?: () => void;
   private readonly onVersionChange?: WriterPreparation;
   private releaseLock: (() => void) | undefined;
+  private leaseHeld = false;
   private lockTask: Promise<unknown> | undefined;
   private acquireTask: Promise<boolean> | undefined;
   private demotionTask: Promise<void> | undefined;
@@ -168,6 +169,7 @@ export class SingleWriterCoordinator {
         let resolveHeld!: () => void;
         const held = new Promise<void>((resolveHeldPromise) => { resolveHeld = resolveHeldPromise; });
         let activated = false;
+        this.leaseHeld = true;
         this.setState('preparing');
         try {
           await prepare?.();
@@ -185,6 +187,7 @@ export class SingleWriterCoordinator {
         } catch (error) {
           fail(error);
         } finally {
+          this.leaseHeld = false;
           this.releaseLock = undefined;
           if (!this.closed && this.currentState === 'preparing') this.setState('reader');
           if (activated && !this.closed) {
@@ -201,7 +204,9 @@ export class SingleWriterCoordinator {
   }
 
   announceCommit(revision = Date.now()) {
-    if (!this.isWritable) return;
+    // Writability admits new actions; lease ownership covers their completion.
+    // Draining in releasing/recovering/closed must still notify passive readers.
+    if (!this.leaseHeld) return;
     this.announce({ type: 'commit', ownerId: this.ownerId, revision });
   }
 
@@ -298,6 +303,9 @@ export class SingleWriterCoordinator {
     this.closed = true;
     this.setState('closed');
     try {
+      // Closing can overlap a bfcache/versionchange drain. Do not release its
+      // lease or close its channel before those already accepted writes finish.
+      await this.demotionTask?.catch(() => {});
       await prepare?.();
     } finally {
       await this.releaseLease();

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { openDB } from 'idb';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   COLLECTIONS,
   DATA_VERSION,
@@ -13,13 +13,145 @@ import {
   parseBackup,
 } from '../src/db';
 import { runMigrationSteps } from '../src/migrations';
+import { initializePersistence } from '../src/persistence-startup';
+import type { LifeKind } from '../src/types';
 import { lifeEntries } from '../src/logic/operations';
 import { interruptions, taskState } from '../src/logic/read-model';
 import { v1BackupFixture, v1OperationHistoryFixture } from './fixtures/v1-backup';
 
 const dbName = (label: string) => `yuzhi-${label}-${Date.now()}-${Math.random()}`;
 
+const preservedLifeKinds: Exclude<LifeKind, 'stage'>[] = [
+  'start', 'task', 'done', 'partial', 'skip', 'close', 'restart', 'trim', 'drop', 'event', 'complete',
+];
+function legacyHistory(version: number) {
+  const date = '2026-10-01';
+  const data = {
+    ...emptyData(),
+    life: [
+      ...preservedLifeKinds.map((kind) => ({
+        id: `orphan-${kind}`, date, kind, text: `唯一历史快照 ${kind}`,
+        ...(kind === 'skip' ? { reason: 'interrupted' as const } : {}),
+      })),
+      { id: 'l|settlement', date, kind: 'done' as const, text: '可从结算重建的副本' },
+      { id: 'stage-row', date, kind: 'stage' as const, text: '阶段副本' },
+    ],
+  };
+  data.entries.push({ id: 'settlement', seq: 7, date, itemType: 'event', itemId: 'e', outcome: 'done', title: '保留的结算' });
+  if (version === 3) {
+    // A row already represented by an operation must not gain a second fact.
+    data.operations.push({ id: 'already-migrated', seq: 8, date, kind: 'legacy-life', payload: {
+      legacyLifeId: 'orphan-event', life: [{ kind: 'event', text: '唯一历史快照 event' }],
+    } });
+    data.life = data.life.filter((row) => row.kind !== 'stage' && row.id !== 'l|settlement');
+  }
+  return { format: 'yuzhi-backup', version, ...data };
+}
+
+async function seedLegacyHistory(name: string, version: number) {
+  const data = legacyHistory(version);
+  const db = await openDB(name, 3, {
+    upgrade(db) {
+      for (const [store, keyPath] of Object.entries(COLLECTIONS)) db.createObjectStore(store, { keyPath });
+      db.createObjectStore('life', { keyPath: 'id' });
+      db.createObjectStore('interruptions', { keyPath: 'id' });
+      db.createObjectStore('meta');
+    },
+  });
+  for (const coll of Object.keys(COLLECTIONS) as Array<keyof typeof COLLECTIONS>) {
+    for (const row of data[coll]) await db.put(coll, row);
+  }
+  for (const row of data.life) await db.put('life', row);
+  await db.put('meta', data.settings, 'settings');
+  await db.put('meta', version, 'dataVersion');
+  db.close();
+}
+
 describe('数据迁移基础设施', () => {
+  it.each([1, 2, 3])('v%s 备份保全所有非 stage 孤立历史，且不重复已有事实', (version) => {
+    const data = parseBackup(JSON.stringify(legacyHistory(version)));
+    const rows = lifeEntries(data);
+    for (const kind of preservedLifeKinds) {
+      expect(rows.filter((row) => row.text === `唯一历史快照 ${kind}`)).toHaveLength(1);
+    }
+    expect(rows.find((row) => row.text === '唯一历史快照 skip')?.reason).toBe('interrupted');
+    expect(rows.filter((row) => row.id === 'l|settlement')).toHaveLength(1);
+    expect(rows.some((row) => row.text === '阶段副本' || row.text === '可从结算重建的副本')).toBe(false);
+    expect(data.entries).toHaveLength(1); // Orphan history does not affect settlement-derived state.
+    expect(new Set([...data.entries, ...data.operations].map((row) => row.seq)).size).toBe(data.entries.length + data.operations.length);
+    expect(parseBackup(exportBackup(data))).toEqual(data);
+  });
+
+  it.each([1, 2, 3])('v%s IndexedDB 删除旧集合后仍保全孤立历史并可重复加载', async (version) => {
+    const name = dbName(`orphan-history-${version}`);
+    await seedLegacyHistory(name, version);
+    const persistence = new IdbPersistence(name);
+    const data = await persistence.load();
+    expect(lifeEntries(data).filter((row) => row.text.startsWith('唯一历史快照'))).toHaveLength(preservedLifeKinds.length);
+    const reloaded = await persistence.load();
+    // IndexedDB returns primary-key order; factSeq owns semantic ordering.
+    expect({ ...reloaded, operations: [...reloaded.operations].sort((a, b) => a.seq - b.seq) })
+      .toEqual({ ...data, operations: [...data.operations].sort((a, b) => a.seq - b.seq) });
+    expect(lifeEntries(reloaded)).toEqual(lifeEntries(data));
+    await persistence.close();
+    const db = await openDB(name);
+    expect(db.version).toBe(IDB_SCHEMA_VERSION);
+    expect(db.objectStoreNames.contains('life')).toBe(false);
+    db.close();
+  });
+
+  it('迁移写回配额失败先回滚并关闭连接，再降级到已恢复快照', async () => {
+    const name = dbName('startup-quota');
+    await seedLegacyHistory(name, 3);
+    // A discarded application's callback cannot close the old connection.
+    const onVersionChange = vi.fn();
+    const persistence = new IdbPersistence(name, true, { onVersionChange });
+    const originalPut = IDBObjectStore.prototype.put;
+    const fault = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+      if (this.name === 'meta' && key === 'dataVersion' && value === DATA_VERSION) {
+        throw new DOMException('disk full', 'QuotaExceededError');
+      }
+      return originalPut.call(this, value, key);
+    });
+    let initialized;
+    try {
+      initialized = await initializePersistence(persistence);
+    } finally {
+      fault.mockRestore();
+    }
+    expect(initialized.fallback).toBeInstanceOf(StorageUnavailableError);
+    expect(await initialized.persistence.load()).toEqual(initialized.data);
+    expect(lifeEntries(initialized.data).filter((row) => row.text.startsWith('唯一历史快照'))).toHaveLength(preservedLifeKinds.length);
+
+    const staged = await openDB(name);
+    expect(staged.version).toBe(IDB_SCHEMA_VERSION - 1);
+    expect(await staged.get('meta', 'dataVersion')).toBe(3);
+    expect(await staged.getAll('operations')).toEqual(legacyHistory(3).operations);
+    expect(await staged.count('life')).toBe(legacyHistory(3).life.length);
+    staged.close();
+    const blocked = vi.fn();
+    const upgraded = await openDB(name, IDB_SCHEMA_VERSION, { blocked });
+    expect(blocked).not.toHaveBeenCalled();
+    expect(onVersionChange).not.toHaveBeenCalled();
+    upgraded.close();
+  });
+
+  it('启动验证失败也关闭候选连接，保留原错误且不切换空白数据', async () => {
+    const name = dbName('startup-invalid');
+    await seedLegacyHistory(name, 3);
+    const raw = await openDB(name);
+    await raw.put('meta', { workStart: 1 }, 'settings');
+    raw.close();
+    const onVersionChange = vi.fn();
+    const persistence = new IdbPersistence(name, true, { onVersionChange });
+    await expect(initializePersistence(persistence)).rejects.toThrow('本地数据里的工作开始时间');
+    const blocked = vi.fn();
+    const upgraded = await openDB(name, IDB_SCHEMA_VERSION, { blocked });
+    expect(blocked).not.toHaveBeenCalled();
+    expect(onVersionChange).not.toHaveBeenCalled();
+    upgraded.close();
+  });
+
   it('按连续版本顺序迁移，并且不修改调用方输入', () => {
     const source = { value: 1, notes: ['old'] };
     const result = runMigrationSteps(source, 1, 3, [
