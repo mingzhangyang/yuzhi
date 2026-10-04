@@ -1,8 +1,6 @@
 import './styles.css';
-import { IdbPersistence, exportBackup, parseBackup, type Persistence } from './db';
-import { initializePersistence } from './persistence-startup';
-import { Store } from './store';
-import type { Data } from './types';
+import { exportBackup, parseBackup } from './db';
+import { AppSession } from './app-session';
 import { IslandRenderer, type Selection } from './island/render';
 import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
@@ -17,71 +15,18 @@ import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
 import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
 import { unclassifiedGroups } from './logic/classify';
-import { SingleWriterCoordinator, type WriterState } from './single-writer';
+import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
 
 async function boot() {
   initModal();
-  let appStore: Store | undefined;
-  let idb: IdbPersistence | undefined;
   let settle!: SettleSheet;
   let ceremony!: Ceremony;
-  let readerRefresh: Promise<void> = Promise.resolve();
-  let syncWriterState = (_state: WriterState) => {};
-  const reloadAppSnapshot = (fresh: Data) => {
-    if (!appStore) return;
-    appStore.reload(fresh);
-  };
-  const tabs = new SingleWriterCoordinator({
-    onStateChange: (state) => syncWriterState(state),
-    onPeerCommit: () => {
-      readerRefresh = readerRefresh
-        .catch(() => {})
-        .then(async () => {
-          if (!appStore || !idb || tabs.state !== 'reader') return;
-          const current = idb;
-          // A return to reader after recovery is a new lifecycle, not permission
-          // for a pre-recovery snapshot to replace the authoritative fresh one.
-          await tabs.runIfCurrent(() => current.load(), reloadAppSnapshot);
-        })
-        .catch((error) => appStore?.onError(error));
-    },
-    onVersionChange: async () => {
-      // The coordinator has already synchronously revoked writability here.
-      // Keep the lease while persistence drains and reconnects as a reader;
-      // SingleWriterCoordinator releases it only after this callback settles.
-      const current = idb;
-      try {
-        if (appStore) {
-          try { await appStore.flush(); } catch (error) { appStore.onError(error); }
-        }
-        if (current) {
-          await current.close();
-          await current.reopen(false);
-          if (appStore) reloadAppSnapshot(await current.load());
-        }
-      } catch (error) {
-        appStore?.onError(error);
-        throw error;
-      }
-    },
-  });
-  await tabs.acquire();
-  idb = new IdbPersistence(undefined, tabs.isWritable, { onVersionChange: () => { void tabs.notifyVersionChange(); } });
-  let per: Persistence = idb;
-  let data: Data;
+  let session: AppSession;
   try {
-    // Startup only accepts a snapshot produced under one stable coordinator
-    // revision. If versionchange recovery races the load, the stale result is
-    // discarded and retried against the new reader/writer state.
-    const initialized = await initializePersistence(idb, () => tabs.runAgainstStableState(async (writable) => {
-      await idb!.setWriteAccess(writable);
-      return idb!.load();
-    }));
-    per = initialized.persistence;
-    data = initialized.data;
-    if (initialized.fallback) {
-      idb = undefined;
+    const started = await AppSession.start();
+    session = started.session;
+    if (started.fallback) {
       setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
     }
   } catch (error) {
@@ -98,11 +43,9 @@ async function boot() {
         </section>`,
       );
     }
-    await tabs.close();
     return;
   }
-  const store = new Store(data, per, () => tabs.revision);
-  appStore = store;
+  const store = session.store;
 
   const syncReadOnlyUi = (readOnly: boolean) => {
     for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
@@ -146,20 +89,17 @@ async function boot() {
   }
 
   store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
-  store.onCommitted = () => {
-    if (idb) tabs.announceCommit();
-  };
 
   const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
   const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
-  if (!tabs.supportsWriterLock && tabNotice) {
+  if (!session.supportsWriterLock && tabNotice) {
     const text = tabNotice.querySelector('span');
     if (text) text.textContent = '此浏览器不支持安全的多标签页写入协调；为保护本地数据，此页保持只读。';
   }
 
   // Store/UI writability is a projection of coordinator state. No caller keeps
   // a second writable flag or replays an old acquisition result.
-  syncWriterState = (state) => {
+  const syncWriterState = (state: WriterState) => {
     const readOnly = state !== 'writer';
     store.setReadOnly(readOnly);
     syncReadOnlyUi(readOnly);
@@ -173,9 +113,9 @@ async function boot() {
       if (state === 'recovering' || state === 'releasing' || state === 'closed') tabNotice.dataset.blocked = 'true';
       else delete tabNotice.dataset.blocked;
     }
-    if (takeOver) takeOver.disabled = !tabs.supportsWriterLock || state !== 'reader';
+    if (takeOver) takeOver.disabled = !session.supportsWriterLock || state !== 'reader';
   };
-  syncWriterState(tabs.state);
+  session.subscribeState(syncWriterState);
 
   let calendarRefreshTask: Promise<void> | undefined;
   let calendarRefreshAgain = false;
@@ -200,41 +140,26 @@ async function boot() {
   }
 
   const requestTakeover = async (notify = true): Promise<boolean> => {
-    if (!tabs.supportsWriterLock) {
+    if (!session.supportsWriterLock) {
       if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
       return false;
     }
     try {
-      await tabs.whenStable();
-      const acquired = await tabs.takeOver(idb
-        ? async () => {
-          // Coordinator is preparing here, so Store/UI stay read-only until
-          // the fresh write-capable snapshot succeeds.
-          await readerRefresh.catch(() => {});
-          await idb!.setWriteAccess(true);
-          const fresh = await idb!.load();
-          reloadAppSnapshot(fresh);
-        }
-        : undefined);
+      const acquired = await session.requestTakeover();
       if (!acquired) {
         if (notify) toast('另一个标签页仍在写入，请稍后再试', true);
         return false;
       }
-      resumeWriterDuties();
       if (notify) toast('已接管写权限');
       return true;
     } catch (error) {
-      await tabs.release().catch(() => {});
-      if (idb) {
-        try { await idb.reopen(false); } catch { /* coordinator remains non-writable */ }
-      }
       console.error('接管写权限失败', error);
       if (notify) toast('接管写权限失败：' + (error instanceof Error ? error.message : String(error)), true);
       return false;
     }
   };
 
-  if (takeOver && tabs.supportsWriterLock) takeOver.onclick = () => { void requestTakeover(); };
+  if (takeOver && session.supportsWriterLock) takeOver.onclick = () => { void requestTakeover(); };
 
   const applyTheme = () => {
     syncThemeDataset(store.data.settings.theme, document.documentElement.dataset);
@@ -393,8 +318,8 @@ async function boot() {
     runWriterAutoRefresh();
   }
 
+  session.setWriterActivation(resumeWriterDuties);
   store.subscribe(update);
-  daily();
   update();
   renderer.start();
 
@@ -415,33 +340,7 @@ async function boot() {
       update();
     }
   });
-  let pageSuspension: Promise<void> | undefined;
-  const suspendForCache = () => tabs.relinquish(async () => {
-    // Enter releasing state synchronously, then drain/demote persistence while
-    // the lease is still held. Store/UI writability follows coordinator state.
-    try { await store.flush(); } catch (error) { store.onError(error); }
-    if (idb) {
-      try { await idb.setWriteAccess(false); } catch (error) { store.onError(error); }
-    }
-  });
-  window.addEventListener('pagehide', (event) => {
-    if (event.persisted) {
-      pageSuspension = suspendForCache();
-      return;
-    }
-    void tabs.close(async () => {
-      try { await store.flush(); } catch (error) { store.onError(error); }
-      await idb?.close();
-    });
-  });
-  window.addEventListener('pageshow', () => {
-    if (!store.isReadOnly) return;
-    void (async () => {
-      if (pageSuspension) await pageSuspension.catch(() => {});
-      pageSuspension = undefined;
-      await requestTakeover(false);
-    })();
-  });
+  session.bindBrowserLifecycle();
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 
   /* ---------------- 顶部按钮 ---------------- */
@@ -482,7 +381,7 @@ async function boot() {
       toast('备份已导出');
     } else if (m === 'import') {
       const context = store.captureWriteContext();
-      const revision = tabs.revision;
+      const revision = session.revision;
       const f = await pickFile($('fileBackup') as HTMLInputElement);
       if (!f || !context.isCurrent()) return;
       try {
@@ -491,13 +390,13 @@ async function boot() {
         const ok = await confirmModal({ title: '用备份替换现在的小岛？', text: `备份里有 ${d.projects.length} 个项目、${d.tasks.length} 件任务、${d.entries.length} 条结算记录。现在这座岛上的数据会被替换。`, ok: '替换', danger: true });
         if (!ok || !context.isCurrent()) return;
         await store.replaceAll(d);
-        if (tabs.revision !== revision || store.isReadOnly) return;
+        if (session.revision !== revision || store.isReadOnly) return;
         tracker.open({ kind: 'overview' }, false);
         applyTheme();
         daily();
         toast('备份已导入');
       } catch (err) {
-        if (tabs.revision !== revision || store.isReadOnly) return;
+        if (session.revision !== revision || store.isReadOnly) return;
         toast(err instanceof Error ? err.message : String(err), true);
       }
     } else if (m === 'archive') tracker.open({ kind: 'archive' });
@@ -517,9 +416,6 @@ async function boot() {
       },
     });
   } else setTimeout(maybePrompt, 1200);
-
-  // 后台日历 I/O 只属于当前 writer；reader 不发重复网络请求。
-  runWriterAutoRefresh();
 
   // 方便调试
   (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A };

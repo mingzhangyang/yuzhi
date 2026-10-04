@@ -81,6 +81,9 @@ export class Store {
 
   /** Replace the in-memory snapshot after a read-only tab observes another tab's commit. */
   reload(data: Data) {
+    if (this.activeWrites || this.pendingBatches.size > 0 || this.replacementInProgress) {
+      throw new Error('Store.reload 只能在没有在途写入或全量替换时切换快照');
+    }
     this.data = structuredClone(data);
     this.committedData = structuredClone(this.data);
     this.pendingBatches.clear();

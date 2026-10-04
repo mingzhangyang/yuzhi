@@ -126,6 +126,30 @@ describe('single writer', () => {
     await reader.close();
   });
 
+  it('final close 等待正在进行的 takeover preparation，再执行资源清理', async () => {
+    const locks = new FakeLocks();
+    let finishPreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => { finishPreparation = resolve; });
+    const order: string[] = [];
+    const tab = new SingleWriterCoordinator({ ownerId: 'close-preparing', locks, channelFactory });
+
+    const takeover = tab.takeOver(async () => {
+      order.push('prepare:start');
+      await preparationGate;
+      order.push('prepare:end');
+    });
+    expect(tab.state).toBe('preparing');
+
+    const closing = tab.close(() => { order.push('cleanup'); });
+    expect(tab.state).toBe('closed');
+
+    finishPreparation();
+    expect(await takeover).toBe(false);
+    await closing;
+
+    expect(order).toEqual(['prepare:start', 'prepare:end', 'cleanup']);
+  });
+
   it('同一时间只允许一个 writer，释放后 reader 可以接管', async () => {
     const locks = new FakeLocks();
     const a = new SingleWriterCoordinator({ ownerId: 'a', locks, channelFactory });
