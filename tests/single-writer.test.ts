@@ -196,6 +196,10 @@ describe('read-only persistence', () => {
       return data;
     };
     await writer.batch([{ kind: 'replaceAll', data: versionData(0) }]);
+    // Prime the reader connection before racing. In the old implementation,
+    // each collection then opened a separate transaction, allowing the writer
+    // transaction to land between project and task reads.
+    expect((await reader.load()).projects[0]?.name).toBe('v0');
 
     for (let version = 1; version <= 12; version++) {
       const load = reader.load();
