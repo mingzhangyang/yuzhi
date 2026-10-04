@@ -282,6 +282,15 @@ export class AppSession {
   resumeFromCache(): Promise<boolean> {
     if (this.closing) return Promise.resolve(false);
     if (this.lifecycleTarget === 'active' && this.resumeTask) return this.resumeTask.promise;
+    if (
+      this.lifecycleTarget === 'active'
+      && !this.pageSuspension
+      && this.tabs.state === 'writer'
+    ) {
+      // A completed resume is idempotent. Do not reopen persistence as
+      // read-only underneath an already-writable Store/coordinator pair.
+      return Promise.resolve(true);
+    }
 
     this.lifecycleTarget = 'active';
     const generation = ++this.lifecycleGeneration;
