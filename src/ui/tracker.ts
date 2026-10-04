@@ -685,7 +685,8 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
       );
     },
     onClose: () => {
-      if (!chosen) A.snoozePrompt(store, p.id);
+      // The tab may have lost writer ownership while this modal was open.
+      if (!chosen && !store.isReadOnly) A.snoozePrompt(store, p.id);
       onDone();
     },
   });

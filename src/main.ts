@@ -140,12 +140,16 @@ async function boot() {
       mutating = Boolean(target.closest('#tracker form, #mdl form'));
     } else if (event.type === 'change') {
       mutating = Boolean(target.closest('#tracker [data-act-change], #settle [data-pull]'));
+    } else if (event.type === 'pointerdown') {
+      // Pointerdown is only stateful for the settlement swipe gesture. Buttons
+      // are handled on click so one user action produces one read-only notice.
+      mutating = Boolean(target.closest('#settle .scard'));
     } else {
       const trackerAction = target.closest<HTMLElement>('#tracker [data-act]');
       mutating = Boolean(
         (trackerAction && !readOnlyNavActions.has(trackerAction.dataset.act ?? ''))
         || target.closest('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]')
-        || target.closest('#settle [data-set], #settle [data-reason], #settle [data-act="all"], #settle [data-act="commit"], #settle .scard')
+        || target.closest('#settle [data-set], #settle [data-reason], #settle [data-act="all"], #settle [data-act="commit"]')
         || target.closest('#ceremony [data-go]')
       );
     }
