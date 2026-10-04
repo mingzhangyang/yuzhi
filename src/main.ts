@@ -13,7 +13,7 @@ import { openCalendar, openClassify, openNew, openSettings, openWelcome, seedDem
 import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
-import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
+import { SEASONS, fmtDay, localDate, relDay, seasonOf, weekday } from './lib/date';
 import { FESTIVAL_NAMES, festivalsOf, weatherOf } from './island/ambience';
 import { unclassifiedGroups } from './logic/classify';
 import type { WriterState } from './single-writer';
@@ -242,10 +242,12 @@ async function boot() {
 
   /* 景物说明：指针与键盘共享 renderer 里的同一套景物语义。 */
   const infoBox = $('mapinfo');
+  const infoAnnounce = $('mapAnnounce');
   const mapCanvas = $('map') as HTMLCanvasElement;
   const hideInfo = () => {
     if (infoBox.hidden) return;
     infoBox.hidden = true;
+    setText(infoAnnounce, '');
     renderer.clearFocus();
   };
   const showInspection = (r: SceneryInspection | null) => {
@@ -257,6 +259,8 @@ async function boot() {
         info.lines.map((l) => `<p>${esc(l)}</p>`).join(''),
     );
     infoBox.hidden = false;
+    // 播报通道永久留在可访问性树里；可视卡片可以自由 hidden/unhidden。
+    setText(infoAnnounce, [info.title, info.sub, ...info.lines].filter(Boolean).join('。'));
     // 卡片放在景物上方；太靠上就放到下方，左右不超出地图
     const wrap = $('mapwrap');
     const W = wrap.clientWidth;
@@ -318,11 +322,12 @@ async function boot() {
         update();
       }, 30);
     }
-    const today = store.today();
+    // 地图场景和顶部日期/天气共用同一个时间快照，避免午夜边界出现互相矛盾的状态。
     const now = store.clock();
+    const today = localDate(now);
     updateStats(store);
     tracker.render();
-    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk));
+    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now));
 
     const pend = pendingDays(store.data, today);
     const light = lightNow(now, dusk);

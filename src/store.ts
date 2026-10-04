@@ -384,8 +384,7 @@ export class Store {
   }
 
   /** 各村落的衰败状态（按数据版本和日期缓存） */
-  villages(): Map<string, VillageState> {
-    const today = this.today();
+  villages(today: ISODate = this.today()): Map<string, VillageState> {
     const key = `${this.version}|${today}`;
     if (this.villageCache?.key !== key) this.villageCache = { key, map: computeAllVillages(this.data, today) };
     return this.villageCache.map;

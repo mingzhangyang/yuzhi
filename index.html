@@ -50,7 +50,8 @@
         <p class="sr-only" id="mapKeyHelp">键盘操作：聚焦地图后，按回车或空格开始浏览景物；使用方向键切换景物；按 Esc 关闭说明。</p>
         <div class="zoom"><button id="zin" aria-label="放大">+</button><button id="zout" aria-label="缩小">−</button><button id="zfit" aria-label="复位">⤢</button></div>
         <div class="tip" id="tip">点村落、小人或码头看看</div>
-        <div class="mapinfo" id="mapinfo" role="status" aria-live="polite" hidden></div>
+        <div class="mapinfo" id="mapinfo" hidden></div>
+        <div class="sr-only" id="mapAnnounce" role="status" aria-live="polite" aria-atomic="true"></div>
       </div>
       <div class="legend" id="legend"></div>
       <div class="chron">
