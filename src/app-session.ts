@@ -250,8 +250,20 @@ export class AppSession {
     if (this.pageSuspension) return this.pageSuspension;
 
     const task = (async () => {
-      await this.tabs.relinquish(() => this.drainAndClosePersistence());
-      this.tabs.suspendNotifications();
+      let cleanupRan = false;
+      try {
+        await this.tabs.relinquish(async () => {
+          cleanupRan = true;
+          await this.drainAndClosePersistence();
+        });
+      } finally {
+        // relinquish() can join an already-running demotion (notably
+        // versionchange recovery). In that case its preparation callback is
+        // intentionally not invoked, so suspension must perform the final
+        // persistence cleanup after the joined demotion settles.
+        if (!cleanupRan) await this.drainAndClosePersistence();
+        this.tabs.suspendNotifications();
+      }
     })();
     this.pageSuspension = task;
     task.catch(() => {});
