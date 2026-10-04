@@ -446,12 +446,7 @@ export class Tracker {
           const id = f.dataset.id!;
           const pid = String(fd.get('tproj') ?? '') || undefined;
           const sel = f.querySelector<HTMLSelectElement>('select[name=tdate]')!;
-          const t = s.task(id)!;
-          if (pid !== t.projectId) {
-            if (!t.projectId && pid) A.arrangeTask(s, id, pid, readDate(sel));
-            else A.moveTask(s, id, pid);
-          }
-          if (readDate(sel) !== s.task(id)!.scheduledFor) A.rescheduleTask(s, id, readDate(sel));
+          A.editTaskPlan(s, id, pid, readDate(sel));
           toast('已保存');
           break;
         }

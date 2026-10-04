@@ -27,6 +27,13 @@ async function boot() {
   let readerRefresh: Promise<void> = Promise.resolve();
   let versionChangeRecovery: Promise<void> | undefined;
   let setAppReadOnly = (readOnly: boolean) => appStore?.setReadOnly(readOnly);
+  let syncReloadedTheme = (_previousTheme: Data['settings']['theme']) => {};
+  const reloadAppSnapshot = (fresh: Data) => {
+    if (!appStore) return;
+    const previousTheme = appStore.data.settings.theme;
+    appStore.reload(fresh);
+    if (previousTheme !== fresh.settings.theme) syncReloadedTheme(previousTheme);
+  };
   const tabs = new SingleWriterCoordinator({
     onRoleChange: (role) => {
       setAppReadOnly(role !== 'writer');
@@ -43,7 +50,7 @@ async function boot() {
           if (!appStore || !idb || tabs.role === 'writer') return;
           const fresh = await idb.load();
           // A takeover may have completed while this read was in flight.
-          if (tabs.role === 'reader' && appStore.isReadOnly) appStore.reload(fresh);
+          if (tabs.role === 'reader' && appStore.isReadOnly) reloadAppSnapshot(fresh);
         })
         .catch((error) => appStore?.onError(error));
     },
@@ -70,7 +77,7 @@ async function boot() {
             await current.close();
             await current.reopen(false);
             const fresh = await current.load();
-            if (appStore) appStore.reload(fresh);
+            if (appStore) reloadAppSnapshot(fresh);
           }
         } finally {
           // Never strand the single-writer lease if close/reopen/load fails.
@@ -221,14 +228,14 @@ async function boot() {
           await readerRefresh.catch(() => {});
           await idb!.setWriteAccess(true);
           const fresh = await idb!.load();
-          appStore!.reload(fresh);
+          reloadAppSnapshot(fresh);
         }
         : undefined);
       if (!acquired) {
         if (notify) toast('另一个标签页仍在写入，请稍后再试', true);
         return false;
       }
-      runWriterAutoRefresh();
+      resumeWriterDuties();
       if (notify) toast('已接管写权限');
       return true;
     } catch (error) {
@@ -260,6 +267,7 @@ async function boot() {
     `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span>`;
 
   const renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
+  syncReloadedTheme = () => applyTheme();
   let dusk = false;
   const tracker = new Tracker(store, {
     openNewProject: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
@@ -386,6 +394,15 @@ async function boot() {
     if (archived.length) toast(`${archived.map(fmtDay).join('、')}没有记录，已归档。不算做了，也不算没做。`);
   }
 
+  function resumeWriterDuties() {
+    if (store.isReadOnly) return;
+    daily();
+    lastToday = store.today();
+    asked.clear();
+    setTimeout(maybePrompt, 0);
+    runWriterAutoRefresh();
+  }
+
   store.subscribe(update);
   daily();
   update();
@@ -393,17 +410,17 @@ async function boot() {
 
   setInterval(() => {
     const t = store.today();
-    if (t !== lastToday) {
-      lastToday = t;
+    if (t !== lastToday && !store.isReadOnly) {
       daily();
+      lastToday = t;
     }
     update();
   }, 60_000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (store.today() !== lastToday) {
-        lastToday = store.today();
+      if (store.today() !== lastToday && !store.isReadOnly) {
         daily();
+        lastToday = store.today();
       }
       update();
     }

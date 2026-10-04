@@ -4,6 +4,7 @@ export {
   createTask,
   declineTask,
   dropTask,
+  editTaskPlan,
   markTaskDone,
   moveTask,
   pullIntoDay,

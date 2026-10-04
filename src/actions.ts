@@ -251,6 +251,23 @@ function moveTaskImpl(store: Store, taskId: string, projectId: string | undefine
   });
 }
 
+/**
+ * 编辑任务的归属和日期是一个用户动作。内部复用领域事实生成逻辑，
+ * 但只由最外层 action 提交一次 persistence transaction。
+ */
+function editTaskPlanImpl(store: Store, taskId: string, projectId: string | undefined, date: ISODate | undefined) {
+  const before = store.task(taskId);
+  if (!before || before.status !== 'open') return;
+
+  if (projectId !== before.projectId) {
+    if (!before.projectId && projectId) arrangeTaskImpl(store, taskId, projectId, date);
+    else moveTaskImpl(store, taskId, projectId);
+  }
+
+  const current = store.task(taskId);
+  if (current && current.scheduledFor !== date) rescheduleTaskImpl(store, taskId, date);
+}
+
 function renameTaskImpl(store: Store, taskId: string, title: string) {
   const t = store.taskRecord(taskId);
   const n = title.trim();
@@ -621,6 +638,9 @@ export const rescheduleTask = (...args: Parameters<typeof rescheduleTaskImpl>): 
 
 export const moveTask = (...args: Parameters<typeof moveTaskImpl>): ReturnType<typeof moveTaskImpl> =>
   args[0].batch(() => moveTaskImpl(...args));
+
+export const editTaskPlan = (...args: Parameters<typeof editTaskPlanImpl>): ReturnType<typeof editTaskPlanImpl> =>
+  args[0].batch(() => editTaskPlanImpl(...args));
 
 export const renameTask = (...args: Parameters<typeof renameTaskImpl>): ReturnType<typeof renameTaskImpl> =>
   args[0].batch(() => renameTaskImpl(...args));

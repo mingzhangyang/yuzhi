@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import { IdbPersistence, MemoryPersistence, emptyData } from '../src/db';
 import { Store } from '../src/store';
-import { createProject } from '../src/actions';
+import { createProject, createTask, editTaskPlan } from '../src/actions';
 
 const dbName = (label: string) => `yuzhi-batch-${label}-${Date.now()}-${Math.random()}`;
 
@@ -28,6 +28,29 @@ describe('原子批次写入', () => {
     expect(persistence.commits).toBe(1);
     expect(notifications).toEqual([['团队']]);
     expect((await persistence.load()).projects.map((project) => project.name)).toEqual(['团队']);
+  });
+
+  it('任务归属和日期一起保存时只产生一个持久化 transaction', async () => {
+    class CountedPersistence extends MemoryPersistence {
+      commits = 0;
+      async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        this.commits++;
+        return super.batch(writes);
+      }
+    }
+    const persistence = new CountedPersistence();
+    const store = new Store(emptyData(), persistence);
+    const from = createProject(store, '原村落');
+    const to = createProject(store, '新村落');
+    const task = createTask(store, { title: '同时改归属和日期', projectId: from.id, scheduledFor: '2026-10-04' });
+    await store.flush();
+
+    persistence.commits = 0;
+    editTaskPlan(store, task.id, to.id, '2026-10-10');
+    await store.flush();
+
+    expect(persistence.commits).toBe(1);
+    expect(store.task(task.id)).toMatchObject({ projectId: to.id, scheduledFor: '2026-10-10' });
   });
 
   it('中途写入失败时 IndexedDB 整批回滚', async () => {
