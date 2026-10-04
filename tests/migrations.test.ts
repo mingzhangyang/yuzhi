@@ -478,6 +478,46 @@ describe('数据迁移基础设施', () => {
     inspect.close();
   });
 
+  it('reader 和 writer 都拒绝未来 schema，避免旧客户端写坏新结构', async () => {
+    const name = dbName('future-schema');
+    const future = await openDB(name, IDB_SCHEMA_VERSION + 1, {
+      upgrade(db) {
+        for (const [store, keyPath] of Object.entries(COLLECTIONS)) db.createObjectStore(store, { keyPath });
+        db.createObjectStore('meta');
+      },
+    });
+    future.close();
+
+    const reader = new IdbPersistence(name, false);
+    await expect(reader.load()).rejects.toThrow('更新版本');
+    await reader.close();
+
+    const writer = new IdbPersistence(name, true);
+    await expect(writer.load()).rejects.toThrow('更新版本');
+    await writer.close();
+  });
+
+  it('staging/current schema 缺少当前集合时 fail closed', async () => {
+    const name = dbName('partial-current-schema');
+    const partial = await openDB(name, IDB_SCHEMA_VERSION, {
+      upgrade(db) {
+        for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
+          if (store !== 'projects') db.createObjectStore(store, { keyPath });
+        }
+        db.createObjectStore('meta');
+      },
+    });
+    partial.close();
+
+    const reader = new IdbPersistence(name, false);
+    await expect(reader.load()).rejects.toThrow(/结构不完整.*projects/);
+    await reader.close();
+
+    const writer = new IdbPersistence(name, true);
+    await expect(writer.load()).rejects.toThrow(/结构不完整.*projects/);
+    await writer.close();
+  });
+
   it('versionchange 时旧连接主动关闭，不阻塞下一次 schema upgrade', async () => {
     const name = dbName('versionchange');
     const old = new IdbPersistence(name);

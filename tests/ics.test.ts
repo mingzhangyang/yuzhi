@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseIcs } from '../src/ics';
 import { autoRefresh, syncSource } from '../src/calendar';
 import { makeStore } from './helpers';
-import { classifyEvents, createProject, mergeEvents, settleDay } from '../src/actions';
+import { classifyEvents, createProject, mergeEvents, removeSource, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
 import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
 import { interruptions } from '../src/logic/read-model';
@@ -149,6 +149,31 @@ describe('日历后台刷新与 writer 权限', () => {
 
     expect(await autoRefresh(h.store)).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('请求进行中 source 被删除时丢弃旧响应，不复活孤儿事件', async () => {
+    const h = makeStore('2026-09-21');
+    h.store.put('sources', { id: 'src', name: '订阅', icsUrl: 'https://example.com/a.ics' });
+    await h.store.flush();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchMock = vi.fn(async () => {
+      await gate;
+      return new Response(ICS, { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const refresh = syncSource(h.store, 'src');
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    removeSource(h.store, 'src');
+    await h.store.flush();
+    release();
+
+    await expect(refresh).resolves.toBe(0);
+    expect(h.store.data.sources).toEqual([]);
+    expect(h.store.data.events).toEqual([]);
   });
 
   it('请求进行中失去 writer 权限时丢弃结果且不做错误回写', async () => {

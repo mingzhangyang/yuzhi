@@ -22,11 +22,14 @@ async function boot() {
   initModal();
   let appStore: Store | undefined;
   let idb: IdbPersistence | undefined;
+  let settle!: SettleSheet;
+  let ceremony!: Ceremony;
   let readerRefresh: Promise<void> = Promise.resolve();
   let versionChangeRecovery: Promise<void> | undefined;
+  let setAppReadOnly = (readOnly: boolean) => appStore?.setReadOnly(readOnly);
   const tabs = new SingleWriterCoordinator({
     onRoleChange: (role) => {
-      appStore?.setReadOnly(role !== 'writer');
+      setAppReadOnly(role !== 'writer');
       const notice = document.querySelector<HTMLElement>('#tabNotice');
       if (notice) {
         notice.hidden = role === 'writer';
@@ -48,7 +51,7 @@ async function boot() {
       // A versionchange means this connection is blocking another upgrade.
       // Stop new actions immediately; the recovery path drains writes, closes
       // and refreshes the reader snapshot before releasing the writer lease.
-      appStore?.setReadOnly(true);
+      setAppReadOnly(true);
       const notice = document.querySelector<HTMLElement>('#tabNotice');
       if (notice) {
         notice.hidden = false;
@@ -108,7 +111,53 @@ async function boot() {
   }
   const store = new Store(data, per);
   appStore = store;
-  store.setReadOnly(!canWrite);
+
+  const syncReadOnlyUi = (readOnly: boolean) => {
+    for (const id of ['newBtn', 'settleBtn', 'fogGo']) {
+      const button = document.getElementById(id) as HTMLButtonElement | null;
+      if (button) button.disabled = readOnly;
+    }
+    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"]')
+      .forEach((button) => { button.disabled = readOnly; });
+    document.body.dataset.readOnly = readOnly ? 'true' : 'false';
+  };
+  setAppReadOnly = (readOnly: boolean) => {
+    store.setReadOnly(readOnly);
+    syncReadOnlyUi(readOnly);
+    if (readOnly) {
+      settle?.close();
+      ceremony?.close();
+    }
+  };
+  setAppReadOnly(!canWrite);
+
+  const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task']);
+  const guardReadOnlyMutation = (event: Event) => {
+    if (!store.isReadOnly || !(event.target instanceof Element)) return;
+    const target = event.target;
+    let mutating = false;
+    if (event.type === 'submit') {
+      mutating = Boolean(target.closest('#tracker form, #mdl form'));
+    } else if (event.type === 'change') {
+      mutating = Boolean(target.closest('#tracker [data-act-change], #settle [data-pull]'));
+    } else {
+      const trackerAction = target.closest<HTMLElement>('#tracker [data-act]');
+      mutating = Boolean(
+        (trackerAction && !readOnlyNavActions.has(trackerAction.dataset.act ?? ''))
+        || target.closest('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]')
+        || target.closest('#settle [data-set], #settle [data-reason], #settle [data-act="all"], #settle [data-act="commit"], #settle .scard')
+        || target.closest('#ceremony [data-go]')
+      );
+    }
+    if (!mutating) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toast('此页当前只读。请先接管写权限，再修改小岛。', true);
+  };
+  for (const type of ['click', 'submit', 'change', 'pointerdown']) {
+    document.addEventListener(type, guardReadOnlyMutation, true);
+  }
+
   store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
   store.onCommitted = () => {
     if (idb) tabs.announceCommit();
@@ -154,7 +203,7 @@ async function boot() {
       if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
       return false;
     }
-    appStore?.setReadOnly(true);
+    setAppReadOnly(true);
     try {
       if (versionChangeRecovery) {
         await versionChangeRecovery;
@@ -179,7 +228,7 @@ async function boot() {
       if (notify) toast('已接管写权限');
       return true;
     } catch (error) {
-      appStore?.setReadOnly(true);
+      setAppReadOnly(true);
       await tabs.release();
       if (idb) {
         try { await idb.reopen(false); } catch { /* keep the failed tab read-only */ }
@@ -218,7 +267,7 @@ async function boot() {
   });
   tracker.bindChange();
 
-  const ceremony = new Ceremony(store, {
+  ceremony = new Ceremony(store, {
     pause: (on) => (renderer.paused = on),
     done: (p, where) => {
       tracker.open(where === 'landmark' ? { kind: 'project', id: p.id } : { kind: 'archive' });
@@ -226,7 +275,7 @@ async function boot() {
     },
   });
 
-  const settle = new SettleSheet(store, {
+  settle = new SettleSheet(store, {
     brick: (pid, from) => flyBrick(pid, from),
     onOpenChange: (o) => {
       dusk = o;
@@ -314,7 +363,7 @@ async function boot() {
   /** 进入「搬离」阶段的村落：询问重新启动 / 缩小规模 / 正式关闭 */
   const asked = new Set<string>();
   function maybePrompt() {
-    if (isModalOpen() || settle.isOpen() || ceremony.isOpen()) return;
+    if (store.isReadOnly || isModalOpen() || settle.isOpen() || ceremony.isOpen()) return;
     const p = A.projectsNeedingPrompt(store).find((x) => !asked.has(x.id));
     if (!p) return;
     asked.add(p.id);
@@ -359,7 +408,7 @@ async function boot() {
   const suspendForCache = async () => {
     // Stop actions before draining writes; only release the lease after the
     // persistence connection is no longer write-capable.
-    store.setReadOnly(true);
+    setAppReadOnly(true);
     try { await store.flush(); } catch (error) { store.onError(error); }
     if (idb) {
       try { await idb.setWriteAccess(false); } catch (error) { store.onError(error); }
@@ -367,7 +416,7 @@ async function boot() {
     await tabs.release();
   };
   window.addEventListener('pagehide', (event) => {
-    store.setReadOnly(true);
+    setAppReadOnly(true);
     if (event.persisted) {
       pageSuspension = suspendForCache();
       return;
@@ -443,7 +492,7 @@ async function boot() {
   applyTheme();
 
   // 第一次打开
-  if (!store.data.projects.length && !store.data.tasks.length && !store.data.sources.length) {
+  if (!store.isReadOnly && !store.data.projects.length && !store.data.tasks.length && !store.data.sources.length) {
     openWelcome({
       project: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
       calendar: () => openCalendar(store, afterImport),

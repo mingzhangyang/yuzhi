@@ -455,6 +455,23 @@ export class IdbPersistence implements Persistence {
     this.versionChangeHandler = fn;
   }
 
+  private assertSupportedSchema(db: IDBPDatabase) {
+    if (db.version <= IDB_SCHEMA_VERSION) return;
+    const version = db.version;
+    db.close();
+    throw new Error(`本地数据库来自更新版本（schema ${version}），当前屿志只支持到 schema ${IDB_SCHEMA_VERSION}。请先更新屿志，当前版本不会写入这份数据。`);
+  }
+
+  private assertRequiredStores(db: IDBPDatabase, storeNames = Array.from(db.objectStoreNames)) {
+    if (db.version < STAGING_SCHEMA_VERSION) return;
+    const required = ['meta', ...COLL_NAMES];
+    const missing = required.filter((name) => !storeNames.includes(name));
+    if (!missing.length) return;
+    const version = db.version;
+    db.close();
+    throw new Error(`数据库结构不完整（schema ${version} 缺少：${missing.join('、')}），为保护数据已停止读写。`);
+  }
+
   private openDatabase(version: number | undefined, allowUpgrade: boolean): Promise<IDBPDatabase> {
     const notifyVersionChange = () => {
       const handler = this.versionChangeHandler;
@@ -492,12 +509,20 @@ export class IdbPersistence implements Persistence {
 
   private async openWritableDatabase(): Promise<IDBPDatabase> {
     const current = await this.openDatabase(undefined, false);
-    if (current.version >= STAGING_SCHEMA_VERSION) return current;
+    this.assertSupportedSchema(current);
+    if (current.version >= STAGING_SCHEMA_VERSION) {
+      this.assertRequiredStores(current);
+      return current;
+    }
     current.close();
-    return this.openDatabase(STAGING_SCHEMA_VERSION, true);
+    const staged = await this.openDatabase(STAGING_SCHEMA_VERSION, true);
+    this.assertRequiredStores(staged);
+    return staged;
   }
 
   private async dropLegacyCollections(db: IDBPDatabase): Promise<IDBPDatabase> {
+    this.assertSupportedSchema(db);
+    this.assertRequiredStores(db);
     const hasLegacy = LEGACY_COLLECTIONS.some((name) => db.objectStoreNames.contains(name));
     if (db.version >= IDB_SCHEMA_VERSION) {
       if (hasLegacy) throw new Error('数据库最终 schema 仍包含旧集合，拒绝继续写入');
@@ -513,6 +538,7 @@ export class IdbPersistence implements Persistence {
     let storedVersionValue: unknown;
     try {
       db = await this.dbp;
+      this.assertSupportedSchema(db);
       const storeNames = Array.from(db.objectStoreNames);
 
       // A read-only open on a brand-new profile creates an empty version-1
@@ -520,6 +546,7 @@ export class IdbPersistence implements Persistence {
       // uninitialized shape as an empty transient snapshot; partial schemas
       // remain errors so corruption is never hidden.
       if (storeNames.length === 0 && !this.writeAccess) return emptyData();
+      this.assertRequiredStores(db, storeNames);
       if (!storeNames.includes('meta')) throw new Error('数据库结构不完整（缺少 meta）');
 
       // One load is one snapshot. Issue every request before the first await so

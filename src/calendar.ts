@@ -26,12 +26,14 @@ export async function syncSource(store: Store, id: string): Promise<number> {
   if (!src?.icsUrl) return 0;
   try {
     const text = await fetchIcs(src.icsUrl);
-    // Writer ownership may be lost while the network request is in flight.
+    // Writer ownership or the source itself may change while the network
+    // request is in flight. Only the still-current source may consume it.
     if (store.isReadOnly) throw new Error('刷新期间写权限已转移，已丢弃这次日历结果');
+    const current = store.data.sources.find((s) => s.id === id);
+    if (!current || current.icsUrl !== src.icsUrl) return 0;
     return store.batch(() => {
-      const n = ingest(store, src, text);
-      const current = store.data.sources.find((s) => s.id === id);
-      if (current) store.put('sources', { ...current, lastFetchedAt: new Date().toISOString(), lastError: undefined });
+      const n = ingest(store, current, text);
+      store.put('sources', { ...current, lastFetchedAt: new Date().toISOString(), lastError: undefined });
       return n;
     });
   } catch (e) {
@@ -49,6 +51,7 @@ export async function addUrlSource(store: Store, name: string, url: string): Pro
   const u = url.trim();
   if (!/^(https?|webcals?):\/\//i.test(u)) throw new Error('请粘贴以 https:// 或 webcal:// 开头的订阅链接');
   const text = await fetchIcs(u);
+  if (store.isReadOnly) throw new Error('读取期间写权限已转移，已丢弃这次日历结果');
   const src: CalendarSource = { id: uid('s'), name: name.trim() || '日历', icsUrl: u };
   const { from, to } = windowNow(store.clock());
   const r = parseIcs(text, src.id, from, to);
@@ -64,6 +67,7 @@ export async function addUrlSource(store: Store, name: string, url: string): Pro
 export async function addFileSource(store: Store, file: File): Promise<number> {
   if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
   const text = await file.text();
+  if (store.isReadOnly) throw new Error('读取期间写权限已转移，已丢弃这次日历结果');
   if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000))) throw new Error('这不是 .ics 日历文件');
   const src: CalendarSource = { id: uid('s'), name: file.name.replace(/\.ics$/i, '') || '上传的日历', lastFetchedAt: new Date().toISOString() };
   const { from, to } = windowNow(store.clock());
