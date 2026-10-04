@@ -260,9 +260,13 @@ export class AppSession {
         // relinquish() can join an already-running demotion (notably
         // versionchange recovery). In that case its preparation callback is
         // intentionally not invoked, so suspension must perform the final
-        // persistence cleanup after the joined demotion settles.
-        if (!cleanupRan) await this.drainAndClosePersistence();
-        this.tabs.suspendNotifications();
+        // persistence cleanup after the joined demotion settles. Notification
+        // teardown is unconditional even if that final cleanup reports/fails.
+        try {
+          if (!cleanupRan) await this.drainAndClosePersistence();
+        } finally {
+          this.tabs.suspendNotifications();
+        }
       }
     })();
     this.pageSuspension = task;
