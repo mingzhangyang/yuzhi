@@ -1,73 +1,46 @@
-interface PropAtlasDef {
-  src: string;
-  width: number;
-  height: number;
-}
+import { PROP_SPRITES, type PropId } from './prop-sprites';
 
-interface PropSpriteDef {
-  atlas: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  anchorX: number;
-  anchorY: number;
-}
+// 构建时带 hash 的 URL：换图后文件名随之变化，不会命中旧缓存
+const URLS = import.meta.glob<string>('../assets/island/props/*.webp', {
+  query: '?url',
+  import: 'default',
+  eager: true,
+});
 
-interface PropManifest {
-  atlases: Record<string, PropAtlasDef>;
-  sprites: Record<string, PropSpriteDef>;
+function urlOf(id: PropId): string | undefined {
+  return URLS[`../assets/island/props/${id}.webp`];
 }
 
 /**
- * Lazy runtime loader for generated island prop atlases.
- * Rendering is a no-op until the manifest and requested atlas have loaded,
+ * Lazy runtime loader for generated island prop sprites (one image per prop).
+ * Each sprite is fetched on first draw; until it has decoded, draw() is a no-op
  * so procedural Canvas art remains the fallback.
  */
 export class IslandPropArt {
-  private manifest: PropManifest | null = null;
-  private images = new Map<string, HTMLImageElement>();
+  private images = new Map<PropId, HTMLImageElement>();
 
-  constructor() {
-    if (typeof window !== 'undefined') void this.loadManifest();
-  }
-
-  private async loadManifest() {
-    try {
-      const res = await fetch('/assets/island/props/manifest.json', { cache: 'force-cache' });
-      if (!res.ok) return;
-      this.manifest = (await res.json()) as PropManifest;
-    } catch {
-      // Generated art is optional enrichment; keep procedural rendering intact.
-    }
-  }
-
-  private image(atlasId: string, src: string): HTMLImageElement | null {
-    let img = this.images.get(atlasId);
+  private image(id: PropId): HTMLImageElement | null {
+    let img = this.images.get(id);
     if (!img) {
+      const src = urlOf(id);
+      if (!src || typeof Image === 'undefined') return null;
       img = new Image();
       img.decoding = 'async';
       img.src = src;
-      this.images.set(atlasId, img);
+      this.images.set(id, img);
     }
     return img.complete && img.naturalWidth > 0 ? img : null;
   }
 
-  draw(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, width: number, alpha = 1): boolean {
-    const manifest = this.manifest;
-    const sprite = manifest?.sprites[id];
-    if (!manifest || !sprite) return false;
-    const atlas = manifest.atlases[sprite.atlas];
-    if (!atlas) return false;
-    const img = this.image(sprite.atlas, atlas.src);
+  /** 以 (x, y) 为落地点绘制道具；width 为绘制宽度，高度按原图比例。 */
+  draw(ctx: CanvasRenderingContext2D, id: PropId, x: number, y: number, width: number, alpha = 1): boolean {
+    const img = this.image(id);
     if (!img) return false;
-
+    const sprite = PROP_SPRITES[id];
     const height = width * (sprite.h / sprite.w);
-    const dx = x - width * sprite.anchorX;
-    const dy = y - height * sprite.anchorY;
     ctx.save();
     ctx.globalAlpha *= alpha;
-    ctx.drawImage(img, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, width, height);
+    ctx.drawImage(img, x - width * sprite.anchorX, y - height * sprite.anchorY, width, height);
     ctx.restore();
     return true;
   }

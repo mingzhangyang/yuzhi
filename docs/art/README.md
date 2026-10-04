@@ -4,18 +4,32 @@
 
 ## 视觉参考
 
-- `art-direction-board.svg`：整体视觉方向板，定义等距小岛、四季、色彩、材质和氛围。
-- `landmark-concepts.svg`：8 个永久地标概念：钟楼、藏书阁、观星台、玻璃温室、风车工坊、海港会馆、纪念塔、山亭。
+- `art-direction-board.webp`：整体视觉方向板，定义等距小岛、四季、色彩、材质和氛围。
+- `landmark-concepts.webp`：8 个永久地标概念：钟楼、藏书阁、观星台、玻璃温室、风车工坊、海港会馆、纪念塔、山亭。
 
-## 运行时环境素材
+## 运行时环境道具
 
-运行时 atlas 位于 `public/assets/island/props/`：
+共 34 个道具，每个道具一张独立 WebP，位于 `src/assets/island/props/<id>.webp`；尺寸与落地锚点记录在 `src/island/prop-sprites.ts`。
 
-- `props-1.svg`
-- `props-2.svg`
-- `manifest.json`
+- 图片经 Vite 打包，文件名带内容 hash，换图后不会命中旧缓存。
+- 运行时按需加载：只有实际绘制过的道具才会被请求；当前只接入码头的木箱、木桶、绳圈和渔网。
+- 锚点为内容底边中点，`IslandPropArt.draw(ctx, id, x, y, width)` 中的 `(x, y)` 即道具落地点。
 
-共 34 个独立道具。manifest 记录每个道具在 atlas 中的 source rectangle 与默认 bottom-center anchor，可直接用于 Canvas `drawImage(...)`。运行时只会按需加载实际使用到的 atlas；当前先接入码头的木箱、木桶、绳圈和渔网。
+### 原稿与切图流程
+
+原稿保存在仓库根目录 `art/source/`（无损 WebP，不进入运行时包）：
+
+- `props-harbor.webp`：港口 / 村落道具 18 个
+- `props-nature.webp`：自然道具 16 个
+
+修改或新增道具时，更新原稿与 `scripts/slice-props.py` 中的 id 列表，然后重新生成：
+
+```sh
+pip install pillow numpy scipy
+python3 scripts/slice-props.py
+```
+
+脚本按 alpha 连通域找出每个物体，去掉抠图残留的低 alpha 光晕并把边缘 alpha 拉满，用实心像素颜色替换半透明边缘（去色边），裁切后留 2px 透明边，按原稿 0.75 倍统一缩放导出，并重新生成 `prop-sprites.ts`。不要手动修改生成结果。
 
 ## 使用原则
 
@@ -24,6 +38,5 @@
 - 港口 / 村落中较中性的木箱、木桶、绳索、码头件、标牌、长椅等可优先接入。
 - 当前自然道具主要表现春夏状态；不要无条件用于冬季积雪场景，等待季节变体或统一季节化处理。
 - 永久地标以概念板为造型参考，优先使用可程序化重绘的清晰轮廓，而不是直接把整栋概念图贴进场景。
-- 高分辨率生成原稿不进入运行时包；仓库中的参考图使用嵌入压缩 WebP 的 SVG 文本容器，避免无谓增加发布体积。
 
-这些素材由 OpenAI 图像生成工具为本项目生成，并针对 Canvas 运行时做了尺寸与 WebP 优化。
+这些素材由 OpenAI 图像生成工具为本项目生成。
