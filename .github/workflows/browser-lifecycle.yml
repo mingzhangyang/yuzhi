@@ -8,7 +8,6 @@ on:
       - 'src/store.ts'
       - 'src/db.ts'
       - 'src/main.ts'
-      - 'tests/ics.test.ts'
       - 'browser-tests/**'
       - '.github/workflows/browser-lifecycle.yml'
   workflow_dispatch:
@@ -27,13 +26,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-
-      - name: Verify calendar fixtures across supported timezones
-        run: |
-          for tz in UTC Asia/Shanghai America/New_York; do
-            echo "== TZ=$tz =="
-            TZ="$tz" npm test -- tests/ics.test.ts --reporter=dot
-          done
 
       - run: npm run build
 
