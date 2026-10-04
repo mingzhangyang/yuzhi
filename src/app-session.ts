@@ -172,11 +172,11 @@ export class AppSession {
   }
 
   async requestTakeover(): Promise<boolean> {
-    if (this.closing || this.tabs.state === 'closed' || !this.tabs.supportsWriterLock) return false;
+    if (this.closing || !this.tabs.supportsWriterLock) return false;
 
     try {
       await this.tabs.whenStable();
-      if (this.closing || this.tabs.state === 'closed') return false;
+      if (this.closing) return false;
 
       const acquired = await this.tabs.takeOver(this.idb
         ? async () => {
@@ -201,7 +201,7 @@ export class AppSession {
       // A failed takeover may restore reader persistence only while the
       // session is still live. The check and reopen enqueue are deliberately
       // adjacent: once final close marks closing, no later recovery may reopen.
-      if (current && !this.closing && this.tabs.state !== 'closed') {
+      if (current && !this.closing) {
         try { await current.reopen(false); } catch (reopenError) { this.report(reopenError); }
       }
       throw error;
