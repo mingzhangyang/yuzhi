@@ -4,10 +4,15 @@ on:
   pull_request:
     paths:
       - 'src/app-session.ts'
+      - 'src/persistence-startup.ts'
       - 'src/single-writer.ts'
       - 'src/store.ts'
       - 'src/db.ts'
       - 'src/main.ts'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
       - 'browser-tests/**'
       - '.github/workflows/browser-lifecycle.yml'
   workflow_dispatch:
