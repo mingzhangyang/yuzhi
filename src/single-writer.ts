@@ -3,6 +3,12 @@ export type WriterState = 'reader' | 'preparing' | 'writer' | 'releasing' | 'rec
 export type WriterPreparation = () => Promise<void> | void;
 
 type LockLike = { name: string } | null;
+type ChannelLike = {
+  onmessage: ((event: MessageEvent<ChannelMessage>) => void) | null;
+  postMessage(message: ChannelMessage): void;
+  close(): void;
+};
+type ChannelFactory = (name: string) => ChannelLike | undefined;
 type LockRequest = (
   name: string,
   options: { ifAvailable?: boolean },
@@ -25,7 +31,7 @@ export interface SingleWriterOptions {
    * browsers). Undefined means "use navigator.locks when available".
    */
   locks?: { request: LockRequest } | null;
-  channelFactory?: (name: string) => { onmessage: ((event: MessageEvent<ChannelMessage>) => void) | null; postMessage(message: ChannelMessage): void; close(): void };
+  channelFactory?: ChannelFactory;
   onStateChange?: (state: WriterState) => void;
   /** Compatibility observer for consumers that only care about reader/writer. */
   onRoleChange?: (role: WriterRole) => void;
@@ -53,7 +59,8 @@ export class SingleWriterCoordinator {
   readonly channelName: string;
 
   private readonly locks?: { request: LockRequest };
-  private readonly channel?: ReturnType<NonNullable<SingleWriterOptions['channelFactory']>>;
+  private readonly channelFactory: ChannelFactory;
+  private channel?: ChannelLike;
   private readonly onStateChange?: (state: WriterState) => void;
   private readonly onRoleChange?: (role: WriterRole) => void;
   private readonly onPeerCommit?: () => void;
@@ -80,9 +87,9 @@ export class SingleWriterCoordinator {
     this.onRoleChange = options.onRoleChange;
     this.onPeerCommit = options.onPeerCommit;
     this.onVersionChange = options.onVersionChange;
-    const makeChannel = options.channelFactory ?? ((name: string) => typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(name) : undefined);
-    this.channel = makeChannel?.(this.channelName) as typeof this.channel;
-    if (this.channel) this.channel.onmessage = (event) => this.receive(event.data);
+    this.channelFactory = options.channelFactory
+      ?? ((name: string) => typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(name) : undefined);
+    this.resumeNotifications();
   }
 
   get supportsWriterLock() {
@@ -113,6 +120,26 @@ export class SingleWriterCoordinator {
     this.onStateChange?.(state);
     const nextRole = this.role;
     if (previousRole !== nextRole) this.onRoleChange?.(nextRole);
+  }
+
+  /**
+   * Drop notification resources while a page is frozen/hidden. BroadcastChannel
+   * is notification-only, so missed commits are recovered by AppSession's
+   * authoritative refresh on resume.
+   */
+  suspendNotifications() {
+    const channel = this.channel;
+    this.channel = undefined;
+    try { channel?.close(); } catch { /* already closed */ }
+  }
+
+  /** Recreate the notification channel after a page lifecycle resume. */
+  resumeNotifications() {
+    if (this.closed || this.channel) return;
+    const channel = this.channelFactory(this.channelName);
+    if (!channel) return;
+    channel.onmessage = (event) => this.receive(event.data);
+    this.channel = channel;
   }
 
   private announce(message: ChannelMessage) {
@@ -328,7 +355,7 @@ export class SingleWriterCoordinator {
       await prepare?.();
     } finally {
       await this.releaseLease();
-      try { this.channel?.close(); } catch { /* already closed */ }
+      this.suspendNotifications();
     }
   }
 

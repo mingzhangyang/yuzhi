@@ -9,6 +9,7 @@ import { itemKey } from '../src/logic/days';
 import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
 import { interruptions } from '../src/logic/read-model';
 import { lifeEntries } from '../src/logic/operations';
+import { localDate } from '../src/lib/date';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -117,14 +118,17 @@ describe('日历合并', () => {
   });
 
   it('旧版本按实际开始时间存的 id 会被迁移，结算记录跟着走', () => {
-    const h = makeStore('2026-09-10');
+    // 结算日属于用户本地日期语义；01:30Z 在纽约还是前一天，不能把
+    // UTC 日期硬编码成所有时区都相同的本地结算日。
+    const settlementDate = localDate(new Date('2026-09-10T01:30:00.000Z'));
+    const h = makeStore(settlementDate);
     const p = createProject(h.store, '团队');
     // 模拟旧版本存下的数据
     const legacy = parseIcs(ICS, 'src', from, to).events.map((e) => ({ ...e, id: `src|${e.uid}|${e.start}` }));
     for (const e of legacy) h.store.put('events', e);
     classifyEvents(h.store, '牙医', p.id);
     const oldId = 'src|single-1|2026-09-10T01:30:00.000Z';
-    settleDay(h.store, '2026-09-10', new Map([[itemKey('event', oldId), { outcome: 'skipped', reason: 'interrupted' }]]));
+    settleDay(h.store, settlementDate, new Map([[itemKey('event', oldId), { outcome: 'skipped', reason: 'interrupted' }]]));
     const originalSeq = h.store.data.entries.find((e) => e.itemType === 'event' && e.itemId === oldId)!.seq;
 
     mergeEvents(h.store, 'src', parseIcs(ICS, 'src', from, to).events, from.toISOString());

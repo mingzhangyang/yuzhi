@@ -417,8 +417,9 @@ async function boot() {
     });
   } else setTimeout(maybePrompt, 1200);
 
-  // 方便调试
-  (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A };
+  // 方便调试与真实浏览器生命周期验收。session 暴露的是现有应用边界，
+  // 不另建测试专用权限状态。
+  (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A, session };
 }
 
 boot();

@@ -38,6 +38,9 @@ export class AppSession {
   private writerActivation?: () => void;
   private readerRefresh: Promise<void> = Promise.resolve();
   private pageSuspension?: Promise<void>;
+  private resumeTask?: { generation: number; promise: Promise<boolean> };
+  private lifecycleGeneration = 0;
+  private lifecycleTarget: 'active' | 'suspended' = 'active';
   private closing = false;
   private closeTask?: Promise<void>;
 
@@ -171,80 +174,165 @@ export class AppSession {
     }
   }
 
-  async requestTakeover(): Promise<boolean> {
-    if (this.closing || !this.tabs.supportsWriterLock) return false;
+  private isActiveLifecycle(generation: number) {
+    return !this.closing
+      && this.lifecycleTarget === 'active'
+      && this.lifecycleGeneration === generation;
+  }
+
+  async requestTakeover(expectedGeneration = this.lifecycleGeneration): Promise<boolean> {
+    if (!this.isActiveLifecycle(expectedGeneration) || !this.tabs.supportsWriterLock) return false;
 
     try {
       await this.tabs.whenStable();
-      if (this.closing) return false;
+      if (!this.isActiveLifecycle(expectedGeneration)) return false;
 
       const acquired = await this.tabs.takeOver(this.idb
         ? async () => {
           // Finish or invalidate any reader refresh before reopening writable.
           await this.readerRefresh.catch(() => {});
-          if (this.closing || this.tabs.state !== 'preparing') return;
+          if (!this.isActiveLifecycle(expectedGeneration) || this.tabs.state !== 'preparing') return;
 
           const current = this.idb;
           if (!current) return;
           await current.setWriteAccess(true);
-          if (this.closing || this.tabs.state !== 'preparing') return;
+          if (!this.isActiveLifecycle(expectedGeneration) || this.tabs.state !== 'preparing') return;
 
           const fresh = await current.load();
-          if (this.closing || this.tabs.state !== 'preparing') return;
+          if (!this.isActiveLifecycle(expectedGeneration) || this.tabs.state !== 'preparing') return;
           this.store.reload(fresh);
         }
         : undefined);
-      return acquired;
+      return acquired && this.isActiveLifecycle(expectedGeneration);
     } catch (error) {
       await this.tabs.release().catch(() => {});
       const current = this.idb;
-      // A failed takeover may restore reader persistence only while the
-      // session is still live. The check and reopen enqueue are deliberately
-      // adjacent: once final close marks closing, no later recovery may reopen.
-      if (current && !this.closing) {
+      // Failed takeover may restore reader persistence only for the exact
+      // lifecycle generation that requested it. A later suspend/close must
+      // never be undone by this recovery path.
+      if (current && this.isActiveLifecycle(expectedGeneration)) {
         try { await current.reopen(false); } catch (reopenError) { this.report(reopenError); }
       }
       throw error;
     }
   }
 
-  private async drainAndDemotePersistence() {
+  private async drainAndClosePersistence() {
     const store = this.currentStore;
     if (store) {
       try { await store.flush(); } catch (error) { this.report(error); }
     }
     const current = this.idb;
     if (current) {
-      try { await current.setWriteAccess(false); } catch (error) { this.report(error); }
+      try { await current.close(); } catch (error) { this.report(error); }
     }
   }
 
   /**
-   * bfcache suspension synchronously revokes new actions through coordinator
-   * state, then drains accepted writes before the lease is released.
+   * Navigation/freeze suspension synchronously revokes new actions, drains all
+   * already accepted writes while the lease is still held, then drops every
+   * resource that can keep a page out of BFCache. The notification channel is
+   * closed only after the final commit has had a chance to broadcast.
    */
   suspendForCache(): Promise<void> {
+    if (this.closing) return Promise.resolve();
+
+    // Every suspend signal is a new lifecycle intent, even when an older
+    // suspension is still draining. Advancing the generation invalidates any
+    // resume that was waiting on, or started after, an earlier suspension.
+    this.lifecycleTarget = 'suspended';
+    this.lifecycleGeneration++;
+
+    // pageswap/pagehide (or duplicate hidden notifications) can describe the
+    // same suspension. The generation must advance so any in-flight resume is
+    // invalidated, but resource cleanup itself is idempotently shared until a
+    // successful resume clears pageSuspension.
     if (this.pageSuspension) return this.pageSuspension;
-    const task = this.tabs.relinquish(() => this.drainAndDemotePersistence());
+
+    const task = (async () => {
+      let cleanupRan = false;
+      try {
+        await this.tabs.relinquish(async () => {
+          cleanupRan = true;
+          await this.drainAndClosePersistence();
+        });
+      } finally {
+        // relinquish() can join an already-running demotion (notably
+        // versionchange recovery). In that case its preparation callback is
+        // intentionally not invoked, so suspension must perform the final
+        // persistence cleanup after the joined demotion settles. Notification
+        // teardown is unconditional even if that final cleanup reports/fails.
+        try {
+          if (!cleanupRan) await this.drainAndClosePersistence();
+        } finally {
+          this.tabs.suspendNotifications();
+        }
+      }
+    })();
     this.pageSuspension = task;
     task.catch(() => {});
     return task;
   }
 
   /**
-   * A restored/visible reader always rechecks durable state. This compensates
-   * for BroadcastChannel notifications that may have been missed while the page
-   * was frozen; takeover then performs its own write-capable refresh as well.
+   * Restore notification/persistence resources, reconcile durable state, then
+   * reacquire the writer lease. A resume belongs to exactly one lifecycle
+   * generation; any later suspend makes every remaining phase stale.
    */
-  async resumeFromCache(): Promise<boolean> {
-    if (this.closing) return false;
-    const suspension = this.pageSuspension;
-    if (suspension) await suspension.catch(() => {});
-    this.pageSuspension = undefined;
+  resumeFromCache(): Promise<boolean> {
+    if (this.closing) return Promise.resolve(false);
+    if (this.lifecycleTarget === 'active' && this.resumeTask) return this.resumeTask.promise;
+    if (
+      this.lifecycleTarget === 'active'
+      && !this.pageSuspension
+      && this.tabs.state === 'writer'
+    ) {
+      // A completed resume is idempotent. Do not reopen persistence as
+      // read-only underneath an already-writable Store/coordinator pair.
+      return Promise.resolve(true);
+    }
 
-    if (this.tabs.state === 'reader') await this.refreshReader();
-    if (this.tabs.state !== 'reader') return this.tabs.state === 'writer';
-    return this.requestTakeover();
+    this.lifecycleTarget = 'active';
+    const generation = ++this.lifecycleGeneration;
+
+    const task = (async () => {
+      const suspension = this.pageSuspension;
+      if (suspension) await suspension.catch(() => {});
+      if (!this.isActiveLifecycle(generation)) return false;
+
+      if (this.pageSuspension === suspension) this.pageSuspension = undefined;
+      this.tabs.resumeNotifications();
+
+      const current = this.idb;
+      if (current) {
+        await current.reopen(false);
+        if (!this.isActiveLifecycle(generation)) {
+          // A suspend may arrive while reopen is queued. Close again after the
+          // stale reopen settles so the departing page cannot keep an IDB
+          // resource alive even if suspend cleanup raced ahead of it.
+          try { await current.close(); } catch (error) { this.report(error); }
+          return false;
+        }
+      }
+
+      if (this.tabs.state === 'reader') await this.refreshReader();
+      if (!this.isActiveLifecycle(generation)) {
+        if (current) {
+          try { await current.close(); } catch (error) { this.report(error); }
+        }
+        return false;
+      }
+      if (this.tabs.state !== 'reader') return this.tabs.state === 'writer';
+      return this.requestTakeover(generation);
+    })();
+
+    const entry = { generation, promise: task };
+    this.resumeTask = entry;
+    void task.then(
+      () => { if (this.resumeTask === entry) this.resumeTask = undefined; },
+      () => { if (this.resumeTask === entry) this.resumeTask = undefined; },
+    );
+    return task;
   }
 
   private async recoverFromVersionChange() {
@@ -274,6 +362,8 @@ export class AppSession {
     // takeover failure recovery cannot enqueue a persistence reopen behind the
     // final close.
     this.closing = true;
+    this.lifecycleTarget = 'suspended';
+    this.lifecycleGeneration++;
     const task = this.tabs.close(async () => {
       const store = this.currentStore;
       if (store) {
@@ -291,27 +381,50 @@ export class AppSession {
    * final resource release is performed by close()/pagehide.
    */
   bindBrowserLifecycle(win: Window = window, doc: Document = document): () => void {
+    const supportsPageSwap = 'onpageswap' in win;
+    const suspend = () => {
+      void this.suspendForCache().catch((error) => this.report(error));
+    };
+    const resume = () => {
+      void this.resumeFromCache().catch((error) => this.report(error));
+    };
+
+    // pageswap runs early enough in modern Chrome/Safari to release Web Locks
+    // and close IndexedDB before BFCache eligibility is finalized.
+    const onPageSwap = () => suspend();
     const onPageHide = (event: PageTransitionEvent) => {
       if (event.persisted) {
-        void this.suspendForCache();
+        suspend();
         return;
       }
       void this.close().catch((error) => this.report(error));
     };
-    const onPageShow = () => {
-      if (!this.currentStore?.isReadOnly) return;
-      void this.resumeFromCache().catch((error) => this.report(error));
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted && !this.pageSuspension) return;
+      resume();
     };
     const onVisibilityChange = () => {
-      if (doc.visibilityState !== 'visible' || this.tabs.state !== 'reader') return;
-      void this.refreshReader();
+      if (doc.visibilityState === 'hidden') {
+        // Browsers without pageswap use visibilitychange as the last reliable
+        // pre-pagehide signal. This may also demote a background tab, which is
+        // safe; a later visible transition resumes that same session.
+        if (!supportsPageSwap) suspend();
+        return;
+      }
+      if (this.pageSuspension || this.resumeTask) {
+        resume();
+        return;
+      }
+      if (this.tabs.state === 'reader') void this.refreshReader();
     };
 
+    if (supportsPageSwap) win.addEventListener('pageswap', onPageSwap);
     win.addEventListener('pagehide', onPageHide);
     win.addEventListener('pageshow', onPageShow);
     doc.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
+      if (supportsPageSwap) win.removeEventListener('pageswap', onPageSwap);
       win.removeEventListener('pagehide', onPageHide);
       win.removeEventListener('pageshow', onPageShow);
       doc.removeEventListener('visibilitychange', onVisibilityChange);

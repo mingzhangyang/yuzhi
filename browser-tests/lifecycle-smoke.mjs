@@ -1,0 +1,192 @@
+import { chromium } from 'playwright';
+
+const baseURL = process.env.BASE_URL ?? 'http://127.0.0.1:4173';
+const timeout = 20_000;
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function openApp(page) {
+  await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    () => Boolean(window.yuzhi?.store && window.yuzhi?.actions && window.yuzhi?.session),
+    undefined,
+    { timeout },
+  );
+}
+
+async function waitReadOnly(page, expected) {
+  await page.waitForFunction(
+    (value) => document.body.dataset.readOnly === value,
+    expected ? 'true' : 'false',
+    { timeout },
+  );
+}
+
+async function runScenario(name, fn) {
+  process.stdout.write(`\n[browser-smoke] ${name} ... `);
+  await fn();
+  console.log('ok');
+}
+
+const browser = await chromium.launch({
+  channel: process.env.PW_CHANNEL ?? 'chrome',
+  headless: true,
+});
+
+try {
+  await runScenario('real multi-tab writer handoff drains accepted writes', async () => {
+    const context = await browser.newContext();
+    try {
+      const writer = await context.newPage();
+      await openApp(writer);
+      await waitReadOnly(writer, false);
+
+      const reader = await context.newPage();
+      await openApp(reader);
+      await waitReadOnly(reader, true);
+      assert(await reader.locator('#tabNotice').isVisible(), 'reader did not expose the read-only tab notice');
+
+      await writer.evaluate(async () => {
+        const app = window.yuzhi;
+        app.actions.createProject(app.store, 'Browser writer A');
+        await app.store.flush();
+      });
+
+      await reader.waitForFunction(
+        () => window.yuzhi.store.data.projects.some((project) => project.name === 'Browser writer A'),
+        undefined,
+        { timeout },
+      );
+      await waitReadOnly(reader, true);
+
+      const release = await writer.evaluate(async () => {
+        const app = window.yuzhi;
+        app.store.batch(() => {
+          for (let i = 0; i < 1200; i++) {
+            app.store.put('chronicle', {
+              id: `browser-drain|${i}`,
+              date: app.store.today(),
+              text: `browser drain ${i}`,
+              kind: 'event',
+            });
+          }
+        });
+
+        // suspendForCache revokes new actions synchronously, then waits for the
+        // already accepted IndexedDB transaction before releasing the Web Lock.
+        const suspending = app.session.suspendForCache();
+        let blocked = '';
+        try {
+          app.actions.createProject(app.store, 'must not commit after release');
+        } catch (error) {
+          blocked = error instanceof Error ? error.message : String(error);
+        }
+        await suspending;
+        return {
+          blocked,
+          state: app.session.state,
+          readOnly: app.store.isReadOnly,
+        };
+      });
+
+      assert(release.readOnly, 'released writer remained writable');
+      assert(release.state === 'reader', `released writer ended in ${release.state}, expected reader`);
+      assert(release.blocked.includes('只读'), `new action after revocation was not blocked: ${release.blocked}`);
+
+      await reader.waitForFunction(
+        () => window.yuzhi.store.data.chronicle.filter((row) => row.id.startsWith('browser-drain|')).length === 1200,
+        undefined,
+        { timeout },
+      );
+
+      await reader.locator('#tabTakeover').click();
+      await waitReadOnly(reader, false);
+      const fresh = await reader.evaluate(() => ({
+        state: window.yuzhi.session.state,
+        projectNames: window.yuzhi.store.data.projects.map((project) => project.name),
+        drained: window.yuzhi.store.data.chronicle.filter((row) => row.id.startsWith('browser-drain|')).length,
+      }));
+      assert(fresh.state === 'writer', `takeover ended in ${fresh.state}`);
+      assert(fresh.projectNames.includes('Browser writer A'), 'takeover opened before loading the final writer snapshot');
+      assert(fresh.drained === 1200, `takeover missed accepted writes: ${fresh.drained}/1200`);
+
+      await reader.evaluate(async () => {
+        const app = window.yuzhi;
+        app.actions.createProject(app.store, 'Browser writer B');
+        await app.store.flush();
+      });
+      const names = await reader.evaluate(() => window.yuzhi.store.data.projects.map((project) => project.name));
+      assert(names.includes('Browser writer B'), 'new writer could not persist after takeover');
+    } finally {
+      await context.close();
+    }
+  });
+
+  await runScenario('real IndexedDB versionchange upgrades and old client stays fail-closed', async () => {
+    const context = await browser.newContext();
+    try {
+      const appPage = await context.newPage();
+      await openApp(appPage);
+      await waitReadOnly(appPage, false);
+
+      const upgrader = await context.newPage();
+      await upgrader.goto(`${baseURL}/browser-smoke-secondary.html?schema-upgrade=1`, { waitUntil: 'load' });
+      const upgradedVersion = await upgrader.evaluate(() => new Promise((resolve, reject) => {
+        const request = indexedDB.open('yuzhi', 9);
+        request.onupgradeneeded = () => {};
+        request.onsuccess = () => {
+          const db = request.result;
+          const version = db.version;
+          db.close();
+          resolve(version);
+        };
+        request.onblocked = () => reject(new Error('schema upgrade blocked by an old IndexedDB connection'));
+        request.onerror = () => reject(request.error ?? new Error('schema upgrade failed'));
+      }));
+      assert(upgradedVersion === 9, `external schema upgrade reached ${upgradedVersion}, expected 9`);
+
+      await waitReadOnly(appPage, true);
+      await appPage.waitForFunction(
+        () => window.yuzhi.session.state === 'reader',
+        undefined,
+        { timeout },
+      );
+
+      const refusal = await appPage.evaluate(async () => {
+        const app = window.yuzhi;
+        let actionError = '';
+        let takeoverError = '';
+        try {
+          app.actions.createProject(app.store, 'must stay blocked on schema 9');
+        } catch (error) {
+          actionError = error instanceof Error ? error.message : String(error);
+        }
+        try {
+          await app.session.requestTakeover();
+        } catch (error) {
+          takeoverError = error instanceof Error ? error.message : String(error);
+        }
+        return {
+          actionError,
+          takeoverError,
+          state: app.session.state,
+          readOnly: app.store.isReadOnly,
+        };
+      });
+
+      assert(refusal.readOnly, 'old client became writable after incompatible schema upgrade');
+      assert(refusal.state === 'reader', `old client ended in ${refusal.state}, expected reader`);
+      assert(refusal.actionError.includes('只读'), `old client accepted a new action: ${refusal.actionError}`);
+      assert(
+        refusal.takeoverError.includes('schema 9') || refusal.takeoverError.includes('更新版本'),
+        `takeover did not report the incompatible schema: ${refusal.takeoverError}`,
+      );
+    } finally {
+      await context.close();
+    }
+  });
+} finally {
+  await browser.close();
+}

@@ -55,9 +55,13 @@ class ControlledPersistence implements SessionPersistence {
   private promotionGate?: Promise<void>;
   private finishPromotion?: () => void;
   private markPromotionStarted?: () => void;
+  private closeGate?: Promise<void>;
+  private finishClose?: () => void;
+  private markCloseStarted?: () => void;
   promotionStarted: Promise<void> = Promise.resolve();
+  closeStarted: Promise<void> = Promise.resolve();
 
-  constructor(writeAccess: boolean) {
+  constructor(writeAccess: boolean, readonly notifyVersionChange?: () => void) {
     this.writeAccess = writeAccess;
   }
 
@@ -65,6 +69,12 @@ class ControlledPersistence implements SessionPersistence {
     this.promotionStarted = new Promise<void>((resolve) => { this.markPromotionStarted = resolve; });
     this.promotionGate = new Promise<void>((resolve) => { this.finishPromotion = resolve; });
     return () => this.finishPromotion?.();
+  }
+
+  blockNextClose() {
+    this.closeStarted = new Promise<void>((resolve) => { this.markCloseStarted = resolve; });
+    this.closeGate = new Promise<void>((resolve) => { this.finishClose = resolve; });
+    return () => this.finishClose?.();
   }
 
   async load() {
@@ -97,6 +107,13 @@ class ControlledPersistence implements SessionPersistence {
 
   async close() {
     this.operations.push('close');
+    if (this.closeGate) {
+      this.markCloseStarted?.();
+      await this.closeGate;
+      this.closeGate = undefined;
+      this.finishClose = undefined;
+      this.markCloseStarted = undefined;
+    }
   }
 }
 
@@ -151,6 +168,151 @@ describe('AppSession', () => {
 
     await b.close();
     await a.close();
+  });
+
+  it('页面暂停会关闭持久层与通知通道，恢复后重建资源再开放 writer', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'page-lifecycle', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+
+    expect(session.state).toBe('writer');
+    expect(FakeChannel.peers.size).toBe(1);
+    persistence.operations.length = 0;
+
+    await session.suspendForCache();
+    expect(session.state).toBe('reader');
+    expect(session.store.isReadOnly).toBe(true);
+    expect(FakeChannel.peers.size).toBe(0);
+    expect(persistence.operations).toContain('close');
+
+    persistence.operations.length = 0;
+    expect(await session.resumeFromCache()).toBe(true);
+    expect(session.state).toBe('writer');
+    expect(session.store.isReadOnly).toBe(false);
+    expect(FakeChannel.peers.size).toBe(1);
+    expect(persistence.operations[0]).toBe('reopen:false');
+    expect(persistence.operations).toContain('access:true:start');
+
+    await session.close();
+  });
+
+  it('完成后的重复 resume 是幂等的，不会把 writer persistence 重新降成只读', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'idempotent-resume', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+
+    await session.suspendForCache();
+    expect(await session.resumeFromCache()).toBe(true);
+    expect(session.state).toBe('writer');
+    expect(session.store.isReadOnly).toBe(false);
+
+    persistence.operations.length = 0;
+    expect(await session.resumeFromCache()).toBe(true);
+    expect(persistence.operations).toEqual([]);
+
+    session.store.batch(() => {
+      session.store.put('projects', {
+        id: 'after-second-resume',
+        name: '重复恢复后仍可写',
+        createdAt: '2026-10-04',
+        status: 'active',
+        islandSlot: 0,
+      });
+    });
+    await expect(session.store.flush()).resolves.toBeUndefined();
+
+    await session.close();
+  });
+
+  it('resume 等待旧 suspension 时再次 suspend，会使旧 resume 失效且不会重开资源', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'overlap-lifecycle', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+
+    expect(session.state).toBe('writer');
+    persistence.operations.length = 0;
+
+    const finishClose = persistence.blockNextClose();
+    const firstSuspend = session.suspendForCache();
+    await persistence.closeStarted;
+    expect(session.store.isReadOnly).toBe(true);
+
+    const staleResume = session.resumeFromCache();
+    const secondSuspend = session.suspendForCache();
+
+    finishClose();
+    await Promise.all([firstSuspend, secondSuspend]);
+    expect(await staleResume).toBe(false);
+
+    // Both suspension signals share one resource cleanup. The later signal
+    // still invalidates the stale resume through lifecycleGeneration.
+    expect(persistence.operations.filter((operation) => operation === 'close')).toHaveLength(1);
+    expect(session.state).toBe('reader');
+    expect(session.store.isReadOnly).toBe(true);
+    expect(FakeChannel.peers.size).toBe(0);
+    expect(persistence.operations.some((operation) => operation.startsWith('reopen:'))).toBe(false);
+
+    await session.close();
+  });
+
+  it('versionchange recovery 与 suspend 重叠时，joined demotion 后仍执行最终资源清理', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    let notifyVersionChange!: () => void;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'versionchange-suspend', locks, channelFactory },
+      persistenceFactory: (writeAccess, notify) => {
+        notifyVersionChange = notify;
+        persistence = new ControlledPersistence(writeAccess, notify);
+        return persistence;
+      },
+    })).session;
+
+    expect(session.state).toBe('writer');
+    persistence.operations.length = 0;
+
+    // Hold the recovery close so suspend joins the coordinator's existing
+    // recovering demotion instead of starting its own preparation callback.
+    const finishRecoveryClose = persistence.blockNextClose();
+    notifyVersionChange();
+    await persistence.closeStarted;
+    expect(session.state).toBe('recovering');
+
+    const suspension = session.suspendForCache();
+    finishRecoveryClose();
+    await suspension;
+
+    expect(session.state).toBe('reader');
+    expect(session.store.isReadOnly).toBe(true);
+    expect(FakeChannel.peers.size).toBe(0);
+
+    const reopenIndex = persistence.operations.lastIndexOf('reopen:false');
+    const closeIndexes = persistence.operations
+      .map((operation, index) => operation === 'close' ? index : -1)
+      .filter((index) => index >= 0);
+    expect(reopenIndex).toBeGreaterThanOrEqual(0);
+    expect(closeIndexes.length).toBeGreaterThanOrEqual(2);
+    expect(closeIndexes.at(-1)).toBeGreaterThan(reopenIndex);
+
+    await session.close();
   });
 
   it('reader 可在错过广播后主动核对持久层，补偿冻结页面的新鲜度缺口', async () => {
