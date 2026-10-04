@@ -75,6 +75,23 @@ describe('此刻层 agendaAt', () => {
     expect(JSON.stringify(h.store.data)).toBe(before);
   });
 
+  it('事件改期后只认新日期上的结算，不被旧日期同 id 记录隐藏', () => {
+    const h = makeStore('2026-10-05');
+    const p = createProject(h.store, '改期');
+    h.store.data.events.push(
+      { id: 'moved', sourceId: 's', uid: 'moved', title: '改期会议', start: stamp('2026-10-05', 11), end: stamp('2026-10-05', 12), allDay: false, projectId: p.id, classified: true },
+      { id: 'moved-drift', sourceId: 's', uid: 'moved-drift', title: '改期未归类', start: stamp('2026-10-05', 13), end: stamp('2026-10-05', 14), allDay: false, classified: false },
+    );
+    h.store.data.entries.push(
+      { id: '2026-10-04|event|moved', seq: 1, date: '2026-10-04', itemType: 'event', itemId: 'moved', outcome: 'done', projectId: p.id, title: '改期会议' },
+      { id: '2026-10-04|event|moved-drift', seq: 2, date: '2026-10-04', itemType: 'event', itemId: 'moved-drift', outcome: 'done', title: '改期未归类' },
+    );
+
+    const result = agendaAt(h.store.data, new Date('2026-10-05T10:45:00'));
+    expect(result.slots.get(p.id)?.soon.map((event) => event.eventId)).toContain('moved');
+    expect(result.drifting).toContain('改期未归类');
+  });
+
   it('只把今天结算成做了 / 做了一部分的日程计入 fired', () => {
     const h = makeStore('2026-10-04');
     const p = createProject(h.store, '烧窑');
@@ -91,10 +108,17 @@ describe('漂流瓶范围', () => {
     const h = makeStore('2026-10-04');
     const ev = (id: string, title: string, day: string) =>
       ({ id, sourceId: 's', uid: id, title, start: stamp(day, 10), end: stamp(day, 11), allDay: false, classified: false });
-    h.store.data.events.push(ev('a', '归档那天', '2026-09-20'), ev('b', '结算那天', '2026-10-02'), ev('c', '还没结算', '2026-10-03'), ev('d', '明天', '2026-10-05'));
+    h.store.data.events.push(
+      ev('z', '安装前旧事件', '2026-08-20'),
+      ev('a', '归档那天', '2026-09-20'),
+      ev('b', '结算那天', '2026-10-02'),
+      ev('c', '还没结算', '2026-10-03'),
+      ev('d', '明天', '2026-10-05'),
+    );
     h.store.data.days.push({ date: '2026-09-20', status: 'unrecorded' }, { date: '2026-10-02', status: 'settled' });
     const result = agendaAt(h.store.data, new Date('2026-10-04T10:00:00'));
     expect(result.drifting.sort()).toEqual(['明天', '还没结算'].sort());
+    expect(result.drifting).not.toContain('安装前旧事件');
   });
 });
 

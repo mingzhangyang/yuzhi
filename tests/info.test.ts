@@ -64,6 +64,14 @@ group('日程说明', () => {
     expect(text).toContain('有 1 场已经结束');
   });
 
+  it('杂务日程只描述柴堆后果，不承诺村落砖块', () => {
+    const live = describe({ kind: 'agenda', target: 'chores', targetName: '杂务', phase: 'live', title: '买菜', later: 0, ended: 0, banners: [] }, ctx());
+    const mixed = describe({ kind: 'agenda', target: 'chores', targetName: '杂务', phase: 'soon', title: '取快递', later: 0, ended: 1, banners: [] }, ctx());
+    expect(live.lines.join('')).toContain('计入柴堆');
+    expect(mixed.lines.join('')).toContain('计入柴堆');
+    expect(live.lines.join('') + mixed.lines.join('')).not.toContain('砖');
+  });
+
   it('只有全天条幅时不说稍后还有场次', () => {
     const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'allday', later: 0, ended: 0, banners: ['出差'] }, ctx());
     expect(info.lines.join('')).not.toContain('稍后');

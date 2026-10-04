@@ -58,8 +58,10 @@ function emptySlot(target: string): AgendaSlot {
   return { target, live: [], soon: [], later: 0, ended: 0, banners: [] };
 }
 
+const occurrenceKey = (date: ISODate, eventId: string) => `${date}|event|${eventId}`;
+
 function isSettled(settled: Set<string>, event: CalendarEvent): boolean {
-  return settled.has(event.id);
+  return settled.has(occurrenceKey(dateOfStamp(event.start), event.id));
 }
 
 function allDayActive(item: EventWithTime, today: ISODate): boolean {
@@ -96,7 +98,8 @@ function driftingTitles(data: Data, today: ISODate, settled: Set<string>): strin
   return unclassifiedGroups(data.events)
     .filter((group) => group.events.some((event) => {
       const day = dateOfStamp(event.start);
-      return day >= today || (!settled.has(event.id) && !recorded.has(day));
+      if (day < data.settings.firstDay) return false;
+      return day >= today || (!isSettled(settled, event) && !recorded.has(day));
     }))
     .map((group) => group.title);
 }
@@ -109,7 +112,11 @@ export function agendaAt(data: Data, now: Date): Agenda {
   const today = localDate(now);
   const nowMs = now.getTime();
   const soonMs = nowMs + AGENDA_SOON_MINUTES * 60_000;
-  const settled = new Set(data.entries.filter((entry) => entry.itemType === 'event').map((entry) => entry.itemId));
+  const settled = new Set(
+    data.entries
+      .filter((entry) => entry.itemType === 'event')
+      .map((entry) => occurrenceKey(entry.date, entry.itemId)),
+  );
   const slots = new Map<string, AgendaSlot>();
   const lighthouseBanners: string[] = [];
   const allDay: string[] = [];

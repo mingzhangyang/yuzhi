@@ -739,7 +739,7 @@ export class IslandRenderer {
       if (hasBoard && Math.hypot(pt.x - x, pt.y - y) < r) return { kind: 'agenda', target: v.projectId };
       const banners = this.villageBannerLayout(v);
       for (const b of banners) {
-        if (Math.abs(pt.x - b.x) < b.w * 0.48 && pt.y > b.y - Math.max(tw * 0.2, 6) && pt.y < b.y + Math.max(tw * 0.15, 5)) return { kind: 'agenda', target: v.projectId };
+        if (this.bannerHitAt(pt, b)) return { kind: 'agenda', target: v.projectId };
       }
       // 进行中 / 仅待结算没有额外道具；用已经画出的村名标签承载说明，
       // 避开井和小人，保持项目点击区域不变。
@@ -752,11 +752,13 @@ export class IslandRenderer {
       return { kind: 'agenda', target: CHORES };
     }
     if (s.lighthouseBanners.length) {
-      const [x, y] = this.lighthouseBannerAnchor();
       const [lx] = this.iso(this.map.lighthouse.i, this.map.lighthouse.j);
-      // 条幅区域，但塔身两侧 0.25 格留给档案馆
-      const n = Math.min(BANNERS_MAX, s.lighthouseBanners.length);
-      if (this.inBannerStack(pt, x, y, n) && Math.abs(pt.x - lx) >= tw * 0.25) return { kind: 'agenda', target: '__lighthouse__' };
+      // 条幅区域，但塔身两侧 0.25 格留给档案馆。
+      for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
+        if (this.bannerHitAt(pt, banner) && Math.abs(pt.x - lx) >= tw * 0.25) {
+          return { kind: 'agenda', target: '__lighthouse__' };
+        }
+      }
     }
     return null;
   }
@@ -2237,12 +2239,24 @@ export class IslandRenderer {
     });
   }
 
-  /** 一列 n 条条幅（中心 x，最下面一条中心 y0）占的点击区域 */
-  private inBannerStack(pt: { x: number; y: number }, x: number, y0: number, n: number): boolean {
+  private bannerHitAt(
+    pt: { x: number; y: number },
+    banner: { x: number; y: number; w: number },
+  ): boolean {
     const tw = this.view.tw;
-    const top = y0 - (n - 1) * this.bannerStep() - Math.max(tw * 0.2, 6);
-    const bottom = y0 + Math.max(tw * 0.15, 5);
-    return Math.abs(pt.x - x) < Math.max(tw * 0.48, 12) && pt.y > top && pt.y < bottom;
+    return Math.abs(pt.x - banner.x) < banner.w * 0.48
+      && pt.y > banner.y - Math.max(tw * 0.2, 6)
+      && pt.y < banner.y + Math.max(tw * 0.15, 5);
+  }
+
+  private lighthouseBannerLayout(titles: string[]): { x: number; y: number; w: number; title: string }[] {
+    const [x, y] = this.lighthouseBannerAnchor();
+    return titles.slice(0, BANNERS_MAX).map((title, k) => ({
+      x,
+      y: y - k * this.bannerStep(),
+      w: this.bannerWidth(title),
+      title,
+    }));
   }
 
   private drawBanner(x: number, y: number, tw: number, title: string, color: string) {
@@ -2954,9 +2968,8 @@ export class IslandRenderer {
       if (t.type === 'mountain') this.drawMountain(x, y, t, tw);
       if (t === m.lighthouse) {
         this.drawLighthouse(x, y, tw);
-        for (const [k, title] of s.lighthouseBanners.slice(0, BANNERS_MAX).entries()) {
-          const [bx, by] = this.lighthouseBannerAnchor();
-          this.drawBanner(bx, by - k * this.bannerStep(), tw, title, '#d8c9a7');
+        for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
+          this.drawBanner(banner.x, banner.y, tw, banner.title, '#d8c9a7');
         }
       }
       if (t === m.granary) this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy);

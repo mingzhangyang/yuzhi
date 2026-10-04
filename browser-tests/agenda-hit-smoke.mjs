@@ -58,6 +58,7 @@ async function seed(page) {
         ev('live-ended', '站会', d('09:00'), d('09:30'), live.id),
         ev('live-later', '回顾', d('17:00'), d('18:00'), live.id),
         ev('trip2', '团建', d('00:00'), d('00:00', '05'), banner.id, true),
+        ev('long-holiday', '跨洲项目季度集中协调与复盘日', d('00:00'), d('00:00', '05'), 'chores', true),
         ev('birthday', '生日', d('00:00'), d('00:00', '05'), 'chores', true),
         ev('soon', '方案评审', d('14:40'), d('15:30'), soon.id),
         ev('ended-only', '晨间复盘', d('09:00'), d('09:30'), endedOnly.id),
@@ -111,7 +112,13 @@ async function points(page) {
     out.walkers = walkers;
     const [lx, ly] = r.iso(r.map.lighthouse.i, r.map.lighthouse.j);
     const [bx, by] = r.lighthouseBannerAnchor();
-    out.lighthouse = { banner: page([bx, by]), tower: page([lx, ly - tw * 1.2]), banners: scene.lighthouseBanners };
+    const firstBanner = scene.lighthouseBanners[0] ?? '';
+    out.lighthouse = {
+      banner: page([bx, by]),
+      bannerEdge: page([bx + r.bannerWidth(firstBanner) * 0.44, by]),
+      tower: page([lx, ly - tw * 1.2]),
+      banners: scene.lighthouseBanners,
+    };
     out.bottles = scene.drifting.map((d, k) => {
       const at = r.driftBottleAnchor(k);
       return { title: d.title, onSea: r.onSea(at[0], at[1]), ...page(at) };
@@ -238,10 +245,19 @@ try {
     assert(center.view.kind === 'project' && center.view.id === v.id, `banner village center opened ${JSON.stringify(center.view)}`);
   });
 
-  await runScenario('灯塔条幅：看得见、点得到，点塔身仍然进档案馆', async () => {
+  await runScenario('灯塔条幅：真实宽度都可点击，高缩放也不漏边缘，塔身仍进档案馆', async () => {
     assert(p.lighthouse.banners.includes('国庆假期'), `lighthouse banners: ${JSON.stringify(p.lighthouse.banners)}`);
+    assert(p.lighthouse.banners.includes('跨洲项目季度集中协调与复盘日'), `long lighthouse banner missing: ${JSON.stringify(p.lighthouse.banners)}`);
     const banner = await click(page, p.lighthouse.banner);
-    assert(banner.info?.includes('国庆假期'), `lighthouse banner info: ${JSON.stringify(banner)}`);
+    assert(banner.info?.includes('跨洲项目季度集中协调与复盘日'), `lighthouse banner info: ${JSON.stringify(banner)}`);
+    await page.evaluate(() => window.yuzhi.renderer.zoomBy(2));
+    await page.waitForTimeout(250);
+    p = await points(page);
+    const edge = await hitAt(page, p.lighthouse.bannerEdge);
+    assert(edge?.kind === 'agenda' && edge.target === '__lighthouse__', `zoomed lighthouse banner edge missed: ${JSON.stringify(edge)}`);
+    await page.evaluate(() => window.yuzhi.renderer.resetView());
+    await page.waitForTimeout(250);
+    p = await points(page);
     await shot(page, '3b-lighthouse-banner-info');
     const tower = await click(page, p.lighthouse.tower);
     assert(tower.view.kind === 'archive', `lighthouse tower opened ${JSON.stringify(tower)}`);

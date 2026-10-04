@@ -148,11 +148,15 @@ function timeOf(stamp: string | undefined): string | undefined {
 }
 
 function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
-  const name = t.targetName ?? (t.target === 'chores' ? '杂务' : '项目日程');
+  const chores = t.target === 'chores';
+  const name = t.targetName ?? (chores ? '杂务' : '项目日程');
+  const consequence = chores
+    ? '结算时确认做了，才会计入柴堆。'
+    : '结算时确认做了，才会烧成一块砖。';
   const lines: string[] = [];
   if (t.phase === 'live') {
     lines.push(`${t.title ? `「${t.title}」` : name}进行中${timeOf(t.until) ? `，到 ${timeOf(t.until)}` : ''}。`);
-    lines.push('结算时确认做了，才会烧成一块砖。');
+    lines.push(consequence);
   } else if (t.phase === 'soon') {
     lines.push(`${t.title ? `「${t.title}」` : name}即将开始${timeOf(t.start) ? `，${timeOf(t.start)} 开始` : ''}。`);
     lines.push('这是此刻的提醒，还没有产生任何后果。');
@@ -164,7 +168,11 @@ function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
   }
   if (t.ended) {
     lines.push(`${name}今天有 ${t.ended} 场已经结束，等待晚间结算。`);
-    if (t.phase !== 'live') lines.push('结算时确认做了，才会留下砖；没做不会提前改变村落。');
+    if (t.phase !== 'live') {
+      lines.push(chores
+        ? '结算时确认做了，才会计入柴堆；没做不会提前改变杂务小屋。'
+        : '结算时确认做了，才会留下砖；没做不会提前改变村落。');
+    }
   }
   if (t.banners.length) {
     const extra = t.banners.length > 2 ? `，另外 ${t.banners.length - 2} 件` : '';

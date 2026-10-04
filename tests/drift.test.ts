@@ -13,8 +13,10 @@ describe('漂流瓶本地 UI 标记', () => {
       },
     });
     try {
-      expect(readSeenDrifts()).toEqual(new Set());
-      expect(() => markDriftSeen('周会')).not.toThrow();
+      expect(readSeenDrifts().has('周会')).toBe(false);
+      const seen = markDriftSeen('周会');
+      expect(seen.has('周会')).toBe(true);
+      expect(readSeenDrifts().has('周会')).toBe(true);
     } finally {
       Object.defineProperty(root, 'localStorage', { configurable: true, value: previous });
     }
