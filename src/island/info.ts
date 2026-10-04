@@ -35,7 +35,7 @@ const SKY: Record<Weather, string> = { clear: '晴', cloudy: '多云', rain: '�
 
 export function moonName(p: number): string {
   if (p < 0.03 || p > 0.97) return '新月';
-  if (p < 0.22) return '峨眉月';
+  if (p < 0.22) return '蛾眉月';
   if (p < 0.28) return '上弦月';
   if (p < 0.47) return '盈凸月';
   if (p < 0.53) return '满月';

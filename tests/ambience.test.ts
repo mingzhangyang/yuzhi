@@ -31,9 +31,16 @@ describe('小岛的天时', () => {
     expect(seasonProgress('2027-02-28')).toBeGreaterThan(0.97);
   });
 
-  it('只有冬天有积雪，隆冬最厚', () => {
+  it('只有冬天有积雪，隆冬最厚，冬末基础积雪完全融化', () => {
     expect(snowCover(1, 0.5, 'clear')).toBe(0);
-    expect(snowCover(3, 0.45, 'clear')).toBeGreaterThan(snowCover(3, 0.02, 'clear'));
+    const early = snowCover(3, 0.02, 'clear');
+    const mid = snowCover(3, 0.45, 'clear');
+    const late = snowCover(3, 0.97, 'clear');
+    expect(mid).toBeGreaterThan(early);
+    expect(late).toBeLessThan(early);
+    expect(snowCover(3, 1, 'clear')).toBe(0);
+    // 季末如果当天正在下雪，可以有一层新雪，但不是旧积雪残留。
+    expect(snowCover(3, 1, 'snow')).toBe(0.25);
     expect(snowCover(3, 0.45, 'snow')).toBeLessThanOrEqual(1);
   });
 

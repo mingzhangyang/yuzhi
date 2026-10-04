@@ -72,7 +72,10 @@ export function seasonProgress(d: ISODate): number {
 /** 冬天地上积雪的厚度（0–1）：初冬薄，一月最厚，二月末化开；其余季节为 0 */
 export function snowCover(season: number, progress: number, weather: Weather): number {
   if (season !== 3) return 0;
-  const base = 0.35 + 0.6 * Math.sin(Math.PI * Math.min(1, progress * 1.1));
+  const p = Math.min(1, Math.max(0, progress));
+  // 初冬已有一层薄雪；隆冬最厚；基础积雪在季末严格归零。
+  // 4p(1-p) 是两端为 0 的隆冬隆起项，(1-p) 则保留初冬的薄雪。
+  const base = 0.35 * (1 - p) + 0.8 * 4 * p * (1 - p);
   return Math.min(1, base + (weather === 'snow' ? 0.25 : 0));
 }
 

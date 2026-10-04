@@ -42,6 +42,7 @@ group('景物说明', () => {
 
   it('月相名称', () => {
     expect(moonName(0)).toBe('新月');
+    expect(moonName(0.1)).toBe('蛾眉月');
     expect(moonName(0.25)).toBe('上弦月');
     expect(moonName(0.5)).toBe('满月');
     expect(moonName(0.75)).toBe('下弦月');
