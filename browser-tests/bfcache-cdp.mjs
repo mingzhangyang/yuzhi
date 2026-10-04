@@ -120,16 +120,23 @@ try {
     'back navigation did not restore the application',
   );
 
+  // The preserved document becomes observable through Runtime before Chrome
+  // necessarily dispatches the restored pageshow event. Wait on the lifecycle
+  // evidence itself instead of treating URL restoration as the event barrier.
+  await waitFor(
+    () => evaluate("sessionStorage.getItem('yuzhi-bfcache:pageshow:/') === 'true'"),
+    'restored pageshow did not report persisted=true',
+  );
+  await waitFor(
+    () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
+    'restored page did not resume writer duties',
+  );
+
   const evidence = await evaluate("({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, projects: window.yuzhi.store.data.projects.map((project) => project.name) })");
 
   if (evidence.pagehidePersisted !== 'true' || evidence.pageshowPersisted !== 'true') {
     throw new Error('BFCache was not used: evidence=' + JSON.stringify(evidence) + ', notRestored=' + JSON.stringify(notRestored));
   }
-
-  await waitFor(
-    () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
-    'restored page did not resume writer duties',
-  );
 
   assert(
     evidence.projects.includes('BFCache CDP evidence'),
