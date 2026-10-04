@@ -120,6 +120,20 @@ describe('single writer', () => {
 });
 
 describe('read-only persistence', () => {
+  it('全新 profile 的只读启动返回空快照，不因缺少 stores 退出', async () => {
+    const name = `yuzhi-fresh-readonly-${Date.now()}-${Math.random()}`;
+    const reader = new IdbPersistence(name, false);
+    expect(await reader.load()).toEqual(emptyData());
+    await expect(reader.batch([
+      { kind: 'put', coll: 'projects', item: { id: 'p', name: '不能写', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } },
+    ])).rejects.toThrow('只读');
+
+    // The same instance can later acquire writer access and initialize schema.
+    await reader.setWriteAccess(true);
+    expect(await reader.load()).toEqual(emptyData());
+    await reader.close();
+  });
+
   it('只读页可读但不能升级 schema 或写入', async () => {
     const name = `yuzhi-readonly-${Date.now()}-${Math.random()}`;
     const writer = new IdbPersistence(name, true);
@@ -167,6 +181,31 @@ describe('read-only persistence', () => {
       { kind: 'put', coll: 'projects', item: { id: 'late', name: '不应写入', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } },
     ])).rejects.toThrow('只读');
     await persistence.close();
+  });
+
+  it('并发 replaceAll 与 load 只会看到完整的数据库 revision', async () => {
+    const name = `yuzhi-snapshot-${Date.now()}-${Math.random()}`;
+    const writer = new IdbPersistence(name, true);
+    await writer.load();
+    const reader = new IdbPersistence(name, false);
+
+    const versionData = (version: number) => {
+      const data = emptyData();
+      data.projects.push({ id: 'p', name: `v${version}`, createdAt: '2026-10-01', status: 'active', islandSlot: 0 });
+      data.tasks.push({ id: 't', projectId: 'p', title: `v${version}`, status: 'open', createdAt: '2026-10-01' });
+      return data;
+    };
+    await writer.batch([{ kind: 'replaceAll', data: versionData(0) }]);
+
+    for (let version = 1; version <= 12; version++) {
+      const load = reader.load();
+      const write = writer.batch([{ kind: 'replaceAll', data: versionData(version) }]);
+      const [snapshot] = await Promise.all([load, write]);
+      expect(snapshot.projects[0]?.name).toBe(snapshot.tasks[0]?.title);
+    }
+
+    await reader.close();
+    await writer.close();
   });
 
   it('只读 Store 拒绝 action', () => {

@@ -46,6 +46,34 @@ describe('原子批次写入', () => {
     expect(loaded.tasks).toEqual([]);
   });
 
+  it('同一失败 generation 的所有 flush waiter 都收到同一个错误', async () => {
+    class FailOncePersistence extends MemoryPersistence {
+      private shouldFail = true;
+      async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        if (this.shouldFail) {
+          this.shouldFail = false;
+          throw new Error('同一代写入失败');
+        }
+        return super.batch(writes);
+      }
+    }
+    const persistence = new FailOncePersistence();
+    const store = new Store(emptyData(), persistence);
+    store.onError = () => {};
+    store.batch(() => {
+      store.put('projects', { id: 'failed', name: '失败批次', createdAt: '2026-10-01', status: 'active', islandSlot: 0 });
+    });
+
+    const first = store.flush();
+    const second = store.flush();
+    await expect(first).rejects.toThrow('同一代写入失败');
+    await expect(second).rejects.toThrow('同一代写入失败');
+
+    createProject(store, '后续成功');
+    await expect(store.flush()).resolves.toBeUndefined();
+    expect((await persistence.load()).projects.map((project) => project.name)).toEqual(['后续成功']);
+  });
+
   it('失败时恢复内存、通知回滚状态，并允许后续批次提交', async () => {
     class FailOncePersistence extends MemoryPersistence {
       private shouldFail = true;

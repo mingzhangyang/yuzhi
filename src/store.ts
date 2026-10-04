@@ -17,15 +17,16 @@ export class Store {
   private notifyPending = false;
   private villageCache: { key: string; map: Map<string, VillageState> } | null = null;
   private version = 0;
+  /** Internal queue tail; always resolves so later generations can proceed. */
   private writeTail: Promise<void> = Promise.resolve();
+  /** Observable outcome of the latest queued generation; rejection is reusable by every waiter. */
+  private flushTail: Promise<void> = Promise.resolve();
   private activeWrites: PersistenceWrite[] | null = null;
   private pendingBatches = new Set<PendingBatch>();
   private committedData: Data;
   private batchChanged = false;
   private hasBatchFailure = false;
   private batchFailure: unknown;
-  private lastFailure: unknown;
-  private hasLastFailure = false;
   private readOnly = false;
   /** 测试时可以替换「今天」 */
   clock: () => Date = () => new Date();
@@ -52,8 +53,8 @@ export class Store {
     this.pendingBatches.clear();
     this.hasBatchFailure = false;
     this.batchFailure = undefined;
-    this.lastFailure = undefined;
-    this.hasLastFailure = false;
+    this.writeTail = Promise.resolve();
+    this.flushTail = Promise.resolve();
     this.invalidateData();
     this.batchChanged = true;
     this.scheduleNotify();
@@ -125,33 +126,44 @@ export class Store {
       this.committedData = structuredClone(pending.snapshot);
       try { this.onCommitted(); } catch (error) { this.onError(error); }
     });
-    this.writeTail = commit
-      .catch((error) => {
+
+    const finish = () => {
+      this.pendingBatches.delete(pending);
+      if (this.pendingBatches.size === 0) {
+        if (this.hasBatchFailure) {
+          this.data = structuredClone(this.committedData);
+          this.hasBatchFailure = false;
+          this.batchFailure = undefined;
+        }
+        if (this.batchChanged) {
+          this.batchChanged = false;
+          this.scheduleNotify();
+        }
+      }
+    };
+
+    const outcome = commit.then(
+      () => { finish(); },
+      (error) => {
         if (!this.hasBatchFailure) {
           this.hasBatchFailure = true;
           this.batchFailure = error;
-          this.lastFailure = error;
-          this.hasLastFailure = true;
           this.data = structuredClone(this.committedData);
           this.invalidateData();
           this.batchChanged = true;
-          try { this.onError(error); } catch { /* a reporting hook must not block transaction cleanup */ }
+          try { this.onError(error); } catch { /* reporting must not block cleanup */ }
         }
-      })
-      .then(() => {
-        this.pendingBatches.delete(pending);
-        if (this.pendingBatches.size === 0) {
-          if (this.hasBatchFailure) {
-            this.data = structuredClone(this.committedData);
-            this.hasBatchFailure = false;
-            this.batchFailure = undefined;
-          }
-          if (this.batchChanged) {
-            this.batchChanged = false;
-            this.scheduleNotify();
-          }
-        }
-      });
+        finish();
+        throw error;
+      },
+    );
+
+    // Attach a handler immediately to avoid unhandled-rejection noise when no
+    // caller flushes, while retaining the original rejected promise so every
+    // waiter for this generation observes the same failure.
+    outcome.catch(() => {});
+    this.flushTail = outcome;
+    this.writeTail = outcome.catch(() => {});
     return result;
   }
 
@@ -242,15 +254,10 @@ export class Store {
     await this.flush();
   }
 
-  /** 等所有写入落盘；失败时恢复内存并向调用方报告 */
+  /** 等调用时已经排队的写入落盘；同一代的所有 waiter 都观察到同一个结果。 */
   async flush(): Promise<void> {
-    await this.writeTail;
-    if (this.hasLastFailure) {
-      const error = this.lastFailure;
-      this.lastFailure = undefined;
-      this.hasLastFailure = false;
-      throw error;
-    }
+    const generation = this.flushTail;
+    await generation;
   }
 
   private invalidateData(): void {

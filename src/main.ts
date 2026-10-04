@@ -127,6 +127,28 @@ async function boot() {
     tabNotice.hidden = canWrite;
   }
 
+  let calendarRefreshTask: Promise<void> | undefined;
+  let calendarRefreshAgain = false;
+  function runWriterAutoRefresh() {
+    if (store.isReadOnly) return;
+    if (calendarRefreshTask) {
+      calendarRefreshAgain = true;
+      return;
+    }
+    calendarRefreshTask = autoRefresh(store)
+      .then((n) => {
+        if (!n || store.isReadOnly) return;
+        if (!isModalOpen() && !settle.isOpen()) afterImport();
+        else daily();
+      })
+      .finally(() => {
+        calendarRefreshTask = undefined;
+        const rerun = calendarRefreshAgain && !store.isReadOnly;
+        calendarRefreshAgain = false;
+        if (rerun) runWriterAutoRefresh();
+      });
+  }
+
   const requestTakeover = async (notify = true): Promise<boolean> => {
     if (!tabs.supportsWriterLock) {
       if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
@@ -153,6 +175,7 @@ async function boot() {
         if (notify) toast('另一个标签页仍在写入，请稍后再试', true);
         return false;
       }
+      runWriterAutoRefresh();
       if (notify) toast('已接管写权限');
       return true;
     } catch (error) {
@@ -369,11 +392,11 @@ async function boot() {
   $('settleBtn').onclick = () => settle.open();
   $('fogGo').onclick = () => settle.open();
   $('newBtn').onclick = () => openNew(store, 'task');
-  const afterImport = () => {
+  function afterImport() {
     // 导入可能带来早于归档期限的事件日子，马上归档，不要等到明天
     daily();
     if (unclassifiedGroups(store.data.events).length) setTimeout(() => openClassify(store), 400);
-  };
+  }
   $('calBtn').onclick = () => openCalendar(store, afterImport);
   const menu = $('menu');
   $('moreBtn').onclick = (e) => {
@@ -431,12 +454,8 @@ async function boot() {
     });
   } else setTimeout(maybePrompt, 1200);
 
-  // 后台刷新日历订阅
-  autoRefresh(store).then((n) => {
-    if (!n) return;
-    if (!isModalOpen() && !settle.isOpen()) afterImport();
-    else daily();
-  });
+  // 后台日历 I/O 只属于当前 writer；reader 不发重复网络请求。
+  runWriterAutoRefresh();
 
   // 方便调试
   (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A };

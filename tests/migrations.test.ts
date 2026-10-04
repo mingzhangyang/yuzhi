@@ -7,6 +7,7 @@ import {
   IDB_SCHEMA_VERSION,
   IdbPersistence,
   StorageUnavailableError,
+  emptyData,
   exportBackup,
   isStorageUnavailableError,
   parseBackup,
@@ -186,6 +187,33 @@ describe('数据迁移基础设施', () => {
       kind: 'legacy-life',
     });
     expect(() => parseBackup(JSON.stringify(bad))).toThrow('事实序号');
+  });
+
+  it('v4 新事实序号从 entries + operations 的全局最大值继续', () => {
+    const v3 = {
+      format: 'yuzhi-backup',
+      version: 3,
+      ...emptyData(),
+      entries: [{
+        id: '2026-10-01|event|legacy-settlement',
+        seq: 5,
+        date: '2026-10-01',
+        itemType: 'event',
+        itemId: 'legacy-settlement',
+        outcome: 'done',
+        title: '旧结算',
+      }],
+      operations: [],
+      life: [{
+        id: 'legacy-active-life',
+        date: '2026-10-01',
+        text: '旧的一生之书记录',
+        kind: 'event',
+      }],
+    };
+    const migrated = parseBackup(JSON.stringify(v3));
+    expect(migrated.entries[0].seq).toBe(5);
+    expect(migrated.operations.find((row) => row.payload?.legacyLifeId === 'legacy-active-life')?.seq).toBe(6);
   });
 
   it('业务迁移失败时停在 staging schema，legacy stores 保持完整', async () => {

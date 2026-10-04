@@ -21,23 +21,31 @@ export function ingest(store: Store, src: CalendarSource, text: string): number 
 
 /** 刷新一个订阅链接 */
 export async function syncSource(store: Store, id: string): Promise<number> {
+  if (store.isReadOnly) throw new Error('当前标签页是只读的，不能刷新日历');
   const src = store.data.sources.find((s) => s.id === id);
   if (!src?.icsUrl) return 0;
   try {
     const text = await fetchIcs(src.icsUrl);
+    // Writer ownership may be lost while the network request is in flight.
+    if (store.isReadOnly) throw new Error('刷新期间写权限已转移，已丢弃这次日历结果');
     return store.batch(() => {
       const n = ingest(store, src, text);
-      store.put('sources', { ...store.data.sources.find((s) => s.id === id)!, lastFetchedAt: new Date().toISOString(), lastError: undefined });
+      const current = store.data.sources.find((s) => s.id === id);
+      if (current) store.put('sources', { ...current, lastFetchedAt: new Date().toISOString(), lastError: undefined });
       return n;
     });
   } catch (e) {
+    // Never turn a demotion race into a second rejected write.
+    if (store.isReadOnly) throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    store.put('sources', { ...store.data.sources.find((s) => s.id === id)!, lastError: msg });
+    const current = store.data.sources.find((s) => s.id === id);
+    if (current) store.put('sources', { ...current, lastError: msg });
     throw e;
   }
 }
 
 export async function addUrlSource(store: Store, name: string, url: string): Promise<number> {
+  if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
   const u = url.trim();
   if (!/^(https?|webcals?):\/\//i.test(u)) throw new Error('请粘贴以 https:// 或 webcal:// 开头的订阅链接');
   const text = await fetchIcs(u);
@@ -54,6 +62,7 @@ export async function addUrlSource(store: Store, name: string, url: string): Pro
 }
 
 export async function addFileSource(store: Store, file: File): Promise<number> {
+  if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
   const text = await file.text();
   if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000))) throw new Error('这不是 .ics 日历文件');
   const src: CalendarSource = { id: uid('s'), name: file.name.replace(/\.ics$/i, '') || '上传的日历', lastFetchedAt: new Date().toISOString() };
@@ -69,14 +78,17 @@ export async function addFileSource(store: Store, file: File): Promise<number> {
 
 /** 打开时刷新超过 2 小时没更新的订阅 */
 export async function autoRefresh(store: Store): Promise<number> {
+  if (store.isReadOnly) return 0;
   const stale = store.data.sources.filter((s) => s.icsUrl && (!s.lastFetchedAt || Date.now() - new Date(s.lastFetchedAt).getTime() > 2 * 3600 * 1000));
   let ok = 0;
   for (const s of stale) {
+    if (store.isReadOnly) break;
     try {
       await syncSource(store, s.id);
       ok++;
     } catch {
-      /* 错误记在来源上，日历面板里能看到 */
+      // Network failures are recorded by syncSource while this tab remains
+      // writer. A writer-transfer abort is intentionally silent here.
     }
   }
   return ok;

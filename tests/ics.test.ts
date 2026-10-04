@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseIcs } from '../src/ics';
+import { autoRefresh, syncSource } from '../src/calendar';
 import { makeStore } from './helpers';
 import { classifyEvents, createProject, mergeEvents, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
 import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
 import { interruptions } from '../src/logic/read-model';
 import { lifeEntries } from '../src/logic/operations';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const ICS = `BEGIN:VCALENDAR
 VERSION:2.0
@@ -130,6 +135,44 @@ describe('日历合并', () => {
     expect(lifeEntries(h.store.data).some((l) => l.id === `l|${en[0].id}`)).toBe(true);
     // 重复事件里没改期的那几次，id 本来就一样
     expect(h.store.data.events.filter((e) => e.uid === 'weekly-1')).toHaveLength(4);
+  });
+});
+
+describe('日历后台刷新与 writer 权限', () => {
+  it('只读 reader 不发订阅网络请求', async () => {
+    const h = makeStore('2026-09-21');
+    h.store.put('sources', { id: 'src', name: '订阅', icsUrl: 'https://example.com/a.ics' });
+    await h.store.flush();
+    h.store.setReadOnly(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await autoRefresh(h.store)).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('请求进行中失去 writer 权限时丢弃结果且不做错误回写', async () => {
+    const h = makeStore('2026-09-21');
+    h.store.put('sources', { id: 'src', name: '订阅', icsUrl: 'https://example.com/a.ics' });
+    await h.store.flush();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchMock = vi.fn(async () => {
+      await gate;
+      return new Response(ICS, { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const refresh = syncSource(h.store, 'src');
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    h.store.setReadOnly(true);
+    release();
+
+    await expect(refresh).rejects.toThrow('写权限');
+    expect(h.store.data.events).toEqual([]);
+    expect(h.store.data.sources[0].lastError).toBeUndefined();
   });
 });
 

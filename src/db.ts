@@ -312,15 +312,22 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
   {
     to: 4,
     run(data) {
+      const entries = Array.isArray(data.entries) ? data.entries : [];
       const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
       const life = Array.isArray(data.life) ? data.life : [];
       const migrated = new Set<string>();
       let seq = 0;
-      for (const value of operations) {
+
+      // Settlement entries and operation facts share one global sequence.
+      // Seed from both collections before appending any migrated life facts.
+      for (const value of [...entries, ...operations]) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
         const row = value as Record<string, unknown>;
         if (typeof row.seq === 'number' && Number.isInteger(row.seq) && row.seq > seq) seq = row.seq;
-        const payload = row.payload;
+      }
+      for (const value of operations) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const payload = (value as Record<string, unknown>).payload;
         if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
           const id = (payload as Record<string, unknown>).legacyLifeId;
           if (typeof id === 'string') migrated.add(id);
@@ -506,16 +513,36 @@ export class IdbPersistence implements Persistence {
     let storedVersionValue: unknown;
     try {
       db = await this.dbp;
-      // Read every persisted collection, including legacy stores that are no
-      // longer part of the current Data type. A skipped-version upgrade may
-      // still need them as migration input.
+      const storeNames = Array.from(db.objectStoreNames);
+
+      // A read-only open on a brand-new profile creates an empty version-1
+      // database because no upgrade callback is allowed. Treat that exact
+      // uninitialized shape as an empty transient snapshot; partial schemas
+      // remain errors so corruption is never hidden.
+      if (storeNames.length === 0 && !this.writeAccess) return emptyData();
+      if (!storeNames.includes('meta')) throw new Error('数据库结构不完整（缺少 meta）');
+
+      // One load is one snapshot. Issue every request before the first await so
+      // IndexedDB keeps a single readonly transaction alive across all current
+      // and legacy collections plus migration metadata.
+      const tx = db.transaction(storeNames, 'readonly');
+      const collectionNames = storeNames.filter((name) => name !== 'meta');
+      const meta = tx.objectStore('meta');
+      const collectionsRequest = Promise.all(collectionNames.map((name) => tx.objectStore(name).getAll()));
+      const settingsRequest = meta.get('settings');
+      const versionRequest = meta.get('dataVersion');
+      const [collections, settings, version] = await Promise.all([
+        collectionsRequest,
+        settingsRequest,
+        versionRequest,
+      ]);
+      await tx.done;
+
       raw = { settings: defaultSettings() };
-      for (const name of Array.from(db.objectStoreNames)) {
-        if (name !== 'meta') raw[name] = await db.getAll(name);
-      }
+      collectionNames.forEach((name, index) => { raw[name] = collections[index]; });
       ensureCurrentCollections(raw);
-      storedSettings = await db.get('meta', 'settings');
-      storedVersionValue = await db.get('meta', 'dataVersion');
+      storedSettings = settings;
+      storedVersionValue = version;
     } catch (error) {
       // Only known browser/IndexedDB availability failures may fall back to
       // transient memory storage. Migration, version and validation failures
