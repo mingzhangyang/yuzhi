@@ -22,7 +22,19 @@ export interface InfoContext {
 export type InfoTarget =
   | { kind: 'tree'; tree: 'pine' | 'round'; cherry: boolean; forest: boolean }
   | { kind: 'ground'; type: TileType; ring: number; site?: 'village' | 'landmark' }
-  | { kind: 'sea' };
+  | { kind: 'sea' }
+  | {
+      kind: 'agenda';
+      target: string;
+      targetName?: string;
+      phase: 'later' | 'soon' | 'live' | 'ended';
+      title?: string;
+      until?: string;
+      later: number;
+      ended: number;
+      banners: string[];
+    }
+  | { kind: 'drift'; title: string };
 
 export interface MapInfo {
   title: string;
@@ -127,8 +139,48 @@ function seaInfo(c: InfoContext): MapInfo {
   return { title: '海', sub: '小岛的天时', lines };
 }
 
+function timeOf(stamp: string | undefined): string | undefined {
+  if (!stamp) return undefined;
+  const d = new Date(stamp);
+  if (!Number.isFinite(d.getTime())) return undefined;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
+  const name = t.targetName ?? (t.target === 'chores' ? '杂务' : '项目日程');
+  const lines: string[] = [];
+  if (t.phase === 'live') {
+    lines.push(`${t.title ? `「${t.title}」` : name}进行中${timeOf(t.until) ? `，到 ${timeOf(t.until)}` : ''}。`);
+    lines.push('结算时确认做了，才会烧成一块砖。');
+  } else if (t.phase === 'soon') {
+    lines.push(`${t.title ? `「${t.title}」` : name}即将开始${timeOf(t.until) ? `，${timeOf(t.until)}开始` : ''}。`);
+    lines.push('这是此刻的提醒，还没有产生任何后果。');
+  } else if (t.phase === 'ended') {
+    lines.push(`${name}今天有 ${t.ended} 场已经结束，等待晚间结算。`);
+    lines.push('结算时确认做了，才会留下砖；没做不会提前改变村落。');
+  } else if (t.later) {
+    lines.push(`${name}今天稍后还有 ${t.later} 场日程。`);
+    lines.push('告示牌只表示安排，不表示已经完成。');
+  }
+  if (t.banners.length) {
+    const extra = t.banners.length > 2 ? `，另外 ${t.banners.length - 2} 件` : '';
+    lines.push(`今天全天：${t.banners.slice(0, 2).join('、')}${extra}。全天事件不需要结算，也不影响村落。`);
+  }
+  return { title: name, sub: '日程 · 此刻层', lines };
+}
+
+function driftInfo(t: Extract<InfoTarget, { kind: 'drift' }>): MapInfo {
+  return {
+    title: '漂流瓶',
+    sub: t.title,
+    lines: ['这组日历事件还没有归类。捞起后会打开归类对话框；归类不会替你完成结算。'],
+  };
+}
+
 export function describe(target: InfoTarget, c: InfoContext): MapInfo {
   if (target.kind === 'tree') return treeInfo(target, c);
   if (target.kind === 'ground') return groundInfo(target, c);
+  if (target.kind === 'agenda') return agendaInfo(target);
+  if (target.kind === 'drift') return driftInfo(target);
   return seaInfo(c);
 }

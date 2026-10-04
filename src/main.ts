@@ -13,11 +13,13 @@ import { openCalendar, openClassify, openNew, openSettings, openWelcome, seedDem
 import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
+import { agendaAt } from './logic/agenda';
 import { SEASONS, fmtDay, localDate, relDay, seasonOf, weekday } from './lib/date';
 import { FESTIVAL_NAMES, festivalsOf, weatherOf } from './island/ambience';
 import { unclassifiedGroups } from './logic/classify';
 import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
+import { markDriftSeen } from './ui/drift';
 
 async function boot() {
   initModal();
@@ -172,7 +174,7 @@ async function boot() {
 
   buildStats();
   $('legend').innerHTML =
-    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span>`;
+    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span><span>告示牌、灯和条幅 = 日程此刻层</span><span>漂流瓶 = 待归类日程</span>`;
 
   const renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
   let dusk = false;
@@ -190,7 +192,6 @@ async function boot() {
     pause: (on) => (renderer.paused = on),
     done: (p, where) => {
       tracker.open(where === 'landmark' ? { kind: 'project', id: p.id } : { kind: 'archive' });
-      setTimeout(() => renderer.pulse(p.id), 400);
     },
   });
 
@@ -220,7 +221,6 @@ async function boot() {
     });
     setTimeout(() => {
       b.remove();
-      renderer.pulse(pid);
     }, 780);
   }
 
@@ -294,6 +294,14 @@ async function boot() {
   renderer.onTap = (hit, pt) => {
     $('tip').style.opacity = '0';
     if (!hit) return showInfo(pt);
+    if (hit.kind === 'drift') {
+      renderer.pickDrift(hit.title);
+      markDriftSeen(hit.title);
+      update();
+      openClassify(store, new Set(), hit.title);
+      return;
+    }
+    if (hit.kind === 'agenda') return showInfo(pt);
     if (hit.kind === 'project' || hit.kind === 'task') tracker.open({ kind: hit.kind, id: hit.id });
     else tracker.open({ kind: hit.kind });
   };
@@ -312,6 +320,21 @@ async function boot() {
 
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
+  let agendaTimer = 0;
+  function scheduleAgendaRefresh(agenda: ReturnType<typeof agendaAt>, now: Date) {
+    window.clearTimeout(agendaTimer);
+    const until = agenda.nextChange ? agenda.nextChange.getTime() - now.getTime() : 60_000;
+    const delay = Math.max(1_000, Math.min(60_000, Number.isFinite(until) ? until : 60_000));
+    agendaTimer = window.setTimeout(() => {
+      const todayNow = store.today();
+      if (todayNow !== lastToday && !store.isReadOnly) {
+        daily();
+        lastToday = todayNow;
+      }
+      update();
+    }, delay);
+  }
+
   function update() {
     if (syncThemeDataset(store.data.settings.theme, document.documentElement.dataset)) {
       // Store notifications include persistence rollback and peer reloads.
@@ -325,13 +348,17 @@ async function boot() {
     // 地图场景和顶部日期/天气共用同一个时间快照，避免午夜边界出现互相矛盾的状态。
     const now = store.clock();
     const today = localDate(now);
+    const agenda = agendaAt(store.data, now);
     updateStats(store);
     tracker.render();
-    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now));
+    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now, agenda));
 
     const pend = pendingDays(store.data, today);
     const light = lightNow(now, dusk);
-    setText($('date'), `${fmtDay(today)} ${weekday(today)} · ${SEASONS[seasonOf(today)]}`);
+    const allDayText = agenda.allDay.length
+      ? ` · ${agenda.allDay.slice(0, 2).join('、')}${agenda.allDay.length > 2 ? `，另外 ${agenda.allDay.length - 2} 件` : ''}`
+      : '';
+    setText($('date'), `${fmtDay(today)} ${weekday(today)} · ${SEASONS[seasonOf(today)]}${allDayText}`);
     const sb = $('settleBtn');
     setHTML(sb, `${light === 'day' ? '结算' : '晚间结算'}${pend.length ? `<span class="dot">${pend.length}</span>` : ''}`);
     const wb = $('weather');
@@ -349,6 +376,7 @@ async function boot() {
     const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
     setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(c.text)}</span></li>`).join('') : '<li class="empty">每天结算后，这里会自动多一行。</li>');
     setText($('chronCount'), `共 ${store.data.chronicle.length} 条`);
+    scheduleAgendaRefresh(agenda, now);
   }
 
   /** 进入「搬离」阶段的村落：询问重新启动 / 缩小规模 / 正式关闭 */
@@ -387,16 +415,9 @@ async function boot() {
   update();
   renderer.start();
 
-  setInterval(() => {
-    const t = store.today();
-    if (t !== lastToday && !store.isReadOnly) {
-      daily();
-      lastToday = t;
-    }
-    update();
-  }, 60_000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
+      renderer.suppressNextCues();
       if (store.today() !== lastToday && !store.isReadOnly) {
         daily();
         lastToday = store.today();
