@@ -89,6 +89,14 @@ function isDomainReExport(statement: Statement): boolean {
   );
 }
 
+function parseActionBarrel(source: string): Program {
+  // Vite's public parseAst parses JavaScript syntax. A composition-only barrel
+  // may still contain TypeScript's type-only re-export form, so normalize only
+  // that declaration syntax before parsing. Any executable statement remains
+  // executable and therefore appears as a non-export AST node.
+  return parseAst(source.replace(/\bexport\s+type\s+\{/g, 'export {'), null, 'actions.ts');
+}
+
 function publicBarrelReferences(source: string): string[] {
   const code = withoutComments(source);
   const pattern = /(['"`])\.\.\/actions(?:\.ts)?(?:[?#][^'"`]*)?\1/g;
@@ -113,14 +121,12 @@ describe('action architecture boundaries', () => {
   });
 
   it('the public action module contains only top-level domain re-exports', () => {
-    const program = parseAst(barrel, null, 'actions.ts');
+    const program = parseActionBarrel(barrel);
     expect(program.body.length).toBeGreaterThan(0);
     expect(program.body.filter((statement) => !isDomainReExport(statement))).toEqual([]);
 
-    const semicolonlessBypass = parseAst(
+    const semicolonlessBypass = parseActionBarrel(
       "export { a } from './actions/a'\nconst hidden = sideEffect()\nexport { b } from './actions/b';",
-      null,
-      'probe.ts',
     );
     expect(semicolonlessBypass.body.map((statement) => statement.type)).toEqual([
       'ExportNamedDeclaration',
@@ -129,7 +135,7 @@ describe('action architecture boundaries', () => {
     ]);
     expect(semicolonlessBypass.body.filter((statement) => !isDomainReExport(statement))).toHaveLength(1);
 
-    const executableExport = parseAst("export const createProject = () => 1", null, 'probe.ts');
+    const executableExport = parseActionBarrel("export const createProject = () => 1");
     expect(executableExport.body.filter((statement) => !isDomainReExport(statement))).toHaveLength(1);
   });
 });
