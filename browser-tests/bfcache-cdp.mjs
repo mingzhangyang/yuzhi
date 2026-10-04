@@ -154,9 +154,9 @@ async function runAttempt(attempt) {
     const appEntry = history.entries[history.currentIndex];
     assert(appEntry, 'missing application history entry');
 
-    await send('Page.navigate', { url: appURL + '/favicon.svg?bfcache-cdp=' + attempt });
+    await send('Page.navigate', { url: appURL + '/browser-smoke-secondary.html?bfcache-cdp=' + attempt });
     await waitFor(
-      () => evaluate("location.pathname === '/favicon.svg'"),
+      () => evaluate("location.pathname === '/browser-smoke-secondary.html'"),
       'secondary navigation did not commit',
     );
 
