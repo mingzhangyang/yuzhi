@@ -95,11 +95,11 @@ async function createClient() {
   return { send, evaluate, on, close };
 }
 
-async function writeDurableProject(evaluate, id, name) {
+async function writeDurableMarker(evaluate, id, text) {
   const expression =
     "(async () => {" +
     "const id=" + JSON.stringify(id) + ";" +
-    "const name=" + JSON.stringify(name) + ";" +
+    "const text=" + JSON.stringify(text) + ";" +
     "const db = await new Promise((resolve, reject) => {" +
     "  const request = indexedDB.open('yuzhi');" +
     "  request.onsuccess = () => resolve(request.result);" +
@@ -107,8 +107,8 @@ async function writeDurableProject(evaluate, id, name) {
     "});" +
     "try {" +
     "  await new Promise((resolve, reject) => {" +
-    "    const tx = db.transaction('projects', 'readwrite');" +
-    "    tx.objectStore('projects').put({ id, name, createdAt: '2026-10-04', status: 'active', islandSlot: 7 });" +
+    "    const tx = db.transaction('chronicle', 'readwrite');" +
+    "    tx.objectStore('chronicle').put({ id, date: '2026-10-04', text, kind: 'event' });" +
     "    tx.oncomplete = () => resolve();" +
     "    tx.onerror = () => reject(tx.error ?? new Error('durable write failed'));" +
     "    tx.onabort = () => reject(tx.error ?? new Error('durable write aborted'));" +
@@ -134,7 +134,7 @@ async function runAttempt(attempt) {
 
   try {
     const durableId = 'bfcache-durable-' + attempt + '-' + Date.now();
-    const durableName = 'BFCache durable refresh ' + attempt;
+    const durableText = 'BFCache durable refresh ' + attempt;
 
     await send('Page.navigate', { url: appURL });
     await waitFor(
@@ -169,7 +169,7 @@ async function runAttempt(attempt) {
 
     // The app document is frozen now. Mutate IndexedDB through the same-origin
     // secondary document; the BFCache document cannot see this in memory.
-    await writeDurableProject(evaluate, durableId, durableName);
+    await writeDurableMarker(evaluate, durableId, durableText);
 
     await send('Page.navigateToHistoryEntry', { entryId: appEntry.id });
     await waitFor(
@@ -217,14 +217,14 @@ async function runAttempt(attempt) {
     }
 
     const evidence = await evaluate(
-      "({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, durablePresent: window.yuzhi.store.data.projects.some((project) => project.id === " + JSON.stringify(durableId) + ") })",
+      "({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, durablePresent: window.yuzhi.store.data.chronicle.some((row) => row.id === " + JSON.stringify(durableId) + ") })",
     );
 
     assert(evidence.pagehidePersisted === 'true', 'BFCache entry evidence was lost');
     assert(evidence.pageshowPersisted === 'true', 'BFCache restore evidence was lost');
     assert(
       evidence.durablePresent,
-      'restored page did not observe the project written to IndexedDB while it was cached',
+      'restored page did not observe the durable chronicle marker written to IndexedDB while it was cached',
     );
 
     return { status: 'restored', evidence };
