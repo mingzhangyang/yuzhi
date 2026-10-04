@@ -16,7 +16,7 @@ import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
 import { SEASONS, fmtDay, relDay, seasonOf, weekday } from './lib/date';
 import { unclassifiedGroups } from './logic/classify';
-import { SingleWriterCoordinator } from './single-writer';
+import { SingleWriterCoordinator, type WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
 
 async function boot() {
@@ -26,70 +26,56 @@ async function boot() {
   let settle!: SettleSheet;
   let ceremony!: Ceremony;
   let readerRefresh: Promise<void> = Promise.resolve();
-  let versionChangeRecovery: Promise<void> | undefined;
-  let setAppReadOnly = (readOnly: boolean) => appStore?.setReadOnly(readOnly);
+  let syncWriterState = (_state: WriterState) => {};
   const reloadAppSnapshot = (fresh: Data) => {
     if (!appStore) return;
     appStore.reload(fresh);
   };
   const tabs = new SingleWriterCoordinator({
-    onRoleChange: (role) => {
-      setAppReadOnly(role !== 'writer');
-      const notice = document.querySelector<HTMLElement>('#tabNotice');
-      if (notice) {
-        notice.hidden = role === 'writer';
-        if (role === 'writer') delete notice.dataset.blocked;
-      }
-    },
+    onStateChange: (state) => syncWriterState(state),
     onPeerCommit: () => {
       readerRefresh = readerRefresh
         .catch(() => {})
         .then(async () => {
-          if (!appStore || !idb || tabs.role === 'writer') return;
+          if (!appStore || !idb || tabs.state !== 'reader') return;
           const fresh = await idb.load();
-          // A takeover may have completed while this read was in flight.
-          if (tabs.role === 'reader' && appStore.isReadOnly) reloadAppSnapshot(fresh);
+          // A takeover may have started while this read was in flight.
+          if (tabs.state === 'reader' && appStore.isReadOnly) reloadAppSnapshot(fresh);
         })
         .catch((error) => appStore?.onError(error));
     },
-    onVersionChange: () => {
-      // A versionchange means this connection is blocking another upgrade.
-      // Stop new actions immediately; the recovery path drains writes, closes
-      // and refreshes the reader snapshot before releasing the writer lease.
-      setAppReadOnly(true);
-      const notice = document.querySelector<HTMLElement>('#tabNotice');
-      if (notice) {
-        notice.hidden = false;
-        notice.dataset.blocked = 'true';
-      }
+    onVersionChange: async () => {
+      // The coordinator has already synchronously revoked writability here.
+      // Keep the lease while persistence drains and reconnects as a reader;
+      // SingleWriterCoordinator releases it only after this callback settles.
       const current = idb;
-      versionChangeRecovery = (async () => {
-        try {
-          if (appStore) {
-            try { await appStore.flush(); } catch (error) { appStore.onError(error); }
-          }
-          if (current) {
-            // Close only after pending actions have drained. Reopen as a reader
-            // and refresh the authoritative snapshot before surrendering the
-            // writer lease so another writer cannot race this refresh.
-            await current.close();
-            await current.reopen(false);
-            const fresh = await current.load();
-            if (appStore) reloadAppSnapshot(fresh);
-          }
-        } finally {
-          // Never strand the single-writer lease if close/reopen/load fails.
-          await tabs.release();
+      try {
+        if (appStore) {
+          try { await appStore.flush(); } catch (error) { appStore.onError(error); }
         }
-      })().catch((error) => appStore?.onError(error));
+        if (current) {
+          await current.close();
+          await current.reopen(false);
+          if (appStore) reloadAppSnapshot(await current.load());
+        }
+      } catch (error) {
+        appStore?.onError(error);
+        throw error;
+      }
     },
   });
-  const canWrite = await tabs.acquire();
-  idb = new IdbPersistence(undefined, canWrite, { onVersionChange: () => tabs.notifyVersionChange() });
+  await tabs.acquire();
+  idb = new IdbPersistence(undefined, tabs.isWritable, { onVersionChange: () => { void tabs.notifyVersionChange(); } });
   let per: Persistence = idb;
   let data: Data;
   try {
-    data = await per.load();
+    // Startup only accepts a snapshot produced under one stable coordinator
+    // revision. If versionchange recovery races the load, the stale result is
+    // discarded and retried against the new reader/writer state.
+    data = await tabs.runAgainstStableState(async (writable) => {
+      await idb!.setWriteAccess(writable);
+      return idb!.load();
+    });
   } catch (error) {
     if (!isStorageUnavailableError(error)) {
       console.error('无法打开屿志本地数据', error);
@@ -126,15 +112,6 @@ async function boot() {
       .forEach((button) => { button.disabled = readOnly; });
     document.body.dataset.readOnly = readOnly ? 'true' : 'false';
   };
-  setAppReadOnly = (readOnly: boolean) => {
-    store.setReadOnly(readOnly);
-    syncReadOnlyUi(readOnly);
-    if (readOnly) {
-      settle?.close();
-      ceremony?.close();
-    }
-  };
-  setAppReadOnly(!canWrite);
 
   const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task']);
   const guardReadOnlyMutation = (event: Event) => {
@@ -174,16 +151,29 @@ async function boot() {
 
   const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
   const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
-  if (!tabs.supportsWriterLock) {
-    if (tabNotice) {
-      tabNotice.hidden = false;
-      const text = tabNotice.querySelector('span');
-      if (text) text.textContent = '此浏览器不支持安全的多标签页写入协调；为保护本地数据，此页保持只读。';
-    }
-    if (takeOver) takeOver.disabled = true;
-  } else if (tabNotice) {
-    tabNotice.hidden = canWrite;
+  if (!tabs.supportsWriterLock && tabNotice) {
+    const text = tabNotice.querySelector('span');
+    if (text) text.textContent = '此浏览器不支持安全的多标签页写入协调；为保护本地数据，此页保持只读。';
   }
+
+  // Store/UI writability is a projection of coordinator state. No caller keeps
+  // a second writable flag or replays an old acquisition result.
+  syncWriterState = (state) => {
+    const readOnly = state !== 'writer';
+    store.setReadOnly(readOnly);
+    syncReadOnlyUi(readOnly);
+    if (readOnly) {
+      settle?.close();
+      ceremony?.close();
+    }
+    if (tabNotice) {
+      tabNotice.hidden = state === 'writer';
+      if (state === 'recovering' || state === 'releasing' || state === 'closed') tabNotice.dataset.blocked = 'true';
+      else delete tabNotice.dataset.blocked;
+    }
+    if (takeOver) takeOver.disabled = !tabs.supportsWriterLock || state !== 'reader';
+  };
+  syncWriterState(tabs.state);
 
   let calendarRefreshTask: Promise<void> | undefined;
   let calendarRefreshAgain = false;
@@ -212,17 +202,12 @@ async function boot() {
       if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
       return false;
     }
-    setAppReadOnly(true);
     try {
-      if (versionChangeRecovery) {
-        await versionChangeRecovery;
-        versionChangeRecovery = undefined;
-      }
+      await tabs.whenStable();
       const acquired = await tabs.takeOver(idb
         ? async () => {
-          // The lock is held, but the Store remains read-only until any
-          // in-flight reader refresh finishes and a fresh authoritative load
-          // succeeds on the write-capable connection.
+          // Coordinator is preparing here, so Store/UI stay read-only until
+          // the fresh write-capable snapshot succeeds.
           await readerRefresh.catch(() => {});
           await idb!.setWriteAccess(true);
           const fresh = await idb!.load();
@@ -237,10 +222,9 @@ async function boot() {
       if (notify) toast('已接管写权限');
       return true;
     } catch (error) {
-      setAppReadOnly(true);
-      await tabs.release();
+      await tabs.release().catch(() => {});
       if (idb) {
-        try { await idb.reopen(false); } catch { /* keep the failed tab read-only */ }
+        try { await idb.reopen(false); } catch { /* coordinator remains non-writable */ }
       }
       console.error('接管写权限失败', error);
       if (notify) toast('接管写权限失败：' + (error instanceof Error ? error.message : String(error)), true);
@@ -430,27 +414,23 @@ async function boot() {
     }
   });
   let pageSuspension: Promise<void> | undefined;
-  const suspendForCache = async () => {
-    // Stop actions before draining writes; only release the lease after the
-    // persistence connection is no longer write-capable.
-    setAppReadOnly(true);
+  const suspendForCache = () => tabs.relinquish(async () => {
+    // Enter releasing state synchronously, then drain/demote persistence while
+    // the lease is still held. Store/UI writability follows coordinator state.
     try { await store.flush(); } catch (error) { store.onError(error); }
     if (idb) {
       try { await idb.setWriteAccess(false); } catch (error) { store.onError(error); }
     }
-    await tabs.release();
-  };
+  });
   window.addEventListener('pagehide', (event) => {
-    setAppReadOnly(true);
     if (event.persisted) {
       pageSuspension = suspendForCache();
       return;
     }
-    void (async () => {
+    void tabs.close(async () => {
       try { await store.flush(); } catch (error) { store.onError(error); }
       await idb?.close();
-      await tabs.close();
-    })();
+    });
   });
   window.addEventListener('pageshow', () => {
     if (!store.isReadOnly) return;

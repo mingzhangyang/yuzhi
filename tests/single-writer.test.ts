@@ -105,6 +105,74 @@ describe('single writer', () => {
     await tab.close();
   });
 
+  it('versionchange 立即撤销写权限，并在恢复完成前一直持有 lease', async () => {
+    const locks = new FakeLocks();
+    let finishRecovery!: () => void;
+    const recovery = new Promise<void>((resolve) => { finishRecovery = resolve; });
+    const states: string[] = [];
+    const a = new SingleWriterCoordinator({
+      ownerId: 'recovering',
+      locks,
+      channelFactory,
+      onStateChange: (state) => states.push(state),
+      onVersionChange: () => recovery,
+    });
+    const b = new SingleWriterCoordinator({ ownerId: 'waiting', locks, channelFactory });
+
+    expect(await a.acquire()).toBe(true);
+    expect(a.isWritable).toBe(true);
+
+    const recovering = a.notifyVersionChange();
+    expect(a.state).toBe('recovering');
+    expect(a.isWritable).toBe(false);
+    expect(await b.acquire()).toBe(false);
+
+    finishRecovery();
+    await recovering;
+    expect(a.state).toBe('reader');
+    expect(await b.acquire()).toBe(true);
+    expect(states).toEqual(['preparing', 'writer', 'recovering', 'reader']);
+
+    await b.close();
+    await a.close();
+  });
+
+  it('稳定状态屏障丢弃恢复期间产生的旧 writer 结果', async () => {
+    const locks = new FakeLocks();
+    let finishRecovery!: () => void;
+    let markRecoveryStarted!: () => void;
+    const recovery = new Promise<void>((resolve) => { finishRecovery = resolve; });
+    const recoveryStarted = new Promise<void>((resolve) => { markRecoveryStarted = resolve; });
+    const tab = new SingleWriterCoordinator({
+      ownerId: 'stable-startup',
+      locks,
+      channelFactory,
+      onVersionChange: async () => {
+        markRecoveryStarted();
+        await recovery;
+      },
+    });
+    expect(await tab.acquire()).toBe(true);
+
+    const observed: boolean[] = [];
+    const stable = tab.runAgainstStableState(async (writable) => {
+      observed.push(writable);
+      if (observed.length === 1) {
+        void tab.notifyVersionChange();
+        return 'stale-writer';
+      }
+      return writable ? 'writer' : 'reader';
+    });
+
+    await recoveryStarted;
+    expect(tab.state).toBe('recovering');
+    finishRecovery();
+
+    expect(await stable).toBe('reader');
+    expect(observed).toEqual([true, false]);
+    await tab.close();
+  });
+
   it('commit 广播只通知 reader，不承担互斥', async () => {
     const locks = new FakeLocks();
     let commits = 0;
