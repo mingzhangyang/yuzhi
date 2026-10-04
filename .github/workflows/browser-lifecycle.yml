@@ -57,3 +57,28 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:4173/ > /dev/null
           node browser-tests/lifecycle-smoke.mjs
+
+      - name: Verify BFCache with direct Chrome DevTools Protocol
+        env:
+          BASE_URL: http://127.0.0.1:4173
+          CDP_URL: http://127.0.0.1:9222
+        run: |
+          rm -rf /tmp/yuzhi-cdp-profile
+          google-chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --remote-debugging-address=127.0.0.1 \
+            --remote-debugging-port=9222 \
+            --user-data-dir=/tmp/yuzhi-cdp-profile \
+            about:blank > /tmp/yuzhi-cdp.log 2>&1 &
+          chrome_pid=$!
+          trap 'kill "$chrome_pid" 2>/dev/null || true; cat /tmp/yuzhi-cdp.log' EXIT
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:9222/json/version > /dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:9222/json/version > /dev/null
+          node browser-tests/bfcache-cdp.mjs
