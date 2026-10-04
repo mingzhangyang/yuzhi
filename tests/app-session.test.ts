@@ -153,6 +153,38 @@ describe('AppSession', () => {
     await a.close();
   });
 
+  it('页面暂停会关闭持久层与通知通道，恢复后重建资源再开放 writer', async () => {
+    const locks = new FakeLocks();
+    let persistence!: ControlledPersistence;
+    const session = (await AppSession.start({
+      coordinator: { ownerId: 'page-lifecycle', locks, channelFactory },
+      persistenceFactory: (writeAccess) => {
+        persistence = new ControlledPersistence(writeAccess);
+        return persistence;
+      },
+    })).session;
+
+    expect(session.state).toBe('writer');
+    expect(FakeChannel.peers.size).toBe(1);
+    persistence.operations.length = 0;
+
+    await session.suspendForCache();
+    expect(session.state).toBe('reader');
+    expect(session.store.isReadOnly).toBe(true);
+    expect(FakeChannel.peers.size).toBe(0);
+    expect(persistence.operations).toContain('close');
+
+    persistence.operations.length = 0;
+    expect(await session.resumeFromCache()).toBe(true);
+    expect(session.state).toBe('writer');
+    expect(session.store.isReadOnly).toBe(false);
+    expect(FakeChannel.peers.size).toBe(1);
+    expect(persistence.operations[0]).toBe('reopen:false');
+    expect(persistence.operations).toContain('access:true:start');
+
+    await session.close();
+  });
+
   it('reader 可在错过广播后主动核对持久层，补偿冻结页面的新鲜度缺口', async () => {
     const name = `yuzhi-session-refresh-${Date.now()}-${Math.random()}`;
     const locks = new FakeLocks();
