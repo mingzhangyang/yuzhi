@@ -1,6 +1,7 @@
 const cdpBase = process.env.CDP_URL ?? 'http://127.0.0.1:9222';
 const appURL = process.env.BASE_URL ?? 'http://127.0.0.1:4173';
 const timeout = 20000;
+const maxAttempts = 3;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -8,8 +9,8 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function waitFor(fn, message) {
-  const deadline = Date.now() + timeout;
+async function waitFor(fn, message, limit = timeout) {
+  const deadline = Date.now() + limit;
   let last;
   while (Date.now() < deadline) {
     try {
@@ -79,6 +80,36 @@ async function evaluate(expression, awaitPromise = false) {
   return result.result?.value;
 }
 
+async function diagnostics(notRestored) {
+  return evaluate(
+    "({ href: location.href, pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })",
+  ).then((state) => ({ state, cdpNotRestored: notRestored }));
+}
+
+async function writeDurableProject(id, name) {
+  const expression =
+    "(async () => {" +
+    "const id=" + JSON.stringify(id) + ";" +
+    "const name=" + JSON.stringify(name) + ";" +
+    "const db = await new Promise((resolve, reject) => {" +
+    "  const request = indexedDB.open('yuzhi');" +
+    "  request.onsuccess = () => resolve(request.result);" +
+    "  request.onerror = () => reject(request.error ?? new Error('open failed'));" +
+    "});" +
+    "try {" +
+    "  await new Promise((resolve, reject) => {" +
+    "    const tx = db.transaction('projects', 'readwrite');" +
+    "    tx.objectStore('projects').put({ id, name, createdAt: '2026-10-04', status: 'active', islandSlot: 7 });" +
+    "    tx.oncomplete = () => resolve();" +
+    "    tx.onerror = () => reject(tx.error ?? new Error('durable write failed'));" +
+    "    tx.onabort = () => reject(tx.error ?? new Error('durable write aborted'));" +
+    "  });" +
+    "} finally { db.close(); }" +
+    "return true;" +
+    "})()";
+  await evaluate(expression, true);
+}
+
 const notRestored = [];
 on('Page.backForwardCacheNotUsed', (params) => notRestored.push(params));
 
@@ -93,62 +124,108 @@ try {
   const version = await send('Browser.getVersion');
   console.log('[bfcache-cdp] browser=' + version.product);
 
-  await send('Page.navigate', { url: appURL });
-  await waitFor(
-    () => evaluate("Boolean(window.yuzhi?.store && window.yuzhi?.session)"),
-    'app did not boot',
-  );
+  let restored = false;
+  let lastEviction;
 
-  await evaluate(
-    "(async () => { const app = window.yuzhi; app.actions.createProject(app.store, 'BFCache CDP evidence'); await app.store.flush(); return true; })()",
-    true,
-  );
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const attemptNotRestoredStart = notRestored.length;
+    const durableId = 'bfcache-durable-' + attempt + '-' + Date.now();
+    const durableName = 'BFCache durable refresh ' + attempt;
 
-  const history = await send('Page.getNavigationHistory');
-  const appEntry = history.entries[history.currentIndex];
-  assert(appEntry, 'missing application history entry');
-
-  await send('Page.navigate', { url: appURL + '/favicon.svg?bfcache-cdp=1' });
-  await waitFor(
-    () => evaluate("location.pathname === '/favicon.svg'"),
-    'secondary navigation did not commit',
-  );
-
-  await send('Page.navigateToHistoryEntry', { entryId: appEntry.id });
-  await waitFor(
-    () => evaluate("location.pathname === '/' && Boolean(window.yuzhi?.session)"),
-    'back navigation did not restore the application',
-  );
-
-  // The preserved document becomes observable through Runtime before Chrome
-  // necessarily dispatches the restored pageshow event. Wait on the lifecycle
-  // evidence itself instead of treating URL restoration as the event barrier.
-  try {
+    await send('Page.navigate', { url: appURL });
     await waitFor(
-      () => evaluate("sessionStorage.getItem('yuzhi-bfcache:pageshow:/') === 'true'"),
-      'restored pageshow did not report persisted=true',
+      () => evaluate("Boolean(window.yuzhi?.store && window.yuzhi?.session)"),
+      'app did not boot',
     );
-  } catch (error) {
-    const diagnostics = await evaluate("({ href: location.href, pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })");
-    throw new Error((error instanceof Error ? error.message : String(error)) + '; diagnostics=' + JSON.stringify(diagnostics) + '; cdpNotRestored=' + JSON.stringify(notRestored));
+    await waitFor(
+      () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
+      'app did not become writer before BFCache attempt',
+    );
+
+    await evaluate(
+      "sessionStorage.removeItem('yuzhi-bfcache:pagehide:/'); sessionStorage.removeItem('yuzhi-bfcache:pageshow:/'); true",
+    );
+
+    const history = await send('Page.getNavigationHistory');
+    const appEntry = history.entries[history.currentIndex];
+    assert(appEntry, 'missing application history entry');
+
+    await send('Page.navigate', { url: appURL + '/favicon.svg?bfcache-cdp=' + attempt });
+    await waitFor(
+      () => evaluate("location.pathname === '/favicon.svg'"),
+      'secondary navigation did not commit',
+    );
+
+    const pagehidePersisted = await evaluate("sessionStorage.getItem('yuzhi-bfcache:pagehide:/')");
+    if (pagehidePersisted !== 'true') {
+      const evidence = await diagnostics(notRestored.slice(attemptNotRestoredStart));
+      throw new Error(
+        'application did not enter BFCache on attempt ' + attempt + ': ' + JSON.stringify(evidence),
+      );
+    }
+
+    // The app document is frozen now. Mutate IndexedDB through the same-origin
+    // secondary document; the BFCache document cannot see this in memory.
+    await writeDurableProject(durableId, durableName);
+
+    await send('Page.navigateToHistoryEntry', { entryId: appEntry.id });
+    await waitFor(
+      () => evaluate("location.pathname === '/' && Boolean(window.yuzhi?.session)"),
+      'back navigation did not return to the application',
+    );
+
+    try {
+      await waitFor(
+        () => evaluate("sessionStorage.getItem('yuzhi-bfcache:pageshow:/') === 'true'"),
+        'restored pageshow did not report persisted=true',
+        6000,
+      );
+    } catch (error) {
+      // pagehide.persisted=true proves the application was eligible and was
+      // actually inserted into BFCache. Failure to restore after that point is
+      // a post-entry browser eviction, not an app eligibility failure. Retry a
+      // bounded number of times, but never convert pagehide.persisted=false or
+      // a product not-restored reason into success.
+      lastEviction = {
+        error: error instanceof Error ? error.message : String(error),
+        evidence: await diagnostics(notRestored.slice(attemptNotRestoredStart)),
+      };
+      console.warn('[bfcache-cdp] cached page was evicted before restore on attempt ' + attempt + ': ' + JSON.stringify(lastEviction));
+      if (attempt < maxAttempts) continue;
+      break;
+    }
+
+    await waitFor(
+      () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
+      'restored page did not resume writer duties',
+    );
+
+    const evidence = await evaluate(
+      "({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, durablePresent: window.yuzhi.store.data.projects.some((project) => project.id === " + JSON.stringify(durableId) + ") })",
+    );
+
+    assert(evidence.pagehidePersisted === 'true', 'BFCache entry evidence was lost');
+    assert(evidence.pageshowPersisted === 'true', 'BFCache restore evidence was lost');
+    assert(
+      evidence.durablePresent,
+      'restored page did not observe the project written to IndexedDB while it was cached',
+    );
+
+    console.log(
+      '[bfcache-cdp] ok attempt=' + attempt +
+      ' pagehide.persisted=' + evidence.pagehidePersisted +
+      ' pageshow.persisted=' + evidence.pageshowPersisted +
+      ' durableRefresh=true',
+    );
+    restored = true;
+    break;
   }
-  await waitFor(
-    () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
-    'restored page did not resume writer duties',
-  );
 
-  const evidence = await evaluate("({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, projects: window.yuzhi.store.data.projects.map((project) => project.name) })");
-
-  if (evidence.pagehidePersisted !== 'true' || evidence.pageshowPersisted !== 'true') {
-    throw new Error('BFCache was not used: evidence=' + JSON.stringify(evidence) + ', notRestored=' + JSON.stringify(notRestored));
+  if (!restored) {
+    throw new Error(
+      'Chrome evicted all ' + maxAttempts + ' pages after confirmed BFCache entry; last=' + JSON.stringify(lastEviction),
+    );
   }
-
-  assert(
-    evidence.projects.includes('BFCache CDP evidence'),
-    'BFCache-restored page lost the durable snapshot',
-  );
-
-  console.log('[bfcache-cdp] ok pagehide.persisted=' + evidence.pagehidePersisted + ' pageshow.persisted=' + evidence.pageshowPersisted);
 } finally {
   try { await send('Page.close'); } catch {}
   socket.close();
