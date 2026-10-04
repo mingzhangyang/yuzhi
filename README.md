@@ -44,6 +44,7 @@ src/
   types.ts            数据模型（交接文档第 14 节，加了几处必要字段）
   db.ts               IndexedDB（idb）读写、JSON 备份导出/导入
   persistence-startup.ts 启动持久层所有权转移、失败清理与受控内存降级
+  app-session.ts      启动/接管/恢复/bfcache/关闭的应用会话编排
   store.ts            内存数据 + 写穿持久层 + 变化通知 + 村落状态缓存
   actions.ts          当前 action 实现与公共入口（所有入口统一走 Store.batch）
   actions/            领域分类再导出入口；实现迁移尚待完成
@@ -68,7 +69,7 @@ tests/                单元测试
 
 实体保留自身字段，`entries` / `operations` 保存结算与操作事实，`snapshots` / `chronicle` 保存历史采样与冻结叙述；一生之书、打断记录、阶段和有效任务状态由 read model 计算。旧版 `life` / `interruptions` 在历史保全、校验及业务事务提交成功后才删除。每个用户动作使用一个持久化 batch；多标签页只有 Web Locks 的 writer 接收新动作，已接受写入在释放锁前完成提交及通知，读者接管取得锁后，须刷新成功才开放新动作。
 
-架构状态（2026-10-04，代码基线 `1d1ad84`）：Phase 0–2 已建立，Phase 3 核心事务机制已实现；Phase 4 仍待会话编排收敛与真实浏览器验收，Phase 5 仍待领域实现拆分。详细工作顺序与完成条件见[架构调整方案第 10 节](docs/架构调整方案.md#10-阶段状态与剩余实施顺序)。
+架构状态（2026-10-04）：Phase 0–2 已建立，Phase 3 核心事务机制已实现；Phase 4 的应用会话编排已收敛到 `AppSession`，仍待真实浏览器 smoke / bfcache / 升级交叠验收；Phase 5 仍待领域实现拆分。详细工作顺序与完成条件见[架构调整方案第 10 节](docs/架构调整方案.md#10-阶段状态与剩余实施顺序)。
 
 ## 已完成（对应交接文档第 16 节开发顺序 1–9）
 
