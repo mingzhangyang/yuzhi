@@ -240,15 +240,59 @@ async function boot() {
     }
   };
 
-  renderer.onTap = (hit) => {
+  /* 点到景物（树、山、田、溪、空地、海）时，在地图上弹出一张说明卡 */
+  const infoBox = $('mapinfo');
+  const hideInfo = () => {
+    if (infoBox.hidden) return;
+    infoBox.hidden = true;
+    renderer.clearFocus();
+  };
+  const showInfo = (pt: { x: number; y: number }) => {
+    const r = renderer.inspect(pt);
+    if (!r) return hideInfo();
+    const { info } = r;
+    setHTML(
+      infoBox,
+      `<div class="mi-head"><b>${esc(info.title)}</b>${info.sub ? `<small>${esc(info.sub)}</small>` : ''}<button type="button" class="mi-x" aria-label="关闭">×</button></div>` +
+        info.lines.map((l) => `<p>${esc(l)}</p>`).join(''),
+    );
+    infoBox.hidden = false;
+    // 卡片放在景物上方；太靠上就放到下方，左右不超出地图
+    const wrap = $('mapwrap');
+    const W = wrap.clientWidth;
+    const bw = infoBox.offsetWidth;
+    const bh = infoBox.offsetHeight;
+    const below = r.y - bh - 12 < 8;
+    infoBox.classList.toggle('below', below);
+    const left = Math.min(Math.max(8, r.x - bw / 2), W - bw - 8);
+    infoBox.style.left = `${left}px`;
+    infoBox.style.top = `${below ? Math.min(r.y + 14, wrap.clientHeight - bh - 8) : r.y - bh - 12}px`;
+    infoBox.style.setProperty('--arrow', `${Math.min(Math.max(14, r.x - left), bw - 14)}px`);
+    infoBox.querySelector<HTMLButtonElement>('.mi-x')!.onclick = hideInfo;
+  };
+  $('map').addEventListener('pointerdown', hideInfo);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideInfo();
+  });
+
+  renderer.onTap = (hit, pt) => {
     $('tip').style.opacity = '0';
-    if (!hit) return;
+    if (!hit) return showInfo(pt);
     if (hit.kind === 'project' || hit.kind === 'task') tracker.open({ kind: hit.kind, id: hit.id });
     else tracker.open({ kind: hit.kind });
   };
-  $('zin').onclick = () => renderer.zoomBy(1.35);
-  $('zout').onclick = () => renderer.zoomBy(1 / 1.35);
-  $('zfit').onclick = () => renderer.resetView();
+  $('zin').onclick = () => {
+    hideInfo();
+    renderer.zoomBy(1.35);
+  };
+  $('zout').onclick = () => {
+    hideInfo();
+    renderer.zoomBy(1 / 1.35);
+  };
+  $('zfit').onclick = () => {
+    hideInfo();
+    renderer.resetView();
+  };
 
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();

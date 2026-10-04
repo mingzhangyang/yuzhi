@@ -10,6 +10,7 @@
 import type { Stage } from '../logic/config';
 import type { ISODate } from '../types';
 import { buildIsland, mulberry32, tileHash, type IslandMap, type Tile, type VillageSite } from './map';
+import { describe, type InfoTarget, type MapInfo } from './info';
 import { dayLight, festivalsOf, moonPhase, seasonProgress, snowCover, weatherOf, type DayLight, type Festival, type Weather } from './ambience';
 
 export interface WalkerView {
@@ -181,7 +182,9 @@ export class IslandRenderer {
   private sparks: Spark[] = [];
   private nextRocket = 0;
   private calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  onTap: (hit: Hit) => void = () => {};
+  /** 被点中的景物：画一圈高亮 */
+  private focus: { i: number; j: number; tree?: [number, number, number] } | null = null;
+  onTap: (hit: Hit, pt: { x: number; y: number }) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement, private wrap: HTMLElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -204,7 +207,10 @@ export class IslandRenderer {
     canvas.addEventListener('pointerup', (e) => {
       const d = this.drag;
       this.drag = null;
-      if (d && !d.moved) this.onTap(this.hitAt(this.localPt(e)));
+      if (d && !d.moved) {
+        const pt = this.localPt(e);
+        this.onTap(this.hitAt(pt), pt);
+      }
     });
     canvas.addEventListener('pointercancel', () => (this.drag = null));
     new ResizeObserver(() => this.resize()).observe(wrap);
@@ -423,6 +429,12 @@ export class IslandRenderer {
     if (near(m.granary, 0.9)) return { kind: 'granary' };
     if (near(m.chores, 0.9)) return { kind: 'chores' };
     if (near(m.lighthouse, 1.3)) return { kind: 'archive' };
+    {
+      // 灯塔立在山顶，塔身在屏幕上比地块高出一截
+      const [lx, ly] = this.iso(m.lighthouse.i, m.lighthouse.j);
+      const tw = this.view.tw;
+      if (Math.abs(pt.x - lx) < tw * 0.25 && pt.y < ly - tw * 0.5 && pt.y > ly - tw * 1.9) return { kind: 'archive' };
+    }
     for (const l of s.landmarks) {
       const site = m.landmarks[l.index];
       if (site && near(site, 0.8)) return { kind: 'project', id: l.projectId };
@@ -440,6 +452,73 @@ export class IslandRenderer {
     if (vb) return { kind: 'project', id: vb.projectId };
     // 点标签
     return null;
+  }
+
+  /** 点到的景物（树、山、田、溪、空地、海）及其说明；anchor 是信息卡指向的位置 */
+  inspect(pt: { x: number; y: number }): { info: MapInfo; x: number; y: number } | null {
+    const s = this.scene;
+    if (!s) return null;
+    const m = this.map;
+    const { tw } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    const a = this.amb;
+    const [yy, mm, dd] = s.date.split('-').map(Number);
+    const ctx = {
+      season: a.season,
+      progress: a.progress,
+      cover: a.cover,
+      weather: a.weather,
+      light: s.light,
+      hour: s.hour,
+      fest: [...a.fest],
+      moon: moonPhase(new Date(yy, mm - 1, dd, Math.floor(s.hour), (s.hour % 1) * 60)),
+    };
+    const occupied = new Set(s.villages.map((v) => v.slot));
+    const built = new Set(s.landmarks.map((l) => l.index));
+    // 树：树冠比地块高，按屏幕上的外框找，取最靠前的一棵
+    let best: { t: Tile; x: number; y: number; s: number; kind: 'pine' | 'round'; seed: number } | null = null;
+    for (const t of m.all) {
+      if (!t.trees.length || (t.landmark >= 0 && built.has(t.landmark))) continue;
+      const [x0, y0] = this.iso(t.i, t.j);
+      for (const tr of t.trees) {
+        const x = x0 + (tr.dx - tr.dy) * hw;
+        const y = y0 + (tr.dx + tr.dy) * hh;
+        const sz = tw * 0.42 * tr.s;
+        if (Math.abs(pt.x - x) < sz * 0.4 && pt.y < y + sz * 0.1 && pt.y > y - sz * 1.3 && (!best || y > best.y)) {
+          best = { t, x, y, s: sz, kind: tr.kind, seed: tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100)) };
+        }
+      }
+    }
+    if (best) {
+      this.focus = { i: best.t.i, j: best.t.j, tree: [best.x, best.y, best.s] };
+      const target: InfoTarget = { kind: 'tree', tree: best.kind, cherry: best.seed % 1 < 0.35, forest: best.t.type === 'forest' };
+      return { info: describe(target, ctx), x: best.x, y: best.y - best.s * (best.kind === 'pine' ? 1.3 : 1) };
+    }
+    // 山：同样按屏幕外框
+    let mt: Tile | null = null;
+    for (const t of m.all) {
+      if (t.type !== 'mountain') continue;
+      const [x, y] = this.iso(t.i, t.j);
+      const h = tw * (0.75 + t.v * 0.55);
+      const k = (y + tw * 0.1 - pt.y) / (h + tw * 0.1);
+      if (k >= 0 && k <= 1 && Math.abs(pt.x - x) < tw * 0.48 * (1 - k) && (!mt || t.i + t.j > mt.i + mt.j)) mt = t;
+    }
+    const { fi, fj } = this.tileCoords(pt);
+    const t = mt ?? m.at(Math.round(fi), Math.round(fj));
+    if (!t) {
+      this.focus = null;
+      return { info: describe({ kind: 'sea' }, ctx), x: pt.x, y: pt.y };
+    }
+    const site = t.village >= 0 && !occupied.has(t.village) ? 'village' : t.landmark >= 0 && !built.has(t.landmark) ? 'landmark' : undefined;
+    this.focus = { i: t.i, j: t.j };
+    const [x, y] = this.iso(t.i, t.j);
+    const top = t.type === 'mountain' ? y - tw * (0.75 + t.v * 0.55) : y - hh;
+    return { info: describe({ kind: 'ground', type: t.type, ring: t.ring, site }, ctx), x, y: top };
+  }
+
+  clearFocus() {
+    this.focus = null;
   }
 
   /* ---------------- 动画 ---------------- */
@@ -1701,6 +1780,37 @@ export class IslandRenderer {
     }
   }
 
+  /** 被点中的景物：一圈呼吸的高亮 */
+  private drawFocus() {
+    const f = this.focus;
+    if (!f) return;
+    const c = this.ctx;
+    const { tw } = this.view;
+    const k = 0.55 + 0.45 * Math.sin(this.t * 4);
+    c.save();
+    c.strokeStyle = '#ffffff';
+    c.globalAlpha = 0.5 + 0.4 * k;
+    c.lineWidth = 2;
+    c.setLineDash([5, 4]);
+    c.lineDashOffset = -this.t * 12;
+    c.beginPath();
+    if (f.tree) {
+      const [x, y, s] = f.tree;
+      c.ellipse(x, y, s * 0.42, s * 0.18, 0, 0, Math.PI * 2);
+    } else {
+      const [x, y] = this.iso(f.i, f.j);
+      const hw = tw / 2;
+      const hh = tw / 4;
+      c.moveTo(x, y - hh);
+      c.lineTo(x + hw, y);
+      c.lineTo(x, y + hh);
+      c.lineTo(x - hw, y);
+      c.closePath();
+    }
+    c.stroke();
+    c.restore();
+  }
+
   /* ---------------- 天空与天气 ---------------- */
 
   /** 云影缓缓掠过小岛 */
@@ -2146,6 +2256,8 @@ export class IslandRenderer {
       this.drawPerson(x, y, s0, p, s.light === 'night' ? 0.88 : 1);
     }
     if (a.fest.has('duanwu') && this.day.night < 0.6) this.drawDragonBoat(false);
+
+    this.drawFocus();
 
     // 天空、天气与光线
     this.drawCloudShadows();
