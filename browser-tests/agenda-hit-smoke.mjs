@@ -361,7 +361,7 @@ try {
   });
 
   await runScenario('杂务待结算 / 稍后：点小屋打开杂务追踪栏', async () => {
-    assert(!p.chores.view.live && p.chores.view.ended === 1 && p.chores.view.later === 1, `unexpected chores state ${JSON.stringify(p.chores.view)}`);
+    assert(!p.chores.view.live && p.chores.view.ended === 1 && p.chores.view.later === 2, `unexpected chores state ${JSON.stringify(p.chores.view)}`);
     const r = await click(page, p.chores.hut);
     assert(r.view.kind === 'chores', `chores hut opened ${JSON.stringify(r)}`);
     const broom = await hitAt(page, p.chores.broom);
@@ -374,8 +374,8 @@ try {
     await page.waitForTimeout(600);
     p = await points(page);
     assert(p.chores.view.soon?.title === '买菜', `chores not soon: ${JSON.stringify(p.chores.view)}`);
-    assert(p.chores.labelText.includes('杂务 0') && p.chores.labelText.includes('买菜 将开始') && p.chores.labelText.includes('待结算 1'),
-      `soon chores label hid count or ended total: ${p.chores.labelText}`);
+    assert(p.chores.labelText.includes('杂务 0') && p.chores.labelText.includes('买菜 将开始') && p.chores.labelText.includes('稍后 1') && p.chores.labelText.includes('待结算 1'),
+      `soon chores label hid count or concurrent totals: ${p.chores.labelText}`);
     const broom = await click(page, p.chores.broom);
     assert(broom.info?.includes('17:00 开始'), `soon broom info: ${JSON.stringify(broom)}`);
     await shot(page, '4a-1650-chores-soon');
