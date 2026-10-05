@@ -1,6 +1,7 @@
 /**
  * 小岛观感对照截图：固定数据、固定时刻，分别截桌面 / 手机、白天 / 夜里。
- * 每批画面调整前后各跑一次，对比同名截图即可。
+ * 每批画面调整前后各跑一次，对比同名截图即可。id 与 Math.random 都已固定，但小人仍按真实帧时间走动，
+ * 位置会有细微差别。
  *
  *   npm run build && npx vite preview --port 4173 --strictPort &
  *   SHOT_DIR=shots/after node browser-tests/island-shots.mjs
@@ -51,6 +52,25 @@ try {
     for (const time of TIMES) {
       const { name: _name, ...opts } = vp;
       const context = await browser.newContext({ timezoneId: TZ, locale: 'zh-CN', ...opts });
+      // 项目和任务的 id 决定小人的外貌、落脚点和哪几户亮灯；固定随机源，改前改后两次运行才画出同一个场景。
+      await context.addInitScript(() => {
+        let seed = 20260714;
+        const rand = () => {
+          seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        Math.random = rand;
+        let n = 0;
+        crypto.randomUUID = () => {
+          n++;
+          // uid() 只取前 16 位，计数器放在最前面保证唯一
+          const part = () => Math.floor(rand() * 2 ** 32).toString(16).padStart(8, '0');
+          const hex = n.toString(16).padStart(8, '0') + part() + part() + part();
+          return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+        };
+      });
       const page = await context.newPage();
       await page.clock.setFixedTime(at(time.hm));
       await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
