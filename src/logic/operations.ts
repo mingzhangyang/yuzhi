@@ -1,5 +1,5 @@
-import type { Data, LifeEntry, LifeKind, OperationEvent, OperationLifeSnapshot, SkipReason } from '../types';
-import { CHORES } from '../types';
+import type { Data, LifeEntry, LifeKind, LifeSubjectType, OperationEvent, OperationLifeSnapshot, SkipReason } from '../types';
+import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 
 const LIFE_KINDS = new Set<LifeKind>([
   'start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete',
@@ -17,6 +17,11 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
   return data.entries.map((entry) => {
     const title = `「${entry.title}」`;
     const taskId = entry.itemType === 'task' ? entry.itemId : undefined;
+    const localSchedule = entry.itemType === 'event'
+      ? data.events.find((event) => event.id === entry.itemId)?.sourceId === LOCAL_CALENDAR_SOURCE_ID
+      : false;
+    const subjectType: LifeSubjectType | undefined = taskId ? 'task' : localSchedule ? 'schedule' : undefined;
+    const subjectId = subjectType ? entry.itemId : undefined;
     if (entry.outcome === 'done') {
       return {
         id: `l|${entry.id}`,
@@ -24,6 +29,8 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
         factSeq: entry.seq,
         projectId: entry.projectId === CHORES ? undefined : entry.projectId,
         taskId,
+        subjectType,
+        subjectId,
         kind: 'done' as const,
         text: entry.itemType === 'task' ? `完成了${title}` : `${title}做了`,
       };
@@ -35,6 +42,8 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
         factSeq: entry.seq,
         projectId: entry.projectId === CHORES ? undefined : entry.projectId,
         taskId,
+        subjectType,
+        subjectId,
         kind: 'partial' as const,
         text: `${title}做了一部分`,
       };
@@ -45,6 +54,8 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
       factSeq: entry.seq,
       projectId: entry.projectId === CHORES ? undefined : entry.projectId,
       taskId,
+      subjectType,
+      subjectId,
       kind: 'skip' as const,
       reason: entry.reason,
       text: `${title}没做${entry.reason ? `：${REASON_TEXT[entry.reason]}` : ''}`,
@@ -70,10 +81,15 @@ function snapshotsOf(event: OperationEvent): OperationLifeSnapshot[] {
     if (typeof o.text !== 'string' || typeof o.kind !== 'string' || !LIFE_KINDS.has(o.kind as LifeKind)) continue;
     if (o.projectId !== undefined && typeof o.projectId !== 'string') continue;
     if (o.taskId !== undefined && typeof o.taskId !== 'string') continue;
+    if (o.subjectType !== undefined && !['project', 'task', 'diary', 'schedule'].includes(String(o.subjectType))) continue;
+    if (o.subjectId !== undefined && typeof o.subjectId !== 'string') continue;
+    if ((o.subjectType === undefined) !== (o.subjectId === undefined)) continue;
     if (o.reason !== undefined && (typeof o.reason !== 'string' || !REASONS.has(o.reason as SkipReason))) continue;
     out.push({
       projectId: o.projectId as string | undefined,
       taskId: o.taskId as string | undefined,
+      subjectType: o.subjectType as LifeSubjectType | undefined,
+      subjectId: o.subjectId as string | undefined,
       text: o.text,
       kind: o.kind as LifeKind,
       reason: o.reason as SkipReason | undefined,
@@ -85,12 +101,23 @@ function snapshotsOf(event: OperationEvent): OperationLifeSnapshot[] {
 /** 把 operation facts 投影成一生之书行。一个 task-moved 可以同时投影到旧村落和新村落。 */
 export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
   const order = String(event.seq).padStart(12, '0');
-  return snapshotsOf(event).map((snapshot, index) => ({
-    id: `oplife|${order}|${event.id}|${index}`,
-    date: event.date,
-    factSeq: event.seq,
-    ...snapshot,
-  }));
+  const syntheticBaseline = event.payload?.source === 'migration'
+    && (event.kind === 'diary-created' || event.kind === 'schedule-created');
+  return snapshotsOf(event).map((snapshot, index) => {
+    const subjectType = snapshot.subjectType ?? (snapshot.taskId ? 'task' : snapshot.projectId ? 'project' : undefined);
+    const subjectId = snapshot.subjectId ?? (snapshot.taskId || snapshot.projectId);
+    return {
+      id: `oplife|${order}|${event.id}|${index}`,
+      date: event.date,
+      // v6 baseline facts describe a state that existed before migration.
+      // They were appended to the immutable stream, so their persisted seq is
+      // intentionally not used as historical occurrence order in the read model.
+      factSeq: syntheticBaseline ? undefined : event.seq,
+      ...snapshot,
+      subjectType,
+      subjectId,
+    };
+  });
 }
 
 /**
