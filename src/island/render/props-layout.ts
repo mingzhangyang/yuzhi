@@ -99,6 +99,19 @@ interface Ground {
   m: IslandMap;
   built: Set<Tile>;
   taken: Set<Tile>;
+  /** 各村告示牌和条幅的落地点（villageAgendaAnchor：广场中心 −0.72, −0.72） */
+  agenda: { i: number; j: number }[];
+}
+
+/** 告示牌、条幅落地点在广场中心的左后方 0.72 格，与 villageAgendaAnchor 一致 */
+export const AGENDA_OFFSET = -0.72;
+
+/**
+ * 道具落地点是否压在某村告示牌和条幅那一块：屏幕上横向 0.7 格以内、深度前后 0.9 格以内。
+ * 那里的道具会画在告示牌前面挡住它。不管村子此刻有没有日程都避开，免得日程一出现道具就跳走。
+ */
+export function inAgendaZone(i: number, j: number, anchors: readonly { i: number; j: number }[]): boolean {
+  return anchors.some((a) => Math.abs(i - j - (a.i - a.j)) / 2 < 0.7 && Math.abs(i + j - (a.i + a.j)) < 0.9);
 }
 
 function freeTile(g: Ground, t: Tile | null): t is Tile {
@@ -129,7 +142,7 @@ function plazaProps(g: Ground, v: PropVillage, center: Tile): PlacedProp[] {
   if (v.stage < 2 && v.houses > 3) ids.push(r(4) < 0.7 ? 'lantern-post' : 'bench');
   const spots = AROUND.map(([di, dj], k) => ({ di, dj, r: r(10 + k) }))
     .sort((a, b) => a.r - b.r)
-    .filter(({ di, dj }) => freeTile(g, g.m.at(center.i + di, center.j + dj)));
+    .filter(({ di, dj }) => freeTile(g, g.m.at(center.i + di, center.j + dj)) && !inAgendaZone(center.i + di, center.j + dj, g.agenda));
   const out: PlacedProp[] = [];
   for (let k = 0; k < ids.length && k < spots.length; k++) {
     const { di, dj } = spots[k];
@@ -163,7 +176,7 @@ function yardProps(g: Ground, v: PropVillage): PlacedProp[] {
     for (const [di, dj] of sides) {
       // 斜邻的那格要是空地，免得道具挤在两座房子中间
       const nb = m.at(t.i + Math.sign(di), t.j + Math.sign(dj));
-      if (!freeTile(g, nb)) continue;
+      if (!freeTile(g, nb) || inAgendaZone(t.i + di, t.j + dj, g.agenda)) continue;
       out.push(prop(pick(pool, houseHash(v.projectId, k, 22)), t.i + di, t.j + dj));
       g.taken.add(nb);
       break;
@@ -180,7 +193,11 @@ export function islandProps(m: IslandMap, villages: readonly PropVillage[], cove
   if (cover > PROP_SNOW_LIMIT) return [];
   const out = harborProps(m);
   const sites = villages.filter((v) => m.villages[v.slot]);
-  const g: Ground = { m, built: new Set(), taken: new Set() };
+  const agenda = sites.map((v) => {
+    const c = m.villages[v.slot].center;
+    return { i: c.i + AGENDA_OFFSET, j: c.j + AGENDA_OFFSET };
+  });
+  const g: Ground = { m, built: new Set(), taken: new Set(), agenda };
   for (const v of sites) for (const t of m.villages[v.slot].slots.slice(0, v.houses)) g.built.add(t);
   // 先排广场，再排院落：广场旁的空地优先给市集和灯柱
   for (const v of sites) out.push(...plazaProps(g, v, m.villages[v.slot].center));

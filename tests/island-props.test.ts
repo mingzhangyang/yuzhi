@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildIsland, MAX_RINGS } from '../src/island/map';
-import { islandProps, PROP_SNOW_LIMIT, propOutline, type PropVillage } from '../src/island/render/props-layout';
+import { AGENDA_OFFSET, inAgendaZone, islandProps, PROP_SNOW_LIMIT, propOutline, type PropVillage } from '../src/island/render/props-layout';
 import { PROP_SPRITES } from '../src/island/prop-sprites';
 
 const villages: PropVillage[] = [
@@ -48,15 +48,19 @@ describe('小岛道具摆放', () => {
         // 院落道具落在自家地块的一角；广场道具落在旁边空地的正中，都不和别家房子同格
         if (Math.abs(p.i - t.i) < 0.01) expect(built.has(tileOf(p))).toBe(false);
       }
-      for (const v of villages) {
-        const c = m.villages[v.slot].center;
-        for (const p of props) {
-          const di = p.i - c.i;
-          const dj = p.j - c.j;
-          expect(di < -0.3 && dj < -0.3 && di > -1.5 && dj > -1.5).toBe(false);
-        }
-      }
+      const anchors = villages.map((v) => ({ i: m.villages[v.slot].center.i + AGENDA_OFFSET, j: m.villages[v.slot].center.j + AGENDA_OFFSET }));
+      for (const p of props) expect(inAgendaZone(p.i, p.j, anchors)).toBe(false);
     }
+  });
+
+  it('院落道具也避开告示牌：两户的小村子，水缸不再摆进广场左后方', () => {
+    const m = buildIsland(0);
+    const c = m.villages[0].center;
+    const anchor = [{ i: c.i + AGENDA_OFFSET, j: c.j + AGENDA_OFFSET }];
+    const props = villageProps(m, [{ slot: 0, projectId: 'p-0', stage: 0, houses: 2 }]);
+    for (const p of props) expect(inAgendaZone(p.i, p.j, anchor)).toBe(false);
+    // 修复前这里会摆一只水缸（15.62, 15.38），压在告示牌上
+    expect(inAgendaZone(15.62, 15.38, anchor)).toBe(true);
   });
 
   it('保留开阔空间：每座村落最多两件广场道具、三件院落道具，荒废的村子不摆', () => {
