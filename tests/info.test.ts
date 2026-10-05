@@ -57,6 +57,25 @@ group('日程说明', () => {
     expect(info.lines[0]).toBe('「周会」即将开始，14:10 开始。');
   });
 
+  it('进行中与即将开始可以同时说明', () => {
+    const info = describe({
+      kind: 'agenda',
+      target: 'p',
+      targetName: '团队',
+      phase: 'live',
+      title: '周会',
+      until: new Date(2026, 9, 4, 15).toISOString(),
+      live: [{ title: '周会', end: new Date(2026, 9, 4, 15).toISOString() }],
+      soon: [{ title: '评审', start: new Date(2026, 9, 4, 14, 40).toISOString() }],
+      later: 0,
+      ended: 0,
+      banners: [],
+    }, ctx());
+    const text = info.lines.join('');
+    expect(text).toContain('「周会」进行中');
+    expect(text).toContain('「评审」即将开始，14:40 开始');
+  });
+
   it('稍后和待结算同时存在时两句都写', () => {
     const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'ended', later: 2, ended: 1, banners: [] }, ctx());
     const text = info.lines.join('');

@@ -583,8 +583,11 @@ export class IslandRenderer {
   private villageLabelText(v: VillageView): string {
     const stageTxt = v.stage ? ` · ${['', '安静', '蒙灰', '搬离'][v.stage]}` : '';
     const ag = v.agenda;
+    const live = ag?.live?.[0];
+    const soon = ag?.soon?.[0];
     const agendaParts = [
-      ag?.phase === 'live' ? `${ag.title ?? '日程'} 至 ${this.timeText(ag.until)}` : ag?.phase === 'soon' ? `${ag.title ?? '日程'} 将开始` : '',
+      live ? `${live.title} 至 ${this.timeText(live.end)}` : '',
+      soon ? `${soon.title} 将开始` : '',
       ag?.later ? `稍后 ${ag.later} 场` : '',
       ag?.ended ? `待结算 ${ag.ended}` : '',
     ].filter(Boolean);
@@ -600,7 +603,7 @@ export class IslandRenderer {
   private choresLabelText(ch: ChoresView): string {
     const parts = [`杂务 ${ch.count}`];
     if (ch.live) parts.push(`${ch.live.title} 至 ${this.timeText(ch.live.until)}`);
-    else if (ch.soon) parts.push(`${ch.soon.title} 将开始`);
+    if (ch.soon) parts.push(`${ch.soon.title} 将开始`);
     if (ch.later) parts.push(`稍后 ${ch.later}`);
     if (ch.ended) parts.push(`待结算 ${ch.ended}`);
     return parts.join(' · ');
@@ -770,8 +773,6 @@ export class IslandRenderer {
   private agendaHitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
-    const drift = this.driftHitAt(pt);
-    if (drift) return drift;
     const tw = this.view.tw;
     const r = Math.max(8, tw * 0.22);
     for (const v of s.villages) {
@@ -829,7 +830,9 @@ export class IslandRenderer {
         phase: c.live ? 'live' : c.soon ? 'soon' : c.ended ? 'ended' : 'later',
         title: c.live?.title ?? c.soon?.title,
         until: c.live?.until,
-        start: c.live ? undefined : c.soon?.start,
+        start: c.soon?.start,
+        live: c.live ? [{ title: c.live.title, end: c.live.until }] : [],
+        soon: c.soon ? [{ title: c.soon.title, start: c.soon.start }] : [],
         later: c.later,
         ended: c.ended,
         banners: [],
@@ -852,12 +855,8 @@ export class IslandRenderer {
     return !this.map.at(Math.round(fi), Math.round(fj)) && !this.map.at(Math.round(fi - 0.6), Math.round(fj - 0.6));
   }
 
-  hitAt(pt: { x: number; y: number }): Hit {
-    const s = this.scene;
-    if (!s) return null;
-    if (this.dockHitAt(pt)) return { kind: 'dock' };
-    const drift = this.driftHitAt(pt);
-    if (drift) return drift;
+  /** 前景可动实体永远优先于其经过的码头、瓶子和日程道具。 */
+  private walkerHitAt(pt: { x: number; y: number }): Hit {
     const s0 = Math.max(5, this.view.tw * 0.2);
     let best: Walker | null = null;
     let bd = Math.max(16, s0 * 1.4);
@@ -869,7 +868,19 @@ export class IslandRenderer {
         best = p;
       }
     }
-    if (best) return { kind: 'task', id: best.id };
+    return best ? { kind: 'task', id: best.id } : null;
+  }
+
+  hitAt(pt: { x: number; y: number }): Hit {
+    const s = this.scene;
+    if (!s) return null;
+
+    // 固定命中层级：前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 宽泛区域。
+    const walker = this.walkerHitAt(pt);
+    if (walker) return walker;
+    if (this.dockHitAt(pt)) return { kind: 'dock' };
+    const drift = this.driftHitAt(pt);
+    if (drift) return drift;
     const agendaHit = this.agendaHitAt(pt);
     if (agendaHit) return agendaHit;
     const { fi, fj } = this.tileCoords(pt);
@@ -937,8 +948,10 @@ export class IslandRenderer {
     const s = this.scene;
     const ctx = this.infoContext();
     if (!s || !ctx) return null;
-    const agendaHit = this.agendaHitAt(pt);
-    if (agendaHit) return this.inspectAgenda(agendaHit, pt.x, pt.y, ctx);
+    const interactive = this.hitAt(pt);
+    if (interactive?.kind === 'agenda' || interactive?.kind === 'drift') {
+      return this.inspectAgenda(interactive, pt.x, pt.y, ctx);
+    }
     const m = this.map;
     const { tw } = this.view;
     const hw = tw / 2;

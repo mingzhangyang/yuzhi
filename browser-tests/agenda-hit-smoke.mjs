@@ -56,6 +56,7 @@ async function seed(page) {
       for (const e of [
         ev('live', '周会', d('14:00'), d('15:00'), live.id),
         ev('live-ended', '站会', d('09:00'), d('09:30'), live.id),
+        ev('live-next', '下一场讨论', d('14:40'), d('15:20'), live.id),
         ev('live-later', '回顾', d('17:00'), d('18:00'), live.id),
         ev('trip2', '团建', d('00:00'), d('00:00', '05'), banner.id, true),
         ev('long-holiday', '跨洲项目季度集中协调与复盘日', d('00:00'), d('00:00', '05'), 'chores', true),
@@ -65,6 +66,7 @@ async function seed(page) {
         ev('trip', '出差', d('00:00'), d('00:00', '06'), banner.id, true),
         ev('chores-ended', '取快递', d('09:00'), d('09:30'), 'chores'),
         ev('chores-later', '买菜', d('17:00'), d('18:00'), 'chores'),
+        ev('chores-next', '倒垃圾', d('17:40'), d('18:10'), 'chores'),
         ev('holiday', '国庆假期', d('00:00', '01'), d('00:00', '08'), undefined, true),
         ev('drift', '神秘会面', d('16:00'), d('17:00'), undefined),
         ev('drift2', '匿名讨论', d('16:10'), d('17:10'), undefined),
@@ -203,6 +205,30 @@ try {
     assert(r.view.kind === 'task', `real click on walker opened ${JSON.stringify(r.view)}`);
   });
 
+  await runScenario('离村小人经过栈桥：前景任务命中优先于码头', async () => {
+    const probe = await page.evaluate(() => {
+      const r = window.yuzhi.renderer;
+      const walker = [...r.walkers.values()].find((w) => w.slot === r.scene.villages.find((v) => v.name === '团队').slot);
+      if (!walker) return null;
+      const [di, dj] = r.map.pierDir;
+      const local = r.iso(r.map.dock.i + di * 0.2, r.map.dock.j + dj * 0.2);
+      const s0 = Math.max(5, r.view.tw * 0.2);
+      const world = r.tileCoords({ x: local[0], y: local[1] + s0 * 0.7 });
+      const original = { x: walker.x, y: walker.y, tx: walker.tx, ty: walker.ty, leaving: walker.leaving };
+      walker.x = world.fi;
+      walker.y = world.fj;
+      walker.tx = world.fi;
+      walker.ty = world.fj;
+      walker.leaving = true;
+      const hit = r.hitAt({ x: local[0], y: local[1] });
+      Object.assign(walker, original);
+      return { hit, dock: r.dockHitAt({ x: local[0], y: local[1] }), taskId: walker.id };
+    });
+    assert(probe?.dock, `departing walker probe did not overlap the pier: ${JSON.stringify(probe)}`);
+    assert(probe.hit?.kind === 'task' && probe.hit.id === probe.taskId,
+      `departing walker was intercepted by dock: ${JSON.stringify(probe)}`);
+  });
+
   await runScenario('只有待结算日程：村名标签可点击，键盘也能浏览到说明', async () => {
     const v = p['结算'];
     assert(v.label?.phase === 'ended' && v.label.ended === 1, `ended-only agenda: ${JSON.stringify(v.label)}`);
@@ -227,6 +253,8 @@ try {
     const label = await page.evaluate(() => window.yuzhi.renderer.scene.villages.find((x) => x.name === '团队').agenda);
     assert(label.phase === 'live', `expected live phase, got ${label.phase}`);
     const lines = await boardInfo(page, v.board);
+    assert(lines?.includes('下一场讨论') && lines.includes('14:40 开始'),
+      `live project hid overlapping soon details: ${JSON.stringify(lines)}`);
     assert(lines?.includes('稍后还有 1 场') && lines.includes('1 场已经结束'), `团队 board info: ${JSON.stringify(lines)}`);
   });
 
@@ -373,11 +401,13 @@ try {
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.waitForTimeout(600);
     p = await points(page);
-    assert(p.chores.view.live?.title === '买菜', `chores not live: ${JSON.stringify(p.chores.view)}`);
-    assert(p.chores.labelText.includes('杂务 0') && p.chores.labelText.includes('买菜 至') && p.chores.labelText.includes('待结算 1'),
-      `live chores label hid count or ended total: ${p.chores.labelText}`);
+    assert(p.chores.view.live?.title === '买菜' && p.chores.view.soon?.title === '倒垃圾',
+      `chores did not preserve live + soon: ${JSON.stringify(p.chores.view)}`);
+    assert(p.chores.labelText.includes('杂务 0') && p.chores.labelText.includes('买菜 至') && p.chores.labelText.includes('倒垃圾 将开始') && p.chores.labelText.includes('待结算 1'),
+      `live chores label hid concurrent details: ${p.chores.labelText}`);
     const broom = await click(page, p.chores.broom);
-    assert(broom.info?.includes('买菜'), `broom info: ${JSON.stringify(broom)}`);
+    assert(broom.info?.includes('买菜') && broom.info.includes('倒垃圾') && broom.info.includes('17:40 开始'),
+      `broom info hid concurrent soon event: ${JSON.stringify(broom)}`);
     await shot(page, '4-1730-chores-live');
     const hut = await click(page, p.chores.hut);
     assert(hut.view.kind === 'chores', `chores hut opened ${JSON.stringify(hut)}`);

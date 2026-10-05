@@ -31,6 +31,9 @@ export type InfoTarget =
       title?: string;
       until?: string;
       start?: string;
+      /** 定时状态不是互斥的：一场进行中时，另一场仍可能即将开始。 */
+      live?: { title: string; end: string }[];
+      soon?: { title: string; start: string }[];
       later: number;
       ended: number;
       banners: string[];
@@ -154,21 +157,24 @@ function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
     ? '结算时确认做了，才会计入柴堆。'
     : '结算时确认做了，才会烧成一块砖。';
   const lines: string[] = [];
-  if (t.phase === 'live') {
-    lines.push(`${t.title ? `「${t.title}」` : name}进行中${timeOf(t.until) ? `，到 ${timeOf(t.until)}` : ''}。`);
+  const live = t.live?.[0] ?? (t.phase === 'live' ? { title: t.title ?? name, end: t.until ?? '' } : undefined);
+  const soon = t.soon?.[0] ?? (t.phase === 'soon' ? { title: t.title ?? name, start: t.start ?? '' } : undefined);
+  if (live) {
+    lines.push(`「${live.title}」进行中${timeOf(live.end) ? `，到 ${timeOf(live.end)}` : ''}。`);
     lines.push(consequence);
-  } else if (t.phase === 'soon') {
-    lines.push(`${t.title ? `「${t.title}」` : name}即将开始${timeOf(t.start) ? `，${timeOf(t.start)} 开始` : ''}。`);
+  }
+  if (soon) {
+    lines.push(`「${soon.title}」即将开始${timeOf(soon.start) ? `，${timeOf(soon.start)} 开始` : ''}。`);
     lines.push('这是此刻的提醒，还没有产生任何后果。');
   }
   // 稍后和待结算互不遮挡：同时有的话两句都写
   if (t.later) {
     lines.push(`${name}今天稍后还有 ${t.later} 场日程。`);
-    if (t.phase !== 'live' && t.phase !== 'soon') lines.push('告示牌只表示安排，不表示已经完成。');
+    if (!live && !soon) lines.push('告示牌只表示安排，不表示已经完成。');
   }
   if (t.ended) {
     lines.push(`${name}今天有 ${t.ended} 场已经结束，等待晚间结算。`);
-    if (t.phase !== 'live') {
+    if (!live) {
       lines.push(chores
         ? '结算时确认做了，才会计入柴堆；没做不会提前改变杂务小屋。'
         : '结算时确认做了，才会留下砖；没做不会提前改变村落。');

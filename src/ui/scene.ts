@@ -68,7 +68,7 @@ function choresOf(store: Store, agenda: Agenda, today: string): ChoresView {
     count,
     woodpile: woodpileStep(count),
     live: live ? { title: live.title, until: live.end } : undefined,
-    soon: !live && soon ? { title: soon.title, start: soon.start } : undefined,
+    soon: soon ? { title: soon.title, start: soon.start } : undefined,
     later: slot?.later ?? 0,
     ended: slot?.ended ?? 0,
   };

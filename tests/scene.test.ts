@@ -90,6 +90,26 @@ describe('scene agenda projection', () => {
     expect(scene.chores.later).toBe(0);
   });
 
+  it('preserves soon details while another event on the same target is live', () => {
+    const { store } = makeStore('2026-10-04');
+    const p = createProject(store, '重叠日程');
+    for (const [id, title, start, end, target] of [
+      ['p-live', '项目进行中', at(14), at(15), p.id],
+      ['p-soon', '项目下一场', at(14, 40), at(15, 20), p.id],
+      ['c-live', '杂务进行中', at(14), at(15), CHORES],
+      ['c-soon', '杂务下一场', at(14, 40), at(15, 20), CHORES],
+    ] as const) {
+      store.data.events.push({ id, sourceId: 's', uid: id, title, start, end, allDay: false, projectId: target, classified: true });
+    }
+
+    const scene = buildScene(store, null, false, new Date(2026, 9, 4, 14, 25));
+    const village = scene.villages.find((v) => v.projectId === p.id)!;
+    expect(village.agenda?.live?.[0].title).toBe('项目进行中');
+    expect(village.agenda?.soon?.[0].title).toBe('项目下一场');
+    expect(scene.chores.live?.title).toBe('杂务进行中');
+    expect(scene.chores.soon?.title).toBe('杂务下一场');
+  });
+
   it('gives banner-only villages the allday phase, not a timed one', () => {
     const { store } = makeStore('2026-10-04');
     const p = createProject(store, '出行');
