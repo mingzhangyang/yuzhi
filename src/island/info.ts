@@ -198,7 +198,7 @@ const CULTIVATION_NAMES: Record<CultivationKind, string> = {
 
 const CULTIVATION_SOURCES: Record<CultivationKind, string> = {
   field: 'Todo / 任务的真实推进会培育这里。',
-  orchard: '导入或自己创建的定时日程会培育这里；兑现后的日程权重更高。',
+  orchard: '只有经过晚间结算的定时日程才会培育这里；未来安排和仅仅创建的日程不会直接加分。',
   pond: '认真结算过的一天会让这里恢复生气；“没做”也可以是诚实记录。',
   garden: '写下日记的日子会培育这里；一天写很多篇也不会重复加速。',
 };
