@@ -182,7 +182,7 @@ export class IslandRenderer extends IslandEffectsPainter {
           this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
           // 即将开始：扫帚靠在门口；进行中：扫帚动起来
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
-        }, this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
+        }, ...this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
       }
       if (t === m.dock) put(d, () => this.drawHarborProps(tw));
       if (t.type === 'plaza' && t.village >= 0) {
@@ -225,7 +225,7 @@ export class IslandRenderer extends IslandEffectsPainter {
           put(d, () => {
             this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, houseHash(vv.projectId, t.slotIdx, 2) < litFrac, variant);
             if (vv.stage >= 2 && t.slotIdx % 2 === 0) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
-          }, this.houseOutline(x, y, tw * HOUSE_SCALE * k, variant));
+          }, ...this.houseOutline(x, y, tw * HOUSE_SCALE * k, variant));
         }
       }
       const lm = t.landmark >= 0 ? lmAt.get(t.landmark) : undefined;

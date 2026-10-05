@@ -672,19 +672,39 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
 
   /** 地标：村落合成的永久建筑。石台 + 主屋，规模大的多一座塔；返回窗户位置 */
 
-  /** 房子的屏幕轮廓（地面三角 + 墙 + 出檐屋顶），与 drawHouse 各样式的比例一致 */
-  protected houseOutline(x: number, y: number, s: number, variant: HouseVariant = 0): [number, number][] {
+  /**
+   * 房子的屏幕轮廓（地面三角 + 墙 + 出檐屋顶），与 drawHouse 各样式的比例一致。
+   * 带披屋的再加一块：披屋朝前的墙和单坡顶，取 drawLeanTo 的同一组局部坐标。
+   */
+  protected houseOutline(x: number, y: number, s: number, variant: HouseVariant = 0): [number, number][][] {
     const hw = s / 2;
+    const P = (pi: number, pj: number, z: number): [number, number] => [x + ((pi - pj) * s) / 2, y + ((pi + pj) * s) / 4 - z];
+    if (variant === 1) {
+      // 双坡顶：与 drawGableRoof 同一组角点（出檐 0.08，屋脊高 0.36s，檐口下沉 0.04s）
+      const H = s * 0.5;
+      const o = 0.08;
+      return [[[x - hw, y], [x, y + s / 4], [x + hw, y], P(0.5 + o, -0.5 - o, H - s * 0.04), P(0.5 + o, 0, H + s * 0.36), P(-0.5 - o, 0, H + s * 0.36), P(-0.5 - o, 0.5 + o, H - s * 0.04)]];
+    }
     const wall = s * (variant === 2 ? 0.8 : 0.5);
-    const top = wall + s * (variant === 1 ? 0.4 : 0.42);
-    return [
-      [x - hw * (variant === 3 ? 2.2 : 1), y],
-      [x, y + s / 4],
-      [x + hw, y],
-      [x + hw * 1.14, y - wall],
-      [x, y - top],
-      [x - hw * 1.14, y - wall],
+    const top = wall + s * 0.42;
+    const outlines: [number, number][][] = [
+      [
+        [x - hw, y],
+        [x, y + s / 4],
+        [x + hw, y],
+        [x + hw * 1.14, y - wall],
+        [x, y - top],
+        [x - hw * 1.14, y - wall],
+      ],
     ];
+    if (variant === 3) {
+      const H0 = s * 0.5;
+      const [i0, i1, j0, j1, o] = [-1.08, -0.5, -0.25, 0.42, 0.06];
+      const zl = H0 * 0.6 - s * 0.02;
+      const zh = H0 * 0.95;
+      outlines.push([P(i0, j1, 0), P(i1, j1, 0), P(i1, j1 + o, zh), P(i1, j0 - o, zh), P(i0 - o, j0 - o, zl), P(i0 - o, j1 + o, zl)]);
+    }
+    return outlines;
   }
 
   /** 井：井身和井顶是实心的，两根立柱之间是空的；圣诞节井边那棵松树也算（drawWell 里画在 x + 0.24tw） */

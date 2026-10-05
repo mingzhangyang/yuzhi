@@ -4,7 +4,7 @@ import { moonPhase } from '../ambience';
 import { describe, type InfoContext, type InfoTarget } from '../info';
 import { tileHash, type Tile } from '../map';
 import type { AgendaView, Ambience, ChoresView, Hit, SceneryCandidate, SceneryFocus, SceneryInspection, VillageView, Walker } from './model';
-import { personSize } from './style';
+import { personSize, treeBounds } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
 
@@ -435,7 +435,7 @@ export abstract class IslandInteraction extends IslandViewport {
     const occupied = new Set(s.villages.map((v) => v.slot));
     const built = new Set(s.landmarks.map((l) => l.index));
     // 树：树冠比地块高，按屏幕上的外框找，取最靠前的一棵
-    let best: { t: Tile; x: number; y: number; s: number; kind: 'pine' | 'round'; seed: number } | null = null;
+    let best: { t: Tile; x: number; y: number; s: number; kind: 'pine' | 'round'; seed: number; top: number } | null = null;
     for (const t of m.all) {
       if (!t.trees.length || (t.landmark >= 0 && built.has(t.landmark))) continue;
       const [x0, y0] = this.iso(t.i, t.j);
@@ -443,14 +443,16 @@ export abstract class IslandInteraction extends IslandViewport {
         const x = x0 + (tr.dx - tr.dy) * hw;
         const y = y0 + (tr.dx + tr.dy) * hh;
         const sz = tw * 0.42 * tr.s;
-        if (Math.abs(pt.x - x) < sz * 0.4 && pt.y < y + sz * 0.1 && pt.y > y - sz * 1.3 && (!best || y > best.y)) {
-          best = { t, x, y, s: sz, kind: tr.kind, seed: tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100)) };
+        const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
+        const b = treeBounds(tr.kind, seed);
+        if (Math.abs(pt.x - x) < sz * b.w && pt.y < y + sz * 0.1 && pt.y > y - sz * b.top && (!best || y > best.y)) {
+          best = { t, x, y, s: sz, kind: tr.kind, seed, top: b.top };
         }
       }
     }
     if (best) {
       const target: InfoTarget = { kind: 'tree', tree: best.kind, cherry: best.seed % 1 < 0.35, forest: best.t.type === 'forest' };
-      return this.selectScenery(target, { i: best.t.i, j: best.t.j, tree: [best.x, best.y, best.s] }, best.x, best.y - best.s * (best.kind === 'pine' ? 1.3 : 1), ctx);
+      return this.selectScenery(target, { i: best.t.i, j: best.t.j, tree: [best.x, best.y, best.s] }, best.x, best.y - best.s * best.top, ctx);
     }
     // 山：同样按屏幕外框
     let mt: Tile | null = null;
@@ -507,9 +509,9 @@ export abstract class IslandInteraction extends IslandViewport {
         const x = x0 + (tr.dx - tr.dy) * hw;
         const y = y0 + (tr.dx + tr.dy) * hh;
         const sz = tw * 0.42 * tr.s;
-        const anchorY = y - sz * (tr.kind === 'pine' ? 1.3 : 1);
-        if (x < 0 || x > w || anchorY < 0 || anchorY > h) continue;
         const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
+        const anchorY = y - sz * treeBounds(tr.kind, seed).top;
+        if (x < 0 || x > w || anchorY < 0 || anchorY > h) continue;
         add(
           { kind: 'tree', tree: tr.kind, cherry: seed % 1 < 0.35, forest: t.type === 'forest' },
           { i: t.i, j: t.j, tree: [x, y, sz] },

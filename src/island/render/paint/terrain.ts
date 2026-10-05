@@ -1,6 +1,6 @@
 import type { Scene } from '../model';
 import { tileHash, type Tile } from '../../map';
-import { BEACH, SNOW, WARM } from '../style';
+import { BEACH, pineTiers, roundLobes, SNOW, WARM } from '../style';
 import { clamp, hash, mix, shade } from '../utils';
 import { IslandPaintBase } from './base';
 
@@ -19,51 +19,6 @@ export function smoothNoise(i: number, j: number, scale: number, salt = 7): numb
   const c = tileHash(i0, j0 + 1, salt);
   const d = tileHash(i0 + 1, j0 + 1, salt);
   return a + (b - a) * su + (c - a) * sw + (a - b - c + d) * su * sw;
-}
-
-/**
- * 松树的分层：[底边高, 顶点高, 半宽]，单位是树的尺寸 s。层数、宽窄和高矮随树而变：有的瘦高，有的矮胖。
- * drawTree 和 treeOutline 共用，画出来的和挡人的轮廓一致。
- */
-export function pineTiers(seed: number): [number, number, number][] {
-  const r1 = (seed * 7.13) % 1;
-  const r2 = (seed * 3.71) % 1;
-  const fat = 0.85 + r1 * 0.35;
-  const tall = 0.9 + r2 * 0.25;
-  if (r2 < 0.3) {
-    return [
-      [0.2, 0.72 * tall, 0.38 * fat],
-      [0.55, 1.18 * tall, 0.25 * fat],
-    ];
-  }
-  if (r2 > 0.8) {
-    return [
-      [0.16, 0.52 * tall, 0.36 * fat],
-      [0.38, 0.78 * tall, 0.3 * fat],
-      [0.6, 1.04 * tall, 0.23 * fat],
-      [0.84, 1.36 * tall, 0.15 * fat],
-    ];
-  }
-  return [
-    [0.18, 0.62 * tall, 0.36 * fat],
-    [0.46, 0.92 * tall, 0.28 * fat],
-    [0.72, 1.28 * tall, 0.2 * fat],
-  ];
-}
-
-/** 阔叶树冠的叶团：[横向偏移, 纵向偏移, 半径]，相对树冠中心、单位 s；数量、位置和大小随树而变，轮廓不对称 */
-export function roundLobes(seed: number): [number, number, number][] {
-  const lobes: [number, number, number][] = [];
-  const n = 3 + Math.floor(((seed * 5.3) % 1) * 3);
-  const lean = (((seed * 9.7) % 1) - 0.5) * 0.12;
-  for (let k = 0; k < n; k++) {
-    const q = (seed * (13.1 + k * 7.7)) % 1;
-    const ang = (k / n) * Math.PI * 2 + q * 1.1;
-    const d = 0.1 + q * 0.08;
-    lobes.push([Math.cos(ang) * d * 1.25 + lean, Math.sin(ang) * d * 0.9 - 0.02, 0.19 + ((seed * (5.9 + k * 3.3)) % 1) * 0.1]);
-  }
-  lobes.push([lean * 0.5, -0.1, 0.24]);
-  return lobes;
 }
 
 /** Ground cache, sea, vegetation, mountains, and water-bound scenery. */

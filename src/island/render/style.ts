@@ -34,3 +34,61 @@ export function houseVariant(projectId: string, slot: number): HouseVariant {
   const r = houseHash(projectId, slot, 1);
   return r < 0.42 ? 0 : r < 0.72 ? 1 : r < 0.87 ? 2 : 3;
 }
+
+/**
+ * 松树的分层：[底边高, 顶点高, 半宽]，单位是树的尺寸 s。层数、宽窄和高矮随树而变：有的瘦高，有的矮胖。
+ * drawTree 和 treeOutline 共用，画出来的和挡人的轮廓一致。
+ */
+export function pineTiers(seed: number): [number, number, number][] {
+  const r1 = (seed * 7.13) % 1;
+  const r2 = (seed * 3.71) % 1;
+  const fat = 0.85 + r1 * 0.35;
+  const tall = 0.9 + r2 * 0.25;
+  if (r2 < 0.3) {
+    return [
+      [0.2, 0.72 * tall, 0.38 * fat],
+      [0.55, 1.18 * tall, 0.25 * fat],
+    ];
+  }
+  if (r2 > 0.8) {
+    return [
+      [0.16, 0.52 * tall, 0.36 * fat],
+      [0.38, 0.78 * tall, 0.3 * fat],
+      [0.6, 1.04 * tall, 0.23 * fat],
+      [0.84, 1.36 * tall, 0.15 * fat],
+    ];
+  }
+  return [
+    [0.18, 0.62 * tall, 0.36 * fat],
+    [0.46, 0.92 * tall, 0.28 * fat],
+    [0.72, 1.28 * tall, 0.2 * fat],
+  ];
+}
+
+/** 阔叶树冠的叶团：[横向偏移, 纵向偏移, 半径]，相对树冠中心、单位 s；数量、位置和大小随树而变，轮廓不对称 */
+export function roundLobes(seed: number): [number, number, number][] {
+  const lobes: [number, number, number][] = [];
+  const n = 3 + Math.floor(((seed * 5.3) % 1) * 3);
+  const lean = (((seed * 9.7) % 1) - 0.5) * 0.12;
+  for (let k = 0; k < n; k++) {
+    const q = (seed * (13.1 + k * 7.7)) % 1;
+    const ang = (k / n) * Math.PI * 2 + q * 1.1;
+    const d = 0.1 + q * 0.08;
+    lobes.push([Math.cos(ang) * d * 1.25 + lean, Math.sin(ang) * d * 0.9 - 0.02, 0.19 + ((seed * (5.9 + k * 3.3)) % 1) * 0.1]);
+  }
+  lobes.push([lean * 0.5, -0.1, 0.24]);
+  return lobes;
+}
+
+/**
+ * 树在屏幕上的外框（单位：树的尺寸 s）：半宽 w、树冠顶高 top。与 drawTree / treeOutline 同一份几何，
+ * 点树看说明和键盘浏览的落点都用它，高瘦的四层松树树尖也能点到。
+ */
+export function treeBounds(kind: 'pine' | 'round', seed: number): { w: number; top: number } {
+  if (kind === 'pine') {
+    const tiers = pineTiers(seed);
+    return { w: Math.max(...tiers.map(([, , w]) => w)), top: Math.max(...tiers.map(([, top]) => top)) };
+  }
+  const lobes = roundLobes(seed);
+  return { w: Math.max(...lobes.map(([dx, , r]) => Math.abs(dx) + r)), top: 0.66 + Math.max(...lobes.map(([, dy, r]) => r - dy)) };
+}
