@@ -2,10 +2,10 @@ import { moonPhase } from '../../ambience';
 import type { Scene, Walker } from '../model';
 import { SNOW } from '../style';
 import { clamp, hash, luma, mix, rgb, shade } from '../utils';
-import { IslandStructurePainter } from './structures';
+import { IslandLandmarkPainter } from './landmarks';
 
 /** People, selection overlays, sky/weather effects, lighting, and labels. */
-export abstract class IslandEffectsPainter extends IslandStructurePainter {
+export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
   protected drawPerson(x: number, y: number, s: number, p: Walker, dim: number) {
     const c = this.ctx;
     const a = this.amb;
@@ -397,22 +397,21 @@ export abstract class IslandEffectsPainter extends IslandStructurePainter {
     c.restore();
   }
 
-  protected label(x: number, y: number, txt: string, dot: string | null, hl: boolean, muted = false) {
+  protected label(x: number, y: number, txt: string, dot: string | null, hl: boolean, muted = false, compact = false) {
     const c = this.ctx;
-    const tw = this.view.tw;
-    c.font = `600 ${tw < 30 ? 10.5 : 12}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    const { font, bw, bh, pad } = this.labelBox(txt, !!dot, compact);
+    c.font = font;
     c.textBaseline = 'middle';
-    const w = c.measureText(txt).width;
-    const bw = w + (dot ? 22 : 14);
-    const bh = tw < 30 ? 18 : 21;
     // 夜里浅色标签压暗、变淡，让窗灯、路灯和灯塔成为画面里最亮的东西；
     // 深色主题的标签本来就暗，不再处理。选中的标签保持清晰。
     const night = hl || !(luma(this.theme.label) >= 150) ? 0 : this.day.night;
-    c.globalAlpha = (muted ? 0.82 : 1) * (1 - 0.18 * night);
-    c.fillStyle = 'rgba(20,30,20,.12)';
+    // 紧凑标签再淡一些，退到村子后面
+    c.globalAlpha = (muted ? 0.82 : 1) * (compact ? 0.86 : 1) * (1 - 0.18 * night);
+    c.fillStyle = compact ? 'rgba(20,30,20,.07)' : 'rgba(20,30,20,.12)';
     this.rrect(x - bw / 2, y - bh / 2 + 1.5, bw, bh, bh / 2);
     c.fill();
-    c.fillStyle = night > 0.01 ? mix(this.theme.label, '#4a5068', 0.6 * night) : this.theme.label;
+    const fill = night > 0.01 ? mix(this.theme.label, '#4a5068', 0.6 * night) : this.theme.label;
+    c.fillStyle = fill;
     c.strokeStyle = hl ? this.theme.accent : this.theme.line;
     c.lineWidth = hl ? 2.2 : 1;
     this.rrect(x - bw / 2, y - bh / 2, bw, bh, bh / 2);
@@ -421,12 +420,12 @@ export abstract class IslandEffectsPainter extends IslandStructurePainter {
     if (dot) {
       c.fillStyle = dot;
       c.beginPath();
-      c.arc(x - bw / 2 + 9, y, 3, 0, Math.PI * 2);
+      c.arc(x - bw / 2 + (compact ? 7 : 9), y, compact ? 2.4 : 3, 0, Math.PI * 2);
       c.fill();
     }
-    c.fillStyle = this.theme.ink;
+    c.fillStyle = compact ? mix(this.theme.ink, fill, 0.22) : this.theme.ink;
     c.textAlign = 'left';
-    c.fillText(txt, x - bw / 2 + (dot ? 16 : 7), y + 0.5);
+    c.fillText(txt, x - bw / 2 + pad, y + 0.5);
     c.globalAlpha = 1;
   }
 

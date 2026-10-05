@@ -120,6 +120,12 @@ try {
         if (tries >= 2) throw new Error(`${vp.name}-${time.name}: seeded villages never appeared`);
       }
       await page.keyboard.press('Escape');
+      // 道具贴图在第一次绘制时才开始加载；先画一帧，等它们都解码完，截图里才不会缺道具
+      await page.evaluate(async () => {
+        const r = window.yuzhi.renderer;
+        r.draw();
+        await Promise.all([...r.propArt.images.values()].map((img) => img.decode().catch(() => {})));
+      });
       await settle(page, 3.5);
       const file = join(shotDir, `${vp.name}-${time.name}.png`);
       await page.locator('#mapwrap').screenshot({ path: file });

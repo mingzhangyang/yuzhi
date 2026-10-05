@@ -8,6 +8,7 @@ import { dayLight } from './ambience';
 import { tileHash } from './map';
 import type { LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
+import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { HOUSE_SCALE, houseHash, houseVariant, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
@@ -184,7 +185,6 @@ export class IslandRenderer extends IslandEffectsPainter {
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
         }, ...this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
       }
-      if (t === m.dock) put(d, () => this.drawHarborProps(tw));
       if (t.type === 'plaza' && t.village >= 0) {
         const vv = occupied.get(t.village);
         if (vv) {
@@ -244,6 +244,15 @@ export class IslandRenderer extends IslandEffectsPainter {
         const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
         put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, seed), ...this.treeOutline(tx, ty, ts, tr.kind, seed));
       }
+    }
+
+    // 码头、村落广场和院落里的道具：按各自的落地点排深度，不透明，也登记遮挡轮廓
+    // 贴图还没加载好（或加载失败）时既不画也不登记轮廓，免得一块看不见的道具挡住后面的小人；
+    // ready() 第一次被问到时开始加载。
+    for (const p of islandProps(m, s.villages, a.cover)) {
+      if (!this.propArt.ready(p.id)) continue;
+      const [x, y] = this.iso(p.i, p.j);
+      put(p.i + p.j, () => this.drawProp(p, x, y, tw), propOutline(p.id, x, y, tw * p.w));
     }
 
     for (let k = 0; k < s.drifting.length; k++) {
@@ -351,19 +360,22 @@ export class IslandRenderer extends IslandEffectsPainter {
 
     // 标签
     const sel = s.selected;
+    // 手机上没放大时，标签收成小号胶囊（compactLabels），选中的那个照常显示
+    const compact = this.compactLabels();
     for (const vv of s.villages) {
       const [x, y] = this.villageLabelAnchor(vv);
-      this.label(x, y, this.villageLabelText(vv), vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
+      const shown = this.villageLabel(vv);
+      this.label(x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
-      this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock');
+      this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock');
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
-      this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary');
+      this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary', false, compact && sel?.kind !== 'granary');
       const ch = s.chores;
       if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true);
+        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true, compact && sel?.kind !== 'chores');
       }
     }
     for (const l of s.landmarks) {
