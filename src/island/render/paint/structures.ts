@@ -1,5 +1,6 @@
 import type { AgendaView, LandmarkView, Scene, VillageView } from '../model';
 import type { Tile } from '../../map';
+import { PROP_LAMPS, propBox, type PlacedProp } from '../props-layout';
 import { LANTERN, SNOW, SNOW_SHADE, WARM, type HouseVariant } from '../style';
 import { clamp, hash, shade } from '../utils';
 import { IslandTerrainPainter } from './terrain';
@@ -1116,18 +1117,20 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     void title;
   }
 
-  protected drawHarborProps(tw: number) {
-    if (this.amb.cover > 0.18) return;
-    const dock = this.map.dock;
-    const props = [
-      ['crate', -0.56, -0.46, 0.44],
-      ['barrel', 0.42, -0.3, 0.34],
-      ['rope-coil', -0.1, 0.05, 0.34],
-      ['fishing-net', 0.56, 0.08, 0.46],
-    ] as const;
-    for (const [id, di, dj, scale] of props) {
-      const [x, y] = this.iso(dock.i + di, dock.j + dj);
-      this.propArt.draw(this.ctx, id, x, y + tw * 0.12, tw * scale);
+  /** 环境道具：先画一圈落地阴影，再按锚点贴图；带灯笼的道具夜里点灯 */
+  protected drawProp(p: PlacedProp, x: number, y: number, tw: number) {
+    // 贴图还没加载好时什么也不画，免得地上先冒出一块孤零零的阴影
+    if (!this.propArt.ready(p.id)) return;
+    const width = tw * p.w;
+    const { hw, top } = propBox(p.id, width);
+    this.shadow(x + hw * 0.12, y, hw * 0.95, hw * 0.3, 0.16);
+    this.propArt.draw(this.ctx, p.id, x, y, width);
+    const lamp = PROP_LAMPS[p.id];
+    if (lamp && this.lit) {
+      const lx = x - hw + lamp[0] * hw * 2;
+      const ly = y - top + lamp[1] * top;
+      this.dot(lx, ly, Math.max(0.8, width * 0.12), 'rgba(255,224,138,.9)');
+      this.lights.push([lx, ly, tw * 0.45, WARM]);
     }
   }
 

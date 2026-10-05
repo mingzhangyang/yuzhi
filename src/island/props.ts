@@ -32,6 +32,11 @@ export class IslandPropArt {
     return img.complete && img.naturalWidth > 0 ? img : null;
   }
 
+  /** 贴图是否已解码可画；第一次问到时开始加载 */
+  ready(id: PropId): boolean {
+    return this.image(id) !== null;
+  }
+
   /** 以 (x, y) 为落地点绘制道具；width 为绘制宽度，高度按原图比例。 */
   draw(ctx: CanvasRenderingContext2D, id: PropId, x: number, y: number, width: number, alpha = 1): boolean {
     const img = this.image(id);

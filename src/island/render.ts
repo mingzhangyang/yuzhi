@@ -8,6 +8,7 @@ import { dayLight } from './ambience';
 import { tileHash } from './map';
 import type { LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
+import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { HOUSE_SCALE, houseHash, houseVariant, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
@@ -184,7 +185,6 @@ export class IslandRenderer extends IslandEffectsPainter {
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
         }, ...this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
       }
-      if (t === m.dock) put(d, () => this.drawHarborProps(tw));
       if (t.type === 'plaza' && t.village >= 0) {
         const vv = occupied.get(t.village);
         if (vv) {
@@ -244,6 +244,12 @@ export class IslandRenderer extends IslandEffectsPainter {
         const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
         put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, seed), ...this.treeOutline(tx, ty, ts, tr.kind, seed));
       }
+    }
+
+    // 码头、村落广场和院落里的道具：按各自的落地点排深度，不透明，也登记遮挡轮廓
+    for (const p of islandProps(m, s.villages, a.cover)) {
+      const [x, y] = this.iso(p.i, p.j);
+      put(p.i + p.j, () => this.drawProp(p, x, y, tw), propOutline(p.id, x, y, tw * p.w));
     }
 
     for (let k = 0; k < s.drifting.length; k++) {
