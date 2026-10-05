@@ -61,8 +61,14 @@ export function bindDateSelects(root: ParentNode, today: ISODate) {
       let done = false;
       const finish = () => {
         if (done) return;
-        done = true;
         const value = input.value;
+        if (value && !input.checkValidity()) {
+          input.reportValidity();
+          input.focus();
+          return;
+        }
+
+        done = true;
         if (value) {
           if (![...sel.options].some((option) => option.value === value)) {
             sel.add(new Option(fmtDay(value), value), sel.options[sel.options.length - 1]);
@@ -77,8 +83,10 @@ export function bindDateSelects(root: ParentNode, today: ISODate) {
         sel.dispatchEvent(new Event('input', { bubbles: true }));
       };
 
-      input.addEventListener('change', finish, { once: true });
-      input.addEventListener('blur', finish, { once: true });
+      // Keep both listeners alive while the native input is invalid. A one-shot
+      // blur/change listener would be consumed by the first rejected attempt.
+      input.addEventListener('change', finish);
+      input.addEventListener('blur', finish);
       sel.hidden = true;
       sel.after(input);
       input.focus();

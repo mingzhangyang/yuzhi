@@ -93,6 +93,63 @@ try {
   // Diary text survives an accidental dismissal and is recovered next time.
   await page.locator('#newBtn').click();
   await page.locator('[data-k="diary"]').click();
+
+  // The detached native picker must not bypass the diary's max=today rule.
+  // Exercise the invalid path with synthetic events so headless Chromium does
+  // not open its native picker UI.
+  const diaryDateGuard = await page.evaluate(() => {
+    const form = document.querySelector('form[data-f="diary"]');
+    const select = form?.querySelector('select[name="date"]');
+    if (!(select instanceof HTMLSelectElement)) throw new Error('diary date select missing');
+
+    select.value = 'other';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const input = form?.querySelector('input[type="date"][aria-label="选择日期"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error('native diary date input missing');
+
+    const today = window.yuzhi.store.today();
+    const [year, month, day] = today.split('-').map(Number);
+    const next = new Date(Date.UTC(year, month - 1, day + 1));
+    const future = next.toISOString().slice(0, 10);
+
+    input.value = future;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const rejected = {
+      future,
+      rangeOverflow: input.validity.rangeOverflow,
+      inputStillPresent: input.isConnected,
+      selectHidden: select.hidden,
+      selectValue: select.value,
+      hasFutureOption: [...select.options].some((option) => option.value === future),
+    };
+
+    input.value = today;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    return {
+      ...rejected,
+      recoveredSelectValue: select.value,
+      recoveredSelectVisible: !select.hidden,
+      nativeInputRemoved: !input.isConnected,
+    };
+  });
+  assert(
+    diaryDateGuard.rangeOverflow
+      && diaryDateGuard.inputStillPresent
+      && diaryDateGuard.selectHidden
+      && diaryDateGuard.selectValue === 'other'
+      && !diaryDateGuard.hasFutureOption,
+    `future diary date escaped native validation: ${JSON.stringify(diaryDateGuard)}`,
+  );
+  assert(
+    diaryDateGuard.recoveredSelectValue
+      && diaryDateGuard.recoveredSelectVisible
+      && diaryDateGuard.nativeInputRemoved,
+    `diary date picker did not recover after a valid correction: ${JSON.stringify(diaryDateGuard)}`,
+  );
+
   await page.locator('form[data-f="diary"] textarea[name="text"]').fill('这是一段还没有提交、但不应该因为误关而丢失的日记。');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
