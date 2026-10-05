@@ -12,7 +12,7 @@ import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { HOUSE_SCALE, houseHash, houseVariant, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
-import { drawCultivationArea } from './render/cultivation';
+import { cultivationOutline, drawCultivationArea } from './render/cultivation';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
 function rectOutline(x: number, y: number, w: number, h: number, below = 0): [number, number][] {
@@ -175,7 +175,13 @@ export class IslandRenderer extends IslandEffectsPainter {
       const d = t.i + t.j;
       if (t.type === 'mountain') put(d, () => this.drawMountain(x, y, t, tw), this.mountainOutline(x, y, t, tw));
       const cultivation = cultivationAt.get(`${t.i},${t.j}`);
-      if (cultivation) put(d + 0.08, () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t));
+      if (cultivation) {
+        put(
+          d + 0.08,
+          () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t),
+          cultivationOutline(cultivation, x, y, tw),
+        );
+      }
       if (t === m.lighthouse) {
         put(d, () => {
           this.drawLighthouse(x, y, tw);
