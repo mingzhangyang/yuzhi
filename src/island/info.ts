@@ -4,6 +4,7 @@
  */
 import { FESTIVAL_NAMES, type Festival, type Weather } from './ambience';
 import type { TileType } from './map';
+import type { CultivationKind, CultivationLevel } from '../logic/cultivation';
 
 export interface InfoContext {
   season: number;
@@ -38,7 +39,8 @@ export type InfoTarget =
       ended: number;
       banners: string[];
     }
-  | { kind: 'drift'; title: string };
+  | { kind: 'drift'; title: string }
+  | { kind: 'cultivation'; area: CultivationKind; level: CultivationLevel; score: number; summary: string };
 
 export interface MapInfo {
   title: string;
@@ -187,6 +189,32 @@ function agendaInfo(t: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
   return { title: name, sub: '日程 · 此刻层', lines };
 }
 
+const CULTIVATION_NAMES: Record<CultivationKind, string> = {
+  field: '农田',
+  orchard: '果园',
+  pond: '鱼塘',
+  garden: '花园',
+};
+
+const CULTIVATION_SOURCES: Record<CultivationKind, string> = {
+  field: 'Todo / 任务的真实推进会培育这里。',
+  orchard: '导入或自己创建的定时日程会培育这里；兑现后的日程权重更高。',
+  pond: '认真结算过的一天会让这里恢复生气；“没做”也可以是诚实记录。',
+  garden: '写下日记的日子会培育这里；一天写很多篇也不会重复加速。',
+};
+
+function cultivationInfo(t: Extract<InfoTarget, { kind: 'cultivation' }>): MapInfo {
+  return {
+    title: CULTIVATION_NAMES[t.area],
+    sub: `培育区 · 长势 ${t.level}/4`,
+    lines: [
+      t.summary,
+      CULTIVATION_SOURCES[t.area],
+      '这里不能直接经营。继续过真实生活，小岛会根据事实自己变化。',
+    ],
+  };
+}
+
 function driftInfo(t: Extract<InfoTarget, { kind: 'drift' }>): MapInfo {
   return {
     title: '漂流瓶',
@@ -200,5 +228,6 @@ export function describe(target: InfoTarget, c: InfoContext): MapInfo {
   if (target.kind === 'ground') return groundInfo(target, c);
   if (target.kind === 'agenda') return agendaInfo(target);
   if (target.kind === 'drift') return driftInfo(target);
+  if (target.kind === 'cultivation') return cultivationInfo(target);
   return seaInfo(c);
 }
