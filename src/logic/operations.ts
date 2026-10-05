@@ -101,13 +101,18 @@ function snapshotsOf(event: OperationEvent): OperationLifeSnapshot[] {
 /** 把 operation facts 投影成一生之书行。一个 task-moved 可以同时投影到旧村落和新村落。 */
 export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
   const order = String(event.seq).padStart(12, '0');
+  const syntheticBaseline = event.payload?.source === 'migration'
+    && (event.kind === 'diary-created' || event.kind === 'schedule-created');
   return snapshotsOf(event).map((snapshot, index) => {
     const subjectType = snapshot.subjectType ?? (snapshot.taskId ? 'task' : snapshot.projectId ? 'project' : undefined);
     const subjectId = snapshot.subjectId ?? (snapshot.taskId || snapshot.projectId);
     return {
       id: `oplife|${order}|${event.id}|${index}`,
       date: event.date,
-      factSeq: event.seq,
+      // v6 baseline facts describe a state that existed before migration.
+      // They were appended to the immutable stream, so their persisted seq is
+      // intentionally not used as historical occurrence order in the read model.
+      factSeq: syntheticBaseline ? undefined : event.seq,
       ...snapshot,
       subjectType,
       subjectId,
