@@ -58,12 +58,12 @@ export function initModal() {
 }
 
 /** 简单的确认框 */
-export function confirmModal(o: { kick?: string; title: string; text: string; ok: string; danger?: boolean }): Promise<boolean> {
+export function confirmModal(o: { kick?: string; title: string; text: string; ok: string; danger?: boolean; readOnlySafe?: boolean }): Promise<boolean> {
   return new Promise((resolve) => {
     openModal({
       kick: o.kick,
       title: o.title,
-      body: `<p>${esc(o.text)}</p><div class="actions"><button class="btn" data-close>算了</button><button class="btn ${o.danger ? 'danger' : 'primary'}" data-ok autofocus>${esc(o.ok)}</button></div>`,
+      body: `<p>${esc(o.text)}</p><div class="actions"><button class="btn" data-close>算了</button><button class="btn ${o.danger ? 'danger' : 'primary'}" data-ok${o.readOnlySafe ? ' data-readonly-safe' : ''} autofocus>${esc(o.ok)}</button></div>`,
       mount(box, signal) {
         signal.addEventListener('abort', () => resolve(false), { once: true });
         box.querySelector('[data-ok]')!.addEventListener('click', () => {
