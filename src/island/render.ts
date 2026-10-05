@@ -1985,4 +1985,3 @@ export class IslandRenderer extends IslandSimulation {
     }
   }
 }
-}
