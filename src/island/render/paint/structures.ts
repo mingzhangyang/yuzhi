@@ -1,13 +1,10 @@
 import type { AgendaView, LandmarkView, Scene, VillageView } from '../model';
 import type { Tile } from '../../map';
-import { LANTERN, SNOW, SNOW_SHADE, WARM } from '../style';
+import { LANTERN, SNOW, SNOW_SHADE, WARM, type HouseVariant } from '../style';
 import { clamp, hash, shade } from '../utils';
 import { IslandTerrainPainter } from './terrain';
 
 /** Buildings and tangible island props. */
-/** 0 四坡顶 · 1 双坡顶 · 2 两层 · 3 带披屋 */
-export type HouseVariant = 0 | 1 | 2 | 3;
-
 export type LandmarkKind = 'clock' | 'library' | 'windmill';
 
 /** 按地标位轮换：前三座地标一定各不相同 */

@@ -1,7 +1,7 @@
 /**
  * 小岛观感对照截图：固定数据、固定时刻，分别截桌面 / 手机、白天 / 夜里。
- * 每批画面调整前后各跑一次，对比同名截图即可。id 与 Math.random 都已固定，但小人仍按真实帧时间走动，
- * 位置会有细微差别。
+ * 每批画面调整前后各跑一次，对比同名截图即可。id、Math.random 与动画时钟都已固定：
+ * 截图前停掉 rAF 循环，按固定步长推进同样的帧数再画一帧，同一份代码两次运行得到同一张图。
  *
  *   npm run build && npx vite preview --port 4173 --strictPort &
  *   SHOT_DIR=shots/after node browser-tests/island-shots.mjs
@@ -36,6 +36,7 @@ async function seed(page) {
   await page.evaluate(async () => {
     const { store, actions: A } = window.yuzhi;
     const have = new Set(store.data.projects.map((p) => p.name));
+    window.__reseed();
     const make = (name, done, open) => {
       const p = A.createProject(store, name);
       for (let k = 0; k < done + open; k++) {
@@ -57,6 +58,20 @@ async function seed(page) {
   });
 }
 
+/** 停掉 rAF 循环后按固定步长推进：动画时钟、小人走动和随机数消耗都与真实帧率无关。 */
+async function settle(page, seconds) {
+  await page.evaluate((frames) => {
+    const r = window.yuzhi.renderer;
+    window.__reseed();
+    r.t = 0;
+    for (let k = 0; k < frames; k++) {
+      r.t += 1 / 60;
+      r.step(1 / 60);
+    }
+    r.draw();
+  }, Math.round(seconds * 60));
+}
+
 mkdirSync(shotDir, { recursive: true });
 const browser = await chromium.launch({ channel: channel || undefined, headless: true });
 try {
@@ -67,6 +82,9 @@ try {
       // 项目和任务的 id 决定小人的外貌、落脚点和哪几户亮灯；固定随机源，改前改后两次运行才画出同一个场景。
       await context.addInitScript(() => {
         let seed = 20260714;
+        window.__reseed = () => {
+          seed = 20260714;
+        };
         const rand = () => {
           seed = (seed + 0x6d2b79f5) | 0;
           let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -88,9 +106,8 @@ try {
       await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => Boolean(window.yuzhi?.renderer && window.yuzhi?.store), undefined, { timeout: 20_000 });
       await page.waitForFunction(() => document.body.dataset.readOnly === 'false', undefined, { timeout: 20_000 });
-      // main.ts 订阅 store 之后立即 update() 一次，renderer.scene 出现说明订阅已就位；
-      // 早于此刻铺的数据要等下一次定时刷新才会画出来。
       await page.waitForFunction(() => Boolean(window.yuzhi.renderer.scene), undefined, { timeout: 20_000 });
+      await page.evaluate(() => window.yuzhi.renderer.stop());
       // 启动时持久化层可能还会重载一次数据，把刚铺的数据冲掉；等村落和地标真正出现，否则重铺。
       for (let tries = 0; ; tries++) {
         await seed(page);
@@ -101,7 +118,7 @@ try {
         if (tries >= 2) throw new Error(`${vp.name}-${time.name}: seeded villages never appeared`);
       }
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(3500);
+      await settle(page, 3.5);
       const file = join(shotDir, `${vp.name}-${time.name}.png`);
       await page.locator('#mapwrap').screenshot({ path: file });
       console.log(file);
