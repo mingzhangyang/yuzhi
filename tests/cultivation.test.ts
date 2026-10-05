@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDiary, createProject, createSchedule, createTask, settleDay } from '../src/actions';
 import { cultivationState } from '../src/logic/cultivation';
 import { itemKey } from '../src/logic/days';
@@ -40,8 +40,7 @@ describe('real-life cultivation read model', () => {
   });
 
   it('rejects a local schedule that inverts after DST-gap normalization', () => {
-    const previous = process.env.TZ;
-    process.env.TZ = 'America/New_York';
+    vi.stubEnv('TZ', 'America/New_York');
     try {
       const { store } = makeStore('2026-03-08');
       expect(() => createSchedule(store, {
@@ -52,8 +51,7 @@ describe('real-life cultivation read model', () => {
         projectId: CHORES,
       })).toThrow('日程结束时间要晚于开始时间');
     } finally {
-      if (previous == null) delete process.env.TZ;
-      else process.env.TZ = previous;
+      vi.unstubAllEnvs();
     }
   });
 
