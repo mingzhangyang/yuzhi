@@ -45,7 +45,14 @@ export {
   mergeEvents,
   removeSource,
   setEventProject,
+  createSchedule,
+  deleteSchedule,
 } from './actions/calendar';
+
+export {
+  createDiary,
+  deleteDiary,
+} from './actions/diary';
 
 export {
   completeProject,
