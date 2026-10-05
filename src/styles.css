@@ -299,11 +299,8 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
   textarea,
   select,
-  .add input,
   .add select,
   .ship select,
-  .ship input[type=date],
-  .field input:not([type="checkbox"]):not([type="radio"]),
   .field select,
   .field textarea,
   .sextra select {
