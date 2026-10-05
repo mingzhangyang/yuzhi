@@ -4,7 +4,7 @@
  * viewport / interaction / simulation 分别负责坐标、命中与动画状态；
  * 本文件只保留绘制工具、具体美术和每帧编排。
  */
-import { dayLight } from './ambience';
+import { dayLight, moonPhase } from './ambience';
 import { tileHash, type Tile } from './map';
 import { IslandPropArt } from './props';
 import type { AgendaView, Glow, LandmarkView, Scene, VillageView, Walker } from './render/model';
