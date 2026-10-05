@@ -198,6 +198,9 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
     return;
   }
   const preferredIndex = preferredTitle !== undefined ? groups.findIndex((group) => group.title === preferredTitle) : -1;
+  // A card action names one concrete drift group. If a calendar refresh removed
+  // it, do not silently classify an unrelated first group.
+  if (preferredTitle !== undefined && preferredIndex < 0) return;
   const g = groups[preferredIndex >= 0 ? preferredIndex : 0];
   const next = g.events.find((e) => dateOfStamp(e.start) >= today) ?? g.events[g.events.length - 1];
   const ps = store.activeProjects();
