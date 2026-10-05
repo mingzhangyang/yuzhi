@@ -75,15 +75,47 @@ export abstract class IslandInteraction extends IslandViewport {
     return parts.join(' · ');
   }
 
-  protected labelHitAt(pt: { x: number; y: number }, x: number, y: number, text: string, dot: boolean): boolean {
+  /**
+   * 手机竖屏（窄于 480px）且没有放大时，标签收成小号、淡一些的胶囊，只写村名：
+   * 这时整座岛只有 390px 宽，完整的标签比村子本身还显眼。放大到 1.4 倍以上恢复原样。
+   */
+  protected compactLabels(): boolean {
+    return this.view.w <= 480 && this.view.zoom < 1.4;
+  }
+
+  /** 标签的字体和胶囊尺寸；绘制和点击判定共用，点到的范围就是画出来的范围 */
+  protected labelBox(text: string, dot: boolean, compact: boolean): { font: string; bw: number; bh: number; pad: number } {
     const tw = this.view.tw;
+    const size = compact ? 9.5 : tw < 30 ? 10.5 : 12;
+    const font = `600 ${size}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
     const c = this.ctx;
     c.save();
-    c.font = `600 ${tw < 30 ? 10.5 : 12}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
-    const bw = c.measureText(text).width + (dot ? 22 : 14);
+    c.font = font;
+    const w = c.measureText(text).width;
     c.restore();
-    const bh = tw < 30 ? 18 : 21;
-    return Math.abs(pt.x - x) <= bw / 2 && Math.abs(pt.y - y) <= bh / 2;
+    // pad：文字左边距（带圆点时让出圆点的位置）；右边距另算
+    const pad = compact ? (dot ? 12.5 : 5) : dot ? 16 : 7;
+    const right = compact ? 5 : dot ? 6 : 7;
+    return { font, bw: w + pad + right, bh: compact ? 15 : tw < 30 ? 18 : 21, pad };
+  }
+
+  /** 这座村子的日程没有告示牌也没有条幅，村名标签就是看日程说明的入口 */
+  protected labelIsAgendaEntry(v: VillageView): boolean {
+    return !!v.agenda && !this.hasNoticeBoard(v.agenda) && !v.agenda.banners.length;
+  }
+
+  /** 村名标签此刻画成什么样：紧凑模式下只写村名；选中的村子、以及标签兼作日程入口的村子照常显示完整内容 */
+  protected villageLabel(v: VillageView): { text: string; compact: boolean } {
+    const s = this.scene;
+    const selected = s?.selected?.kind === 'project' && s.selected.id === v.projectId;
+    const compact = this.compactLabels() && !selected;
+    return { text: compact && !this.labelIsAgendaEntry(v) ? v.name : this.villageLabelText(v), compact };
+  }
+
+  protected labelHitAt(pt: { x: number; y: number }, x: number, y: number, text: string, dot: boolean, compact = false): boolean {
+    const { bw, bh } = this.labelBox(text, dot, compact);
+    // 紧凑的胶囊只有 15px 高，手指点不准；点击范围上下各放宽一些
+    return Math.abs(pt.x - x) <= bw / 2 && Math.abs(pt.y - y) <= Math.max(bh, compact ? 24 : 0) / 2;
   }
 
   protected pointToSegmentDistance(
@@ -254,7 +286,8 @@ export abstract class IslandInteraction extends IslandViewport {
       // 避开井和小人，保持项目点击区域不变。
       if (!hasBoard && !banners.length) {
         const [lx, ly] = this.villageLabelAnchor(v);
-        if (this.labelHitAt(pt, lx, ly, this.villageLabelText(v), true)) return { kind: 'agenda', target: v.projectId };
+        const { text, compact } = this.villageLabel(v);
+        if (this.labelHitAt(pt, lx, ly, text, true, compact)) return { kind: 'agenda', target: v.projectId };
       }
     }
     if ((s.chores.live || s.chores.soon) && this.broomHitAt(pt, !!s.chores.live)) {

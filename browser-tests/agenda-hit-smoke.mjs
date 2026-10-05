@@ -284,6 +284,30 @@ try {
     assert(keyboardReachable, 'ended-only agenda was missing from keyboard scenery browsing');
   });
 
+  await runScenario('手机宽度：标签收成只写村名的小胶囊，兼作日程入口的标签仍显示完整内容、仍可点击', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(350);
+    p = await points(page);
+    const v = p['结算'];
+    const shown = await page.evaluate(() => {
+      const r = window.yuzhi.renderer;
+      return r.scene.villages.map((x) => ({ name: x.name, entry: r.labelIsAgendaEntry(x), ...r.villageLabel(x) }));
+    });
+    for (const x of shown) {
+      assert(x.compact, `label not compact on a phone: ${JSON.stringify(x)}`);
+      if (!x.entry) assert(x.text === x.name, `compact label kept extra text: ${JSON.stringify(x)}`);
+    }
+    const entry = shown.find((x) => x.name === '结算');
+    assert(entry?.entry && entry.text !== entry.name, `agenda-entry label lost its details: ${JSON.stringify(entry)}`);
+    for (const dy of [0, -10, 10]) {
+      const hit = await hitAt(page, { local: { x: v.labelPoint.local.x, y: v.labelPoint.local.y + dy } });
+      assert(hit?.kind === 'agenda' && hit.target === v.id, `compact entry label (dy ${dy}) hit: ${JSON.stringify(hit)}`);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(350);
+    p = await points(page);
+  });
+
   await runScenario('稍后和待结算同时存在：标签和说明两样都写', async () => {
     const v = p['团队'];
     assert(v.label?.later === 1 && v.label?.ended === 1, `团队 agenda: ${JSON.stringify(v.label)}`);

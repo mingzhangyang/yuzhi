@@ -357,19 +357,22 @@ export class IslandRenderer extends IslandEffectsPainter {
 
     // 标签
     const sel = s.selected;
+    // 手机上没放大时，标签收成小号胶囊（compactLabels），选中的那个照常显示
+    const compact = this.compactLabels();
     for (const vv of s.villages) {
       const [x, y] = this.villageLabelAnchor(vv);
-      this.label(x, y, this.villageLabelText(vv), vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
+      const shown = this.villageLabel(vv);
+      this.label(x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
-      this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock');
+      this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock');
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
-      this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary');
+      this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary', false, compact && sel?.kind !== 'granary');
       const ch = s.chores;
       if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true);
+        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true, compact && sel?.kind !== 'chores');
       }
     }
     for (const l of s.landmarks) {
