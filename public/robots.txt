@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yuzhi.orangely.xyz/sitemap.xml
