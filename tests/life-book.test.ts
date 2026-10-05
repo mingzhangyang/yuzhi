@@ -15,6 +15,7 @@ import {
 } from '../src/actions';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../src/types';
 import {
+  buildLifeBookIndex,
   diaryLatestSnapshot,
   diaryVersions,
   lifeBookEntries,
@@ -22,7 +23,8 @@ import {
   scheduleLatestSnapshot,
   scheduleVersions,
 } from '../src/logic/life-book';
-import { BACKUP_FORMAT, emptyData, parseBackup } from '../src/db';
+import { BACKUP_FORMAT, MemoryPersistence, emptyData, parseBackup } from '../src/db';
+import { Store } from '../src/store';
 import { itemKey } from '../src/logic/days';
 import { makeStore } from './helpers';
 
@@ -165,6 +167,47 @@ describe('unified life book', () => {
     expect(rows.map((entry) => entry.kind)).toEqual(['start', 'done']);
     expect(rows[0].factSeq).toBeUndefined();
     expect(rows[1].factSeq).toBe(1);
+  });
+
+  it('keeps a migrated future schedule baseline before immediate post-migration edits', () => {
+    const data = emptyData();
+    data.events.push({
+      id: 'local|future',
+      sourceId: LOCAL_CALENDAR_SOURCE_ID,
+      uid: 'future',
+      title: '未来的旧日程',
+      start: new Date(2026, 9, 8, 9, 0, 0).toISOString(),
+      end: new Date(2026, 9, 8, 10, 0, 0).toISOString(),
+      allDay: false,
+      projectId: CHORES,
+      classified: true,
+    });
+
+    const migrated = parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 5,
+      exportedAt: '2026-10-05T00:00:00.000Z',
+      ...data,
+    }));
+    const store = new Store(migrated, new MemoryPersistence(migrated));
+    store.clock = () => new Date(2026, 9, 5, 12, 0, 0);
+
+    editSchedule(store, 'local|future', {
+      title: '未来的旧日程（已修改）',
+      date: '2026-10-08',
+      start: '09:00',
+      end: '10:00',
+      projectId: CHORES,
+    });
+
+    const rows = lifeBookEntries(store.data, { type: 'schedule', id: 'local|future' });
+    expect(rows.map((entry) => entry.kind)).toEqual(['start', 'event']);
+    expect(rows[0]).toMatchObject({ baseline: true, date: '2026-10-08' });
+    expect(rows[1]).toMatchObject({ date: '2026-10-05' });
+
+    const index = buildLifeBookIndex(store.data);
+    expect(index.entries({ type: 'schedule', id: 'local|future' }).map((entry) => entry.kind))
+      .toEqual(['start', 'event']);
   });
 
   it('migrates v5 diaries and local schedules into baseline life-book facts', () => {
