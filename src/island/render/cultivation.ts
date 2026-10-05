@@ -173,3 +173,25 @@ export function drawCultivationArea(
   else drawGarden(c, x, y, tw, area.level, snow);
   c.restore();
 }
+
+
+/**
+ * Conservative opaque footprint for walker hit occlusion.
+ * Orchard needs extra height for tree canopies; the other areas stay near the tile.
+ */
+export function cultivationOutline(
+  area: CultivationAreaState,
+  x: number,
+  y: number,
+  tw: number,
+): [number, number][] {
+  const half = area.kind === 'pond' ? 0.49 : 0.47;
+  const above = area.kind === 'orchard' ? 0.4 : area.kind === 'pond' ? 0.23 : 0.26;
+  const below = area.kind === 'pond' ? 0.23 : 0.24;
+  return [
+    [x - tw * half, y + tw * below],
+    [x + tw * half, y + tw * below],
+    [x + tw * half, y - tw * above],
+    [x - tw * half, y - tw * above],
+  ];
+}
