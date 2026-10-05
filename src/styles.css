@@ -348,7 +348,8 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
   .cbox { max-width: none; max-height: 94vh; border-radius: 18px 18px 0 0; }
   .cfoot { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .dlg-back { align-items: flex-end; padding: 0; }
-  .dlg { border-radius: 18px 18px 0 0; max-height: min(88dvh, 88vh); padding: 18px 16px 0; overscroll-behavior: contain; }
+  .dlg { border-radius: 18px 18px 0 0; max-height: min(88dvh, 88vh); padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); overscroll-behavior: contain; }
+  .dlg:has(.capture) { padding-bottom: 0; }
   .capture-tabs { position: sticky; top: -18px; z-index: 2; margin: 0 -2px 6px; padding: 4px 2px 8px; background: var(--panel); }
   .capture-tabs button { min-height: 44px; padding: 9px 7px; font-size: 14px; }
   .capture-form { margin: 0 -16px; }
