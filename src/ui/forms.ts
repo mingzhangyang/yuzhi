@@ -23,7 +23,7 @@ export function openNew(
 ) {
   const today = store.today();
   const ps = store.activeProjects();
-  const projectOptions = ps.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const projectOptions = ps.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   const futureDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option>`;
   const diaryDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, -1)}">昨天</option><option value="${addDays(today, -2)}">前天</option>`;
   const body = `
@@ -132,13 +132,13 @@ export function openCalendar(store: Store, onImported: () => void) {
       .map((s) => {
         const n = store.data.events.filter((e) => e.sourceId === s.id).length;
         const when = s.lastFetchedAt ? new Date(s.lastFetchedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-        return `<div class="row static"><span class="tx"><b>${esc(s.name)}</b><span>${s.icsUrl ? '订阅链接' : '上传的文件'} · ${n} 个事件 · 更新于 ${when}</span>${s.lastError ? `<span class="err">${esc(s.lastError)}</span>` : ''}</span>${s.icsUrl ? `<button class="btn small" data-sync="${s.id}">刷新</button>` : ''}<button class="btn small danger" data-rm="${s.id}">移除</button></div>`;
+        return `<div class="row static"><span class="tx"><b>${esc(s.name)}</b><span>${s.icsUrl ? '订阅链接' : '上传的文件'} · ${n} 个事件 · 更新于 ${when}</span>${s.lastError ? `<span class="err">${esc(s.lastError)}</span>` : ''}</span>${s.icsUrl ? `<button class="btn small" data-sync="${esc(s.id)}">刷新</button>` : ''}<button class="btn small danger" data-rm="${esc(s.id)}">移除</button></div>`;
       })
       .join('');
     const ruleRows = rules
       .map((r) => {
         const p = r.projectId === CHORES ? '杂务' : store.project(r.projectId)?.name ?? '已关闭的项目';
-        return `<div class="task"><div class="tt"><b>标题包含「${esc(r.contains)}」→ ${esc(p)}</b></div><div class="acts"><button class="iconbtn" data-rule="${r.id}" aria-label="删除规则">✕</button></div></div>`;
+        return `<div class="task"><div class="tt"><b>标题包含「${esc(r.contains)}」→ ${esc(p)}</b></div><div class="acts"><button class="iconbtn" data-rule="${esc(r.id)}" aria-label="删除规则">✕</button></div></div>`;
       })
       .join('');
     const groups = unclassifiedGroups(store.data.events);
@@ -258,7 +258,7 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
     kick: `日历事件归类 · 还有 ${groups.length} 类`,
     title: `「${g.title}」属于哪里？`,
     body: `<p class="hint">${g.events.length} 次 · ${next ? `${dateOfStamp(next.start) >= today ? '下一次' : '最近一次'}在${relDay(dateOfStamp(next.start), today)}` : ''}</p>
-      <div class="rows" style="margin-top:8px">${ps.map((p) => `<button class="row" data-p="${p.id}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b></span></button>`).join('')}<button class="row" data-p=""><i class="sw" style="background:#8a8578"></i><span class="tx"><b>杂务</b><span>不属于任何项目</span></span></button></div>
+      <div class="rows" style="margin-top:8px">${ps.map((p) => `<button class="row" data-p="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b></span></button>`).join('')}<button class="row" data-p=""><i class="sw" style="background:#8a8578"></i><span class="tx"><b>杂务</b><span>不属于任何项目</span></span></button></div>
       <label class="field inline"><input type="checkbox" name="rem" checked> 以后标题包含</label>
       <label class="field" style="margin-top:4px"><input name="kw" value="${esc(kw)}" autocomplete="off" aria-label="规则关键词"></label>
       <p class="hint">的事件都自动归到这里。</p>
