@@ -49,6 +49,8 @@ async function boot() {
     return;
   }
   const store = session.store;
+  let renderer!: IslandRenderer;
+  let preparingCueBaseline = false;
 
   const syncReadOnlyUi = (readOnly: boolean) => {
     for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
@@ -103,6 +105,15 @@ async function boot() {
   // Store/UI writability is a projection of coordinator state. No caller keeps
   // a second writable flag or replays an old acquisition result.
   const syncWriterState = (state: WriterState) => {
+    // A successful takeover enters preparing before its durable reload. Start
+    // the silent baseline there, so missed broadcasts cannot replay old cues.
+    // Initial startup has no renderer yet; visibility restoration owns its
+    // separate (nestable) suppression scope.
+    if (state === 'preparing' && renderer && !preparingCueBaseline) {
+      preparingCueBaseline = true;
+      renderer.beginCueSuppression();
+    }
+
     const readOnly = state !== 'writer';
     store.setReadOnly(readOnly);
     syncReadOnlyUi(readOnly);
@@ -117,6 +128,26 @@ async function boot() {
       else delete tabNotice.dataset.blocked;
     }
     if (takeOver) takeOver.disabled = !session.supportsWriterLock || state !== 'reader';
+
+    if (!preparingCueBaseline || !renderer) return;
+    if (state === 'writer') {
+      // AppSession runs writer activation after state listeners. A microtask
+      // therefore installs one final scene after daily/refresh duties while
+      // suppression is still active, then releases only this preparation scope.
+      queueMicrotask(() => {
+        if (!preparingCueBaseline || session.state !== 'writer') return;
+        try {
+          update();
+        } finally {
+          renderer.endCueSuppression();
+          preparingCueBaseline = false;
+        }
+      });
+    } else if (state !== 'preparing') {
+      // Failed/cancelled takeover: do not leave the renderer permanently muted.
+      renderer.endCueSuppression();
+      preparingCueBaseline = false;
+    }
   };
   session.subscribeState(syncWriterState);
 
@@ -176,7 +207,7 @@ async function boot() {
   $('legend').innerHTML =
     `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span><span>告示牌、灯和条幅 = 日程此刻层</span><span>漂流瓶 = 待归类日程</span>`;
 
-  const renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
+  renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
   let dusk = false;
   const tracker = new Tracker(store, {
     openNewProject: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),

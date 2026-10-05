@@ -61,6 +61,37 @@ try {
       );
       await waitReadOnly(reader, true);
 
+      // Simulate a visible reader missing BroadcastChannel delivery. The
+      // authoritative takeover reload must recover the event without replaying
+      // the stale scene -> fresh scene transition as a new cue.
+      await reader.evaluate(() => {
+        window.yuzhi.session.tabs.suspendNotifications();
+      });
+      await writer.evaluate(async () => {
+        const app = window.yuzhi;
+        const project = app.store.data.projects.find((row) => row.name === 'Browser writer A');
+        if (!project) throw new Error('seed project missing');
+        const now = app.store.clock().getTime();
+        app.store.put('events', {
+          id: 'browser-takeover-soon',
+          sourceId: 'browser-smoke',
+          uid: 'browser-takeover-soon',
+          title: '接管前提醒',
+          start: new Date(now + 10 * 60_000).toISOString(),
+          end: new Date(now + 70 * 60_000).toISOString(),
+          allDay: false,
+          projectId: project.id,
+          classified: true,
+        });
+        await app.store.flush();
+      });
+      const stale = await reader.evaluate(() => ({
+        hasEvent: window.yuzhi.store.data.events.some((event) => event.id === 'browser-takeover-soon'),
+        hasSoon: window.yuzhi.renderer.scene.villages.some((village) =>
+          village.agenda?.soon?.some((event) => event.eventId === 'browser-takeover-soon')),
+      }));
+      assert(!stale.hasEvent && !stale.hasSoon, `reader unexpectedly received the missed broadcast: ${JSON.stringify(stale)}`);
+
       const release = await writer.evaluate(async () => {
         const app = window.yuzhi;
         app.store.batch(() => {
@@ -103,14 +134,29 @@ try {
 
       await reader.locator('#tabTakeover').click();
       await waitReadOnly(reader, false);
+      await reader.waitForFunction(
+        () => window.yuzhi.renderer.scene.villages.some((village) =>
+          village.agenda?.soon?.some((event) => event.eventId === 'browser-takeover-soon')),
+        undefined,
+        { timeout },
+      );
       const fresh = await reader.evaluate(() => ({
         state: window.yuzhi.session.state,
         projectNames: window.yuzhi.store.data.projects.map((project) => project.name),
         drained: window.yuzhi.store.data.chronicle.filter((row) => row.id.startsWith('browser-drain|')).length,
+        hasSoon: window.yuzhi.renderer.scene.villages.some((village) =>
+          village.agenda?.soon?.some((event) => event.eventId === 'browser-takeover-soon')),
+        bellHandled: window.yuzhi.renderer.belled.has('browser-takeover-soon'),
+        bellRipples: window.yuzhi.renderer.bellRipples.length,
+        stageCues: window.yuzhi.renderer.stageCues.length,
+        pulses: window.yuzhi.renderer.pulses.length,
       }));
       assert(fresh.state === 'writer', `takeover ended in ${fresh.state}`);
       assert(fresh.projectNames.includes('Browser writer A'), 'takeover opened before loading the final writer snapshot');
       assert(fresh.drained === 1200, `takeover missed accepted writes: ${fresh.drained}/1200`);
+      assert(fresh.hasSoon, 'takeover did not install the missed soon event');
+      assert(!fresh.bellHandled && fresh.bellRipples === 0 && fresh.stageCues === 0 && fresh.pulses === 0,
+        `takeover replayed stale cues: ${JSON.stringify(fresh)}`);
 
       await reader.evaluate(async () => {
         const app = window.yuzhi;

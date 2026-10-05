@@ -67,6 +67,8 @@ async function seed(page) {
         ev('chores-later', '买菜', d('17:00'), d('18:00'), 'chores'),
         ev('holiday', '国庆假期', d('00:00', '01'), d('00:00', '08'), undefined, true),
         ev('drift', '神秘会面', d('16:00'), d('17:00'), undefined),
+        ev('drift2', '匿名讨论', d('16:10'), d('17:10'), undefined),
+        ev('drift3', '未知访谈', d('16:20'), d('17:20'), undefined),
       ]) store.put('events', e);
     });
     return { live: live.id, banner: banner.id, soon: soon.id };
@@ -263,18 +265,34 @@ try {
     assert(tower.view.kind === 'archive', `lighthouse tower opened ${JSON.stringify(tower)}`);
   });
 
-  await runScenario('漂流瓶：在海面上、不被码头标签盖住，点开即捞起并打开归类', async () => {
-    assert(p.bottles.length === 1 && p.bottles[0].title === '神秘会面', `bottles: ${JSON.stringify(p.bottles)}`);
-    assert(p.bottles[0].onSea, `bottle is not on open water: ${JSON.stringify(p.bottles[0])}`);
+  await runScenario('窄屏多个漂流瓶：点击每个瓶心都选中最近的那一只', async () => {
+    await page.setViewportSize({ width: 320, height: 760 });
+    await page.waitForTimeout(350);
+    p = await points(page);
+    assert(p.bottles.length === 3, `expected three narrow-screen bottles: ${JSON.stringify(p.bottles)}`);
+    for (const bottle of p.bottles) {
+      const hit = await hitAt(page, bottle);
+      assert(hit?.kind === 'drift' && hit.title === bottle.title,
+        `tap on ${bottle.title} selected ${JSON.stringify(hit)} from ${JSON.stringify(p.bottles)}`);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(350);
+    p = await points(page);
+  });
+
+  await runScenario('漂流瓶：在海面上、不被码头标签盖住，点开即捞起并只移除被点中的组', async () => {
+    assert(p.bottles.length === 3 && p.bottles[0].title === '神秘会面', `bottles: ${JSON.stringify(p.bottles)}`);
+    assert(p.bottles.every((b) => b.onSea), `some bottles are not on open water: ${JSON.stringify(p.bottles)}`);
     const hit = await hitAt(page, p.bottles[0]);
-    assert(hit?.kind === 'drift', `bottle hit resolved to ${JSON.stringify(hit)}`);
+    assert(hit?.kind === 'drift' && hit.title === '神秘会面', `bottle hit resolved to ${JSON.stringify(hit)}`);
     await page.keyboard.press('Escape');
     await page.mouse.click(p.bottles[0].x, p.bottles[0].y);
     await page.waitForFunction(() => !document.getElementById('mdl').hidden && document.getElementById('mdlBox').innerText.includes('神秘会面'), undefined, { timeout });
     await shot(page, '3c-drift-classify');
     await page.keyboard.press('Escape');
-    const left = await page.evaluate(() => window.yuzhi.renderer.scene.drifting.length);
-    assert(left === 0, `bottle still floating after pick: ${left}`);
+    const left = await page.evaluate(() => window.yuzhi.renderer.scene.drifting.map((item) => item.title));
+    assert(left.length === 2 && !left.includes('神秘会面'),
+      `picked bottle did not remove exactly its own group: ${JSON.stringify(left)}`);
   });
 
   await runScenario('杂务待结算 / 稍后：点小屋打开杂务追踪栏', async () => {

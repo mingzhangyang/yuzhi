@@ -263,7 +263,7 @@ export class IslandRenderer {
   private focus: SceneryFocus | null = null;
   private sceneryIndex = -1;
   private suppressCuesOnce = false;
-  private suppressCuesUntilRelease = false;
+  private cueSuppressionDepth = 0;
   onTap: (hit: Hit, pt: { x: number; y: number }) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement, private wrap: HTMLElement) {
@@ -349,18 +349,18 @@ export class IslandRenderer {
     this.clearQueuedCues();
   }
 
-  /** 页面恢复期间持续压制提示，直到 durable snapshot 已经成为新的基线。 */
+  /** 持续压制提示直到调用方安装完 durable baseline；允许恢复与接管嵌套。 */
   beginCueSuppression() {
-    this.suppressCuesUntilRelease = true;
+    this.cueSuppressionDepth++;
     this.clearQueuedCues();
   }
 
   endCueSuppression() {
-    this.suppressCuesUntilRelease = false;
+    if (this.cueSuppressionDepth > 0) this.cueSuppressionDepth--;
   }
 
   setScene(s: Scene) {
-    const suppress = this.suppressCuesOnce || this.suppressCuesUntilRelease;
+    const suppress = this.suppressCuesOnce || this.cueSuppressionDepth > 0;
     const prev = suppress ? null : this.scene;
     this.suppressCuesOnce = false;
     const cues = diffScene(prev, s);
@@ -709,16 +709,19 @@ export class IslandRenderer {
     return this.driftBottleSpots()[index] ?? this.driftBottleSpots()[0];
   }
 
-  /** 漂流瓶在海上，不和陆地上的东西重叠，可以最先判断 */
+  /** 漂流瓶在海上，不和陆地上的东西重叠，可以最先判断。窄屏重叠时取离点击点最近的瓶子。 */
   private driftHitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
     const bottleRadius = Math.max(14, this.view.tw * 0.42);
+    let nearest: { distance: number; title: string } | null = null;
     for (let k = 0; k < s.drifting.length; k++) {
       const [x, y] = this.driftBottleAnchor(k);
-      if (Math.hypot(pt.x - x, pt.y - y) < bottleRadius) return { kind: 'drift', title: s.drifting[k].title };
+      const distance = Math.hypot(pt.x - x, pt.y - y);
+      if (distance >= bottleRadius) continue;
+      if (!nearest || distance < nearest.distance) nearest = { distance, title: s.drifting[k].title };
     }
-    return null;
+    return nearest ? { kind: 'drift', title: nearest.title } : null;
   }
 
   /**

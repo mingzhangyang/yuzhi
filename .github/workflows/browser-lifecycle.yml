@@ -83,6 +83,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:4173/ > /dev/null
 
+          node browser-tests/agenda-hit-smoke.mjs
           node browser-tests/lifecycle-smoke.mjs
 
           rm -rf /tmp/yuzhi-cdp-profile
