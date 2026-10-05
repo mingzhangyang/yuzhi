@@ -213,6 +213,7 @@ export abstract class IslandSimulation extends IslandInteraction {
     const r = this.canvas.getBoundingClientRect();
     if (!r.width) return null;
     return { x: r.left + x, y: r.top + y - this.view.tw * 0.3 };
+  }
 
   protected step(dt: number) {
     const s = this.scene;
