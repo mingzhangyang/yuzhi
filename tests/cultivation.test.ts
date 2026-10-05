@@ -19,11 +19,12 @@ describe('real-life cultivation read model', () => {
   });
 
   it('describes repeated partial work as progress occurrences rather than distinct Todos', () => {
-    const { store } = makeStore('2026-10-05');
+    const { store, setToday } = makeStore('2026-10-04');
     const p = createProject(store, '长任务');
     const task = createTask(store, { title: '分段完成', projectId: p.id, scheduledFor: '2026-10-04' });
 
     settleDay(store, '2026-10-04', new Map([[itemKey('task', task.id), { outcome: 'partial' }]]));
+    setToday('2026-10-05');
     settleDay(store, '2026-10-05', new Map([[itemKey('task', task.id), { outcome: 'partial' }]]));
 
     const field = cultivationState(store.data, '2026-10-05').field;
