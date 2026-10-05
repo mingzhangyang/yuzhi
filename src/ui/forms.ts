@@ -24,7 +24,8 @@ export function openNew(
   const today = store.today();
   const ps = store.activeProjects();
   const projectOptions = ps.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const dateOptions = `<option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option>`;
+  const futureDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option>`;
+  const diaryDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, -1)}">昨天</option><option value="${addDays(today, -2)}">前天</option>`;
   const body = `
     <div class="seg" role="tablist">
       <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}">Todo</button>
@@ -35,13 +36,13 @@ export function openNew(
     <form data-f="task" ${kind === 'task' ? '' : 'hidden'}>
       <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off"></label>
       <label class="field">住进哪个村落<select name="proj"><option value="">先停在码头</option>${projectOptions}</select></label>
-      <label class="field">哪天做<select name="date">${dateOptions}<option value="">不定日期</option></select></label>
+      <label class="field">哪天做<select name="date">${futureDateOptions}<option value="">不定日期</option></select></label>
       <p class="hint">Todo 真正推进并在结算里确认后，才会培育农田。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">添加 Todo</button></div>
     </form>
     <form data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
       <label class="field">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off"></label>
-      <label class="field">日期<select name="date">${dateOptions}</select></label>
+      <label class="field">日期<select name="date">${futureDateOptions}</select></label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <label class="field">开始<input name="start" type="time" value="09:00"></label>
         <label class="field">结束<input name="end" type="time" value="10:00"></label>
@@ -51,7 +52,7 @@ export function openNew(
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">创建日程</button></div>
     </form>
     <form data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
-      <label class="field">日期<select name="date">${dateOptions}</select></label>
+      <label class="field">日期<select name="date">${diaryDateOptions}</select></label>
       <label class="field">写下今天<textarea name="text" placeholder="发生了什么、想到什么、想记住什么……"></textarea></label>
       <p class="hint">日记不会变成待办，也不需要结算。最近写过日记的日子会让花园慢慢繁盛。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">写下日记</button></div>
