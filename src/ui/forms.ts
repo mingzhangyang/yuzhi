@@ -11,11 +11,12 @@ import { addFileSource, addUrlSource, syncSource } from '../calendar';
 import { suggestKeyword, unclassifiedGroups } from '../logic/classify';
 import { addDays, dateOfStamp, fmtDay, relDay } from '../lib/date';
 import { roofOf } from './scene';
+import { bindDateSelects, dateSelect, readDate } from './date-select';
 import { MAX_VILLAGES } from '../logic/config';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** 新建：Todo、日程、日记或项目。它们是现实输入，不是额外的经营动作。 */
+/** 新建：高频捕捉保持轻量；场景内创建再继承项目等上下文。 */
 export function openNew(
   store: Store,
   kind: 'task' | 'schedule' | 'diary' | 'project' = 'task',
@@ -24,91 +25,158 @@ export function openNew(
   const today = store.today();
   const ps = store.activeProjects();
   const projectOptions = ps.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-  const futureDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option>`;
-  const diaryDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, -1)}">昨天</option><option value="${addDays(today, -2)}">前天</option>`;
+  const titles = {
+    task: '新建 Todo',
+    schedule: '新建日程',
+    diary: '写日记',
+    project: '新建项目',
+  } as const;
+  const diaryDraftKey = 'yuzhi:capture:diary-draft';
+
+  let diaryDraft: { date?: string; text?: string } | null = null;
+  try {
+    const saved = sessionStorage.getItem(diaryDraftKey);
+    if (saved) diaryDraft = JSON.parse(saved) as { date?: string; text?: string };
+  } catch {
+    // Draft recovery is a convenience only; private browsing may reject storage.
+  }
+
+  const diaryDate = diaryDraft?.date && diaryDraft.date <= today ? diaryDraft.date : today;
+  const diaryText = diaryDraft?.text ?? '';
   const body = `
-    <div class="seg" role="group" aria-label="新建类型">
-      <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}" aria-pressed="${kind === 'task'}">Todo</button>
-      <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}" aria-pressed="${kind === 'schedule'}">日程</button>
-      <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}" aria-pressed="${kind === 'diary'}">日记</button>
-      <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}" aria-pressed="${kind === 'project'}">项目</button>
-    </div>
-    <form data-f="task" ${kind === 'task' ? '' : 'hidden'}>
-      <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off" ${kind === 'task' ? 'autofocus' : ''}></label>
-      <label class="field">住进哪个村落<select name="proj"><option value="">先停在码头</option>${projectOptions}</select></label>
-      <label class="field">哪天做<select name="date">${futureDateOptions}<option value="">不定日期</option></select></label>
-      <p class="hint">Todo 真正推进并在结算里确认后，才会培育农田。</p>
-      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">添加 Todo</button></div>
-    </form>
-    <form data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
-      <label class="field">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off" ${kind === 'schedule' ? 'autofocus' : ''}></label>
-      <label class="field">日期<select name="date">${futureDateOptions}</select></label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <label class="field">开始<input name="start" type="time" value="09:00"></label>
-        <label class="field">结束<input name="end" type="time" value="10:00"></label>
+    <div class="capture">
+      <div class="seg capture-tabs" role="group" aria-label="新建类型">
+        <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}" aria-pressed="${kind === 'task'}">Todo</button>
+        <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}" aria-pressed="${kind === 'schedule'}">日程</button>
+        <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}" aria-pressed="${kind === 'diary'}">日记</button>
+        <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}" aria-pressed="${kind === 'project'}">项目</button>
       </div>
-      <label class="field">时间花在哪<select name="proj"><option value="${CHORES}">杂务 / 生活</option>${projectOptions}</select></label>
-      <p class="hint">自己创建的日程和导入日历走同一套规则：计划本身不会让果园生长；日程经过现实并由你结算后，才会成为培育事实。</p>
-      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">创建日程</button></div>
-    </form>
-    <form data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
-      <label class="field">日期<select name="date">${diaryDateOptions}</select></label>
-      <label class="field">写下今天<textarea name="text" placeholder="发生了什么、想到什么、想记住什么……" ${kind === 'diary' ? 'autofocus' : ''}></textarea></label>
-      <p class="hint">日记不会变成待办，也不需要结算。最近写过日记的日子会让花园慢慢繁盛。</p>
-      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">写下日记</button></div>
-    </form>
-    <form data-f="project" ${kind === 'project' ? '' : 'hidden'}>
-      <label class="field">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off" ${kind === 'project' ? 'autofocus' : ''}></label>
-      <p class="hint">一个项目是岛上的一座村落。项目仍由真实推进来生长，不需要在岛上另行经营。</p>
-      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">立项</button></div>
-    </form>`;
+
+      <form class="capture-form" data-f="task" ${kind === 'task' ? '' : 'hidden'}>
+        <div class="capture-fields">
+          <label class="field capture-primary">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off" ${kind === 'task' ? 'autofocus' : ''}></label>
+          <div class="capture-meta">
+            <label class="field">所属项目<select name="proj"><option value="">未指定 · 先停在码头</option>${projectOptions}</select></label>
+            <label class="field">日期${dateSelect('date', today, { withNone: true, mode: 'task' })}</label>
+          </div>
+          <p class="hint">先记下来就好。未指定项目的 Todo 会乘船停在码头；真实推进并结算后，农田才会生长。</p>
+        </div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">添加 Todo</button></div>
+      </form>
+
+      <form class="capture-form" data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
+        <div class="capture-fields">
+          <label class="field capture-primary">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off" ${kind === 'schedule' ? 'autofocus' : ''}></label>
+          <label class="field">日期${dateSelect('date', today, { current: today, withNone: false, mode: 'schedule' })}</label>
+          <div class="capture-time-grid">
+            <label class="field">开始<input name="start" type="time" value="09:00"></label>
+            <label class="field">结束<input name="end" type="time" value="10:00"></label>
+          </div>
+          <label class="field">所属项目<select name="proj"><option value="${CHORES}">杂务 / 生活</option>${projectOptions}</select></label>
+          <p class="hint">计划本身不会让果园生长；日程真正经过现实并结算后，才会成为培育事实。</p>
+        </div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">创建日程</button></div>
+      </form>
+
+      <form class="capture-form diary-form" data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
+        <div class="capture-fields">
+          <div class="diary-date-row"><span>记录日期</span>${dateSelect('date', today, { current: diaryDate, withNone: false, mode: 'diary' })}</div>
+          <label class="field diary-writing"><span class="sr-only">日记内容</span><textarea name="text" placeholder="发生了什么、想到什么、想记住什么……" ${kind === 'diary' ? 'autofocus' : ''}>${esc(diaryText)}</textarea></label>
+          <p class="hint" data-diary-note>${diaryText ? '已恢复上次没有写完的内容。' : '日记不需要结算；写过日记的日子会让花园慢慢繁盛。'}</p>
+        </div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>关闭</button><button class="btn primary">写下日记</button></div>
+      </form>
+
+      <form class="capture-form" data-f="project" ${kind === 'project' ? '' : 'hidden'}>
+        <div class="capture-fields">
+          <label class="field capture-primary">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off" ${kind === 'project' ? 'autofocus' : ''}></label>
+          <p class="hint">项目会成为岛上的一座村落。立项后直接添加第一件要做的事，不需要额外经营村落。</p>
+        </div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">立项并进入</button></div>
+      </form>
+    </div>`;
+
   openModal({
-    title: '新建现实输入',
+    title: titles[kind],
     body,
     mount(box) {
-      box.querySelectorAll<HTMLElement>('[data-k]').forEach((b) =>
-        b.addEventListener('click', () => {
-          box.querySelectorAll<HTMLElement>('[data-k]').forEach((x) => {
-            const selected = x === b;
-            x.classList.toggle('on', selected);
-            x.setAttribute('aria-pressed', String(selected));
-          });
-          box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((form) => (form.hidden = form.dataset.f !== b.dataset.k));
-          box.querySelector<HTMLElement>(`form[data-f="${b.dataset.k}"] input, form[data-f="${b.dataset.k}"] textarea`)?.focus();
-        }),
+      bindDateSelects(box, today);
+
+      const selectKind = (nextKind: keyof typeof titles) => {
+        box.querySelectorAll<HTMLElement>('[data-k]').forEach((button) => {
+          const selected = button.dataset.k === nextKind;
+          button.classList.toggle('on', selected);
+          button.setAttribute('aria-pressed', String(selected));
+        });
+        box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((form) => {
+          form.hidden = form.dataset.f !== nextKind;
+        });
+        const title = box.querySelector<HTMLElement>('#mdlT');
+        if (title) title.textContent = titles[nextKind];
+        box.querySelector<HTMLElement>(`form[data-f="${nextKind}"] input:not([type="hidden"]), form[data-f="${nextKind}"] textarea`)?.focus();
+      };
+
+      box.querySelectorAll<HTMLElement>('[data-k]').forEach((button) =>
+        button.addEventListener('click', () => selectKind(button.dataset.k as keyof typeof titles)),
       );
+
+      const diaryForm = box.querySelector<HTMLFormElement>('form[data-f="diary"]')!;
+      const diaryTextArea = diaryForm.querySelector<HTMLTextAreaElement>('textarea[name=text]')!;
+      const diaryDateSelect = diaryForm.querySelector<HTMLSelectElement>('select[name=date]')!;
+      const persistDiaryDraft = () => {
+        const draft = { date: readDate(diaryDateSelect) ?? today, text: diaryTextArea.value };
+        try {
+          if (draft.text.trim()) sessionStorage.setItem(diaryDraftKey, JSON.stringify(draft));
+          else sessionStorage.removeItem(diaryDraftKey);
+        } catch {
+          // Ignore storage failures; the form itself still works normally.
+        }
+      };
+      diaryTextArea.addEventListener('input', persistDiaryDraft);
+      diaryDateSelect.addEventListener('input', persistDiaryDraft);
+
       box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((form) =>
-        form.addEventListener('submit', (e) => {
-          e.preventDefault();
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
           const fd = new FormData(form);
           try {
             if (form.dataset.f === 'task') {
               const pid = String(fd.get('proj') ?? '');
-              const t = A.createTask(store, {
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
+              const task = A.createTask(store, {
                 title: String(fd.get('title') ?? ''),
                 projectId: pid || undefined,
-                scheduledFor: String(fd.get('date') ?? '') || undefined,
+                scheduledFor: date,
               });
-              toast(t.projectId ? `「${t.title}」住进了「${store.project(t.projectId)?.name}」` : `「${t.title}」乘船停在了码头`);
+              toast(task.projectId ? `「${task.title}」住进了「${store.project(task.projectId)?.name}」` : `「${task.title}」乘船停在了码头`);
             } else if (form.dataset.f === 'schedule') {
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
               const event = A.createSchedule(store, {
                 title: String(fd.get('title') ?? ''),
-                date: String(fd.get('date') ?? today),
+                date,
                 start: String(fd.get('start') ?? ''),
                 end: String(fd.get('end') ?? ''),
                 projectId: String(fd.get('proj') ?? CHORES),
               });
               toast(`日程「${event.title}」已经放进小岛的时间里`);
             } else if (form.dataset.f === 'diary') {
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
               const entry = A.createDiary(store, {
-                date: String(fd.get('date') ?? today),
+                date,
                 text: String(fd.get('text') ?? ''),
               });
+              try {
+                sessionStorage.removeItem(diaryDraftKey);
+              } catch {
+                // Ignore storage cleanup failures after a successful save.
+              }
               toast(`${fmtDay(entry.date)}的日记写下来了，花园会记住它`);
             } else {
-              const p = A.createProject(store, String(fd.get('name') ?? ''));
-              toast(`岛上立起了新村落「${p.name}」`);
-              onProject?.(p.id);
+              const project = A.createProject(store, String(fd.get('name') ?? ''));
+              toast(`岛上立起了新村落「${project.name}」`);
+              closeModal(false);
+              onProject?.(project.id);
+              return;
             }
             closeModal(false);
           } catch (err) {
@@ -120,7 +188,6 @@ export function openNew(
     },
   });
 }
-
 /** 日历：订阅链接、上传文件、归类规则 */
 export function openCalendar(store: Store, onImported: () => void) {
   // 日历对话框里的每个操作都会写入；只读标签页不打开半绑定的对话框
