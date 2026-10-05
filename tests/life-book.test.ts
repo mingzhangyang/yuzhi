@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDiary,
+  createProject,
   createSchedule,
   createTask,
   deleteDiary,
   deleteSchedule,
   editDiary,
   editSchedule,
+  moveTask,
   renameTask,
+  settleDay,
 } from '../src/actions';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../src/types';
 import {
@@ -19,6 +22,7 @@ import {
   scheduleVersions,
 } from '../src/logic/life-book';
 import { BACKUP_FORMAT, emptyData, parseBackup } from '../src/db';
+import { itemKey } from '../src/logic/days';
 import { makeStore } from './helpers';
 
 describe('unified life book', () => {
@@ -82,14 +86,30 @@ describe('unified life book', () => {
 
   it('routes existing project/task facts through the same subject read model', () => {
     const h = makeStore('2026-10-05');
-    const task = createTask(h.store, { title: '旧名字' });
+    const a = createProject(h.store, '旧村落');
+    const b = createProject(h.store, '新村落');
+    const task = createTask(h.store, { title: '旧名字', projectId: a.id });
+    moveTask(h.store, task.id, b.id);
     renameTask(h.store, task.id, '新名字');
 
     const rows = lifeBookEntries(h.store.data, { type: 'task', id: task.id });
-    expect(rows.map((row) => row.text)).toEqual([
-      '改名：「旧名字」 → 「新名字」',
-    ]);
-    expect(rows[0]).toMatchObject({ subjectType: 'task', subjectId: task.id });
+    expect(rows.at(-1)?.text).toBe('改名：「旧名字」 → 「新名字」');
+    expect(rows.at(-1)).toMatchObject({ subjectType: 'task', subjectId: task.id, projectId: b.id });
+  });
+
+  it('projects settlement facts into a local schedule Life Book', () => {
+    const h = makeStore('2026-10-05');
+    const event = createSchedule(h.store, {
+      title: '今天的讨论',
+      date: h.today,
+      start: '09:00',
+      end: '10:00',
+      projectId: CHORES,
+    });
+    settleDay(h.store, h.today, new Map([[itemKey('event', event.id), { outcome: 'done' }]]));
+
+    expect(lifeBookEntries(h.store.data, { type: 'schedule', id: event.id }).map((entry) => entry.kind))
+      .toEqual(['start', 'done']);
   });
 
   it('migrates v5 diaries and local schedules into baseline life-book facts', () => {
