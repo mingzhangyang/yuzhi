@@ -7,7 +7,7 @@ const openModal = vi.fn();
 vi.mock('../src/ui/dom', async (importOriginal) => ({ ...(await importOriginal<object>()), toast: (...a: unknown[]) => toast(...a) }));
 vi.mock('../src/ui/modal', async (importOriginal) => ({ ...(await importOriginal<object>()), openModal: (...a: unknown[]) => openModal(...a) }));
 
-const { openCalendar, openClassify } = await import('../src/ui/forms');
+const { openCalendar, openClassify, openNew } = await import('../src/ui/forms');
 
 describe('calendar dialog', () => {
   it('a read-only tab gets a notice instead of a partially bound dialog', () => {
@@ -62,5 +62,36 @@ describe('calendar dialog', () => {
     openClassify(store, new Set(), '已经消失的漂流瓶');
 
     expect(openModal.mock.calls.length).toBe(callsBefore);
+  });
+});
+
+
+describe('unified capture dialog', () => {
+  it('keeps global Todo capture intentionally unscheduled and unassigned by default', () => {
+    const store = new Store(emptyData(), new MemoryPersistence());
+
+    openNew(store, 'task');
+
+    const dialog = openModal.mock.calls.at(-1)?.[0] as { title?: string; body?: string } | undefined;
+    expect(dialog?.title).toBe('新建 Todo');
+    expect(dialog?.body).toContain('<option value="" selected>不定日期</option>');
+    expect(dialog?.body).toContain('未指定 · 先停在码头');
+    expect(dialog?.body).toContain('其他日期…');
+  });
+
+  it('uses task-specific titles instead of exposing the internal “现实输入” concept', () => {
+    const store = new Store(emptyData(), new MemoryPersistence());
+
+    openNew(store, 'diary');
+    const diaryDialog = openModal.mock.calls.at(-1)?.[0] as { title?: string; body?: string };
+    expect(diaryDialog.title).toBe('写日记');
+    expect(diaryDialog.body).toContain('<label class="diary-date-row"><span>记录日期</span>');
+
+    openNew(store, 'schedule');
+    expect((openModal.mock.calls.at(-1)?.[0] as { title?: string; body?: string }).title).toBe('新建日程');
+    expect((openModal.mock.calls.at(-1)?.[0] as { body?: string }).body).toContain('其他日期…');
+
+    openNew(store, 'project');
+    expect((openModal.mock.calls.at(-1)?.[0] as { title?: string }).title).toBe('新建项目');
   });
 });

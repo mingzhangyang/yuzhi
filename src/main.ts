@@ -214,8 +214,15 @@ async function boot() {
 
   renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
   let dusk = false;
+  function openProjectAfterCreate(id: string) {
+    tracker.open({ kind: 'project', id });
+    requestAnimationFrame(() => {
+      $('trackerBody').querySelector<HTMLInputElement>('input[name="ptask"]')?.focus();
+    });
+  }
+
   const tracker = new Tracker(store, {
-    openNewProject: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
+    openNew: (kind) => openNew(store, kind, openProjectAfterCreate),
     openClassify: () => openClassify(store),
     openPrompt: (p) => abandonPrompt(store, p, () => setTimeout(maybePrompt, 300)),
     openSettings: () => openSettings(store, applyTheme),
@@ -513,7 +520,7 @@ async function boot() {
   /* ---------------- 顶部按钮 ---------------- */
   $('settleBtn').onclick = () => settle.open();
   $('fogGo').onclick = () => settle.open();
-  $('newBtn').onclick = () => openNew(store, 'task');
+  $('newBtn').onclick = () => openNew(store, 'task', openProjectAfterCreate);
   function afterImport() {
     // 导入可能带来早于归档期限的事件日子，马上归档，不要等到明天
     daily();
@@ -604,7 +611,7 @@ async function boot() {
     !store.data.diaries.length
   ) {
     openWelcome({
-      project: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
+      project: () => openNew(store, 'project', openProjectAfterCreate),
       calendar: () => openCalendar(store, afterImport),
       demo: () => {
         seedDemo(store);

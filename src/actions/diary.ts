@@ -7,9 +7,14 @@ import { ActionError } from './shared';
 function createDiaryImpl(store: Store, input: { text: string; date?: ISODate }): DiaryEntry {
   const text = input.text.trim();
   if (!text) throw new ActionError('写下一点今天发生的事吧');
+
+  const today = store.today();
+  const date = input.date ?? today;
+  if (date > today) throw new ActionError('日记只能记录今天或过去发生的事');
+
   const entry: DiaryEntry = {
     id: uid('diary'),
-    date: input.date ?? store.today(),
+    date,
     text,
     createdAt: store.clock().toISOString(),
   };

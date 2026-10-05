@@ -191,6 +191,21 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .seg button { border: 0; background: none; padding: 6px 11px; font-size: 13px; color: var(--muted); cursor: pointer; line-height: 1.4; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .dlg .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* 统一创建器：标题与类型切换稳定，字段按内容密度分组 */
+.capture { margin-top: 2px; }
+.capture-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; margin: 2px 0 4px; }
+.capture-tabs button { min-width: 0; }
+.capture-form { margin-top: 4px; }
+.capture-fields { min-width: 0; }
+.capture-primary input { font-size: 16px; padding: 10px 11px; }
+.capture-meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); gap: 10px; }
+.capture-time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.capture-actions { padding-top: 2px; }
+.diary-date-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 4px; font-size: 12.5px; color: var(--muted); }
+.diary-date-row select { width: auto; max-width: 180px; border: 1px solid var(--line); border-radius: 99px; background: var(--chip); padding: 6px 28px 6px 10px; }
+.diary-writing { margin-top: 8px; }
+.field.diary-writing textarea { min-height: 220px; line-height: 1.7; resize: vertical; background: var(--panel); padding: 12px; }
 .srcs { margin: 6px 0 4px; }
 .err { color: var(--warn); font-size: 12px; }
 .checklist label { display: flex; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
@@ -333,6 +348,18 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
   .cbox { max-width: none; max-height: 94vh; border-radius: 18px 18px 0 0; }
   .cfoot { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .dlg-back { align-items: flex-end; padding: 0; }
-  .dlg { border-radius: 18px 18px 0 0; max-height: 88vh; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .dlg { border-radius: 18px 18px 0 0; max-height: min(88dvh, 88vh); padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); overscroll-behavior: contain; }
+  .dlg:has(.capture) { padding-bottom: 0; }
+  .capture-tabs { position: sticky; top: -18px; z-index: 2; margin: 0 -2px 6px; padding: 4px 2px 8px; background: var(--panel); }
+  .capture-tabs button { min-height: 44px; padding: 9px 7px; font-size: 14px; }
+  .capture-form { margin: 0 -16px; }
+  .capture-fields { padding: 0 16px; }
+  .capture-meta { grid-template-columns: 1fr; gap: 0; }
+  .capture-time-grid { gap: 8px; }
+  .capture-actions { position: sticky; bottom: 0; z-index: 3; margin-top: 14px !important; padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .capture-actions .btn { min-height: 44px; padding: 9px 16px; }
+  .capture-actions .primary { min-width: 118px; }
+  .field.diary-writing textarea { min-height: min(38dvh, 320px); resize: none; }
+  .diary-date-row select { min-height: 44px; }
   .scard .st { display: none; }
 }
