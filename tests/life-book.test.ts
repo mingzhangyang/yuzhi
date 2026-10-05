@@ -162,10 +162,9 @@ describe('unified life book', () => {
     }));
 
     const rows = lifeBookEntries(migrated, { type: 'schedule', id: 'local|settled' });
-    expect(rows.map((entry) => [entry.factSeq, entry.kind])).toEqual([
-      [1, 'start'],
-      [2, 'done'],
-    ]);
+    expect(rows.map((entry) => entry.kind)).toEqual(['start', 'done']);
+    expect(rows[0].factSeq).toBeUndefined();
+    expect(rows[1].factSeq).toBe(1);
   });
 
   it('migrates v5 diaries and local schedules into baseline life-book facts', () => {
