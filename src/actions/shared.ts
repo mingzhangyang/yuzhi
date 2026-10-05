@@ -40,6 +40,8 @@ export function operation(
     kind: OperationKind;
     projectId?: string;
     taskId?: string;
+    subjectType?: OperationEvent['subjectType'];
+    subjectId?: string;
     payload?: OperationEvent['payload'];
     life?: OperationLifeSnapshot[];
   },
@@ -52,6 +54,8 @@ export function operation(
     kind: o.kind,
     projectId: o.projectId,
     taskId: o.taskId,
+    subjectType: o.subjectType,
+    subjectId: o.subjectId,
     payload,
   };
   store.put('operations', event);
