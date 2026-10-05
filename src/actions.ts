@@ -46,11 +46,13 @@ export {
   removeSource,
   setEventProject,
   createSchedule,
+  editSchedule,
   deleteSchedule,
 } from './actions/calendar';
 
 export {
   createDiary,
+  editDiary,
   deleteDiary,
 } from './actions/diary';
 
