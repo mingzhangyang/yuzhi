@@ -19,25 +19,36 @@ npm run build      # 类型检查 + 打包到 dist/
 
 ## 部署到 Cloudflare
 
-两种方式都可以，代码共用同一份 `.ics` 代理（`shared/icsProxy.ts`：只转发、不保存；拒绝内网地址、限制 5MB、只放行日历内容）。第一次部署前先 `npx wrangler login`。
+生产环境只使用 **Cloudflare Workers + Static Assets**。Wrangler 会把 `dist/` 作为 SPA 静态资源，并让 `/api/*` 优先进入 `worker/index.ts`；`.ics` 代理只转发、不保存，拒绝内网地址、限制 5MB、只放行日历内容。
 
-### 方式一：Worker + 静态资源（推荐）
+目标生产域名是 `https://yuzhi.orangely.xyz`。仓库里的 `wrangler.toml` 已固定：
+
+- Worker 名称：`yuzhi`
+- Custom Domain：`yuzhi.orangely.xyz`
+- `workers.dev`：关闭
+- Version preview URLs：关闭
+- SPA fallback：开启
+- Worker-first API 路由：`/api/*`
+
+本地验证与手动部署：
 
 ```bash
-npm run deploy           # 构建后 wrangler deploy，发布到 https://yuzhi.<你的子域>.workers.dev
-npm run preview:worker   # 本地预览（wrangler dev）
+npm run build
+npm run check:worker     # Wrangler dry-run，验证 Worker bundle、静态资源和配置
+npm run dev:worker       # 本地 Workers runtime
+npm run deploy           # 手动生产发布
 ```
 
-配置在 `wrangler.toml`：`dist/` 作为静态资源，`/api/ics` 由 `worker/index.ts` 处理。
+### Cloudflare Workers Builds（GitHub）
 
-### 方式二：Pages
+在 Cloudflare 控制台选择 **Workers & Pages → Create application → Import a repository**，连接 `mingzhangyang/yuzhi`。使用仓库根目录，配置：
 
-```bash
-npm run deploy:pages     # 构建后 wrangler pages deploy dist（第一次会创建 yuzhi 项目）
-npm run preview:pages    # 本地预览（wrangler pages dev）
-```
+- Production branch：`main`
+- Build command：`npm run build`
+- Deploy command：`npx wrangler deploy`
+- Preview Builds：**关闭**
 
-`/api/ics` 由 `functions/api/ics.ts`（Pages Function）提供。也可以在 Cloudflare 后台把 GitHub 仓库连到 Pages：构建命令 `npm run build`，输出目录 `dist`。
+Cloudflare 的 Preview Builds 是项目级设置，不能由 `wrangler.toml` 代替；连接仓库时需要在 **Settings → Build → Branch control** 确认关闭。这样只有推送到 `main` 才会构建并发布。
 
 ## 目录
 
@@ -63,9 +74,8 @@ src/
   calendar.ts         订阅链接 / 上传文件 / 自动刷新
   island/             小岛：地形生成（map.ts）与 Canvas 绘制、交互（render.ts）
   ui/                 指标卡、追踪栏（含档案馆）、晚间结算、落成仪式、对话框
-shared/icsProxy.ts    .ics 代理核心，Worker、Pages Function 与 Vite 开发服务器共用
+shared/icsProxy.ts    .ics 代理核心，Worker 与 Vite 开发服务器共用
 worker/index.ts       Cloudflare Worker 入口（静态资源 + /api/ics）
-functions/api/ics.ts  Cloudflare Pages Function
 tests/                单元测试
 ```
 
@@ -81,7 +91,7 @@ tests/                单元测试
 4. 晚间结算：右滑做了（砖块飞进村落）、左滑没做（四个原因可选）、轻点做了一部分、「全部做了」、「今天还做了别的事…」。桌面上同时有 ✓ ½ ✕ 按钮。
 5. 衰败阶段（正常 / 安静 / 蒙灰 / 搬离）与画面变化：行人变少、屋顶蒙灰、杂草、木板封窗、居民背着包袱走向码头、夜里亮灯的窗户变少；进入搬离时询问重新启动 / 缩小规模 / 正式关闭。
 6. 四项指标与编年史。
-7. Cloudflare Worker（Pages Function）+ .ics 链接订阅与文件上传 + 归类规则（第一次手动指定，之后自动归位，杂务区放没有归属的事件）。
+7. Cloudflare Worker + .ics 链接订阅与文件上传 + 归类规则（第一次手动指定，之后自动归位，杂务区放没有归属的事件）。
 8. 海雾（未结算的日子）与超过 3 天自动归档为「未记录」。
 9. 手机端：地图在上、指标两列、追踪栏变成从底部拉起的面板，结算为全屏面板、滑动优先。
 
