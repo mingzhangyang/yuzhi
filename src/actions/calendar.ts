@@ -126,7 +126,14 @@ function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEv
   const title = input.title.trim();
   if (!title) throw new ActionError('写一句日程标题吧');
   if (!LOCAL_YMD.test(input.date)) throw new ActionError('日程日期格式不对');
-  if (!LOCAL_HM.test(input.start) || !LOCAL_HM.test(input.end) || input.end <= input.start) {
+  if (!LOCAL_HM.test(input.start) || !LOCAL_HM.test(input.end)) {
+    throw new ActionError('日程时间格式不对');
+  }
+  const start = localScheduleStamp(input.date, input.start);
+  const end = localScheduleStamp(input.date, input.end);
+  // Compare actual local instants after Date normalization. During a DST
+  // spring-forward gap, wall-clock string order can be misleading.
+  if (Date.parse(end) <= Date.parse(start)) {
     throw new ActionError('日程结束时间要晚于开始时间');
   }
   const requested = input.projectId;
@@ -141,8 +148,8 @@ function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEv
     sourceId: LOCAL_CALENDAR_SOURCE_ID,
     uid: eventUid,
     title,
-    start: localScheduleStamp(input.date, input.start),
-    end: localScheduleStamp(input.date, input.end),
+    start,
+    end,
     allDay: false,
     projectId,
     classified: true,
