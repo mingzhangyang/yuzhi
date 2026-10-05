@@ -9,50 +9,97 @@ import { closeModal, openModal } from './modal';
 import * as A from '../actions';
 import { addFileSource, addUrlSource, syncSource } from '../calendar';
 import { suggestKeyword, unclassifiedGroups } from '../logic/classify';
-import { addDays, dateOfStamp, relDay } from '../lib/date';
+import { addDays, dateOfStamp, fmtDay, relDay } from '../lib/date';
 import { roofOf } from './scene';
 import { MAX_VILLAGES } from '../logic/config';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** 新建：项目（村落）或任务 */
-export function openNew(store: Store, kind: 'task' | 'project' = 'task', onProject?: (id: string) => void) {
+/** 新建：Todo、日程、日记或项目。它们是现实输入，不是额外的经营动作。 */
+export function openNew(
+  store: Store,
+  kind: 'task' | 'schedule' | 'diary' | 'project' = 'task',
+  onProject?: (id: string) => void,
+) {
   const today = store.today();
   const ps = store.activeProjects();
+  const projectOptions = ps.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const dateOptions = `<option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option>`;
   const body = `
-    <div class="seg" role="tablist"><button data-k="task" class="${kind === 'task' ? 'on' : ''}">任务</button><button data-k="project" class="${kind === 'project' ? 'on' : ''}">项目（村落）</button></div>
+    <div class="seg" role="tablist">
+      <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}">Todo</button>
+      <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}">日程</button>
+      <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}">日记</button>
+      <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}">项目</button>
+    </div>
     <form data-f="task" ${kind === 'task' ? '' : 'hidden'}>
-      <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off" ${kind === 'task' ? 'autofocus' : ''}></label>
-      <label class="field">住进哪个村落<select name="proj"><option value="">先停在码头</option>${ps.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>
-      <label class="field">哪天做<select name="date"><option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option><option value="">不定日期</option></select></label>
-      <p class="hint">停在码头的任务不会出现在结算里，等你安排。</p>
-      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">添加</button></div>
+      <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off"></label>
+      <label class="field">住进哪个村落<select name="proj"><option value="">先停在码头</option>${projectOptions}</select></label>
+      <label class="field">哪天做<select name="date">${dateOptions}<option value="">不定日期</option></select></label>
+      <p class="hint">Todo 真正推进并在结算里确认后，才会培育农田。</p>
+      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">添加 Todo</button></div>
+    </form>
+    <form data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
+      <label class="field">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off"></label>
+      <label class="field">日期<select name="date">${dateOptions}</select></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="field">开始<input name="start" type="time" value="09:00"></label>
+        <label class="field">结束<input name="end" type="time" value="10:00"></label>
+      </div>
+      <label class="field">时间花在哪<select name="proj"><option value="${CHORES}">杂务 / 生活</option>${projectOptions}</select></label>
+      <p class="hint">自己创建的日程和导入日历走同一套规则：结束后仍要由你结算；日程会培育果园。</p>
+      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">创建日程</button></div>
+    </form>
+    <form data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
+      <label class="field">日期<select name="date">${dateOptions}</select></label>
+      <label class="field">写下今天<textarea name="text" placeholder="发生了什么、想到什么、想记住什么……"></textarea></label>
+      <p class="hint">日记不会变成待办，也不需要结算。最近写过日记的日子会让花园慢慢繁盛。</p>
+      <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">写下日记</button></div>
     </form>
     <form data-f="project" ${kind === 'project' ? '' : 'hidden'}>
-      <label class="field">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off" ${kind === 'project' ? 'autofocus' : ''}></label>
-      <p class="hint">一个项目是岛上的一座村落。做完的事会变成砖，村落慢慢长大；很久不动，村落会安静、蒙灰。</p>
+      <label class="field">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off"></label>
+      <p class="hint">一个项目是岛上的一座村落。项目仍由真实推进来生长，不需要在岛上另行经营。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">立项</button></div>
     </form>`;
   openModal({
-    title: '新建',
+    title: '新建现实输入',
     body,
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-k]').forEach((b) =>
         b.addEventListener('click', () => {
           box.querySelectorAll('[data-k]').forEach((x) => x.classList.toggle('on', x === b));
-          box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((f) => (f.hidden = f.dataset.f !== b.dataset.k));
-          box.querySelector<HTMLInputElement>(`form[data-f="${b.dataset.k}"] input`)!.focus();
+          box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((form) => (form.hidden = form.dataset.f !== b.dataset.k));
+          box.querySelector<HTMLElement>(`form[data-f="${b.dataset.k}"] input, form[data-f="${b.dataset.k}"] textarea`)?.focus();
         }),
       );
-      box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((f) =>
-        f.addEventListener('submit', (e) => {
+      box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((form) =>
+        form.addEventListener('submit', (e) => {
           e.preventDefault();
-          const fd = new FormData(f);
+          const fd = new FormData(form);
           try {
-            if (f.dataset.f === 'task') {
+            if (form.dataset.f === 'task') {
               const pid = String(fd.get('proj') ?? '');
-              const t = A.createTask(store, { title: String(fd.get('title') ?? ''), projectId: pid || undefined, scheduledFor: String(fd.get('date') ?? '') || undefined });
+              const t = A.createTask(store, {
+                title: String(fd.get('title') ?? ''),
+                projectId: pid || undefined,
+                scheduledFor: String(fd.get('date') ?? '') || undefined,
+              });
               toast(t.projectId ? `「${t.title}」住进了「${store.project(t.projectId)?.name}」` : `「${t.title}」乘船停在了码头`);
+            } else if (form.dataset.f === 'schedule') {
+              const event = A.createSchedule(store, {
+                title: String(fd.get('title') ?? ''),
+                date: String(fd.get('date') ?? today),
+                start: String(fd.get('start') ?? ''),
+                end: String(fd.get('end') ?? ''),
+                projectId: String(fd.get('proj') ?? CHORES),
+              });
+              toast(`日程「${event.title}」已经放进小岛的时间里`);
+            } else if (form.dataset.f === 'diary') {
+              const entry = A.createDiary(store, {
+                date: String(fd.get('date') ?? today),
+                text: String(fd.get('text') ?? ''),
+              });
+              toast(`${fmtDay(entry.date)}的日记写下来了，花园会记住它`);
             } else {
               const p = A.createProject(store, String(fd.get('name') ?? ''));
               toast(`岛上立起了新村落「${p.name}」`);
@@ -65,6 +112,7 @@ export function openNew(store: Store, kind: 'task' | 'project' = 'task', onProje
           }
         }),
       );
+      box.querySelector<HTMLElement>(`form[data-f="${kind}"] input, form[data-f="${kind}"] textarea`)?.focus();
     },
   });
 }
@@ -261,8 +309,8 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
   openModal({
     kick: '欢迎',
     title: '这是一座由你的日子长成的岛',
-    body: `<p>每个项目是一座村落，每件没做完的事是住在里面的一个小人。新任务先停在码头，晚上结算时确认今天做了什么，小岛据此变化，编年史自动写下一行。</p>
-      <p class="hint">输入不会比普通待办 App 多：你只管建项目、加任务、晚上滑一滑。</p>
+    body: `<p>每个项目是一座村落；Todo、日程、日记和真实结算会继续长成岛上的村落、农田、果园、鱼塘和花园。</p>
+      <p class="hint">你不需要浇水、喂鱼或施肥。只记录本来就在发生的生活，小岛负责把它映射成生长。</p>
       <button class="opt" data-w="project"><b>建第一座村落</b><span>从一个正在做的项目开始</span></button>
       <button class="opt" data-w="calendar"><b>接入日历</b><span>粘贴 .ics 订阅链接，或上传 .ics 文件</span></button>
       <button class="opt" data-w="demo"><b>先看看示例</b><span>放几个示例村落，感受一下衰败和恢复（之后可以关闭它们）</span></button>`,
