@@ -34,14 +34,14 @@ export function openNew(
       <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}" aria-pressed="${kind === 'project'}">项目</button>
     </div>
     <form data-f="task" ${kind === 'task' ? '' : 'hidden'}>
-      <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off"></label>
+      <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off" ${kind === 'task' ? 'autofocus' : ''}></label>
       <label class="field">住进哪个村落<select name="proj"><option value="">先停在码头</option>${projectOptions}</select></label>
       <label class="field">哪天做<select name="date">${futureDateOptions}<option value="">不定日期</option></select></label>
       <p class="hint">Todo 真正推进并在结算里确认后，才会培育农田。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">添加 Todo</button></div>
     </form>
     <form data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
-      <label class="field">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off"></label>
+      <label class="field">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off" ${kind === 'schedule' ? 'autofocus' : ''}></label>
       <label class="field">日期<select name="date">${futureDateOptions}</select></label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <label class="field">开始<input name="start" type="time" value="09:00"></label>
@@ -53,12 +53,12 @@ export function openNew(
     </form>
     <form data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
       <label class="field">日期<select name="date">${diaryDateOptions}</select></label>
-      <label class="field">写下今天<textarea name="text" placeholder="发生了什么、想到什么、想记住什么……"></textarea></label>
+      <label class="field">写下今天<textarea name="text" placeholder="发生了什么、想到什么、想记住什么……" ${kind === 'diary' ? 'autofocus' : ''}></textarea></label>
       <p class="hint">日记不会变成待办，也不需要结算。最近写过日记的日子会让花园慢慢繁盛。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">写下日记</button></div>
     </form>
     <form data-f="project" ${kind === 'project' ? '' : 'hidden'}>
-      <label class="field">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off"></label>
+      <label class="field">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off" ${kind === 'project' ? 'autofocus' : ''}></label>
       <p class="hint">一个项目是岛上的一座村落。项目仍由真实推进来生长，不需要在岛上另行经营。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">立项</button></div>
     </form>`;
@@ -117,7 +117,6 @@ export function openNew(
           }
         }),
       );
-      box.querySelector<HTMLElement>(`form[data-f="${kind}"] input, form[data-f="${kind}"] textarea`)?.focus();
     },
   });
 }
