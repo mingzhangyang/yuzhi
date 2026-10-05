@@ -78,7 +78,7 @@ export function cultivationState(data: Data, today: ISODate): CultivationState {
       level: levelFrom(fieldScore, [1, 3, 7, 12]),
       score: fieldScore,
       summary: taskDone || taskPartial
-        ? `最近 14 天推进了 ${taskDone} 件 Todo，另有 ${taskPartial} 件做了一部分。`
+        ? `最近 14 天记录了 ${taskDone} 次 Todo 完成推进，另有 ${taskPartial} 次部分推进。`
         : '最近 14 天还没有确认推进 Todo，农田正在休耕。',
     },
     orchard: {
