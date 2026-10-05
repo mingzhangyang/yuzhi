@@ -151,10 +151,21 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .task { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
 .task:last-child { border-bottom: 0; }
 .task .tt { flex: 1; min-width: 0; cursor: pointer; }
+.history-link { border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 0; }
+.history-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 .task .tt b { font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task .tt span { font-size: 11px; color: var(--faint); }
 .task .tt span.late { color: var(--warn); }
-.task .acts { display: flex; gap: 4px; flex: none; }
+.task .acts { display: flex; gap: 4px; flex: none; align-items: center; }
+.history-record { opacity: .82; }
+.history-record .tt b { color: var(--muted); }
+.journal-body { margin: 12px 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--chip); font-size: 13px; line-height: 1.75; word-break: break-word; }
+.revision { border-top: 1px dashed var(--line); padding: 7px 0; }
+.revision:first-of-type { border-top: 0; }
+.revision summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.revision summary span { float: right; font-weight: 400; font-size: 11px; color: var(--faint); }
+.revision-body { margin-top: 7px; padding: 8px 10px; border-radius: 8px; background: var(--chip); color: var(--muted); font-size: 12px; line-height: 1.65; word-break: break-word; }
+.field textarea.history-editor { min-height: 220px; line-height: 1.7; }
 .iconbtn { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; padding: 0; display: grid; place-items: center; font-size: 13px; line-height: 1; color: var(--muted); }
 .iconbtn:hover { border-color: var(--accent); color: var(--accent); }
 .add { display: flex; gap: 6px; margin: 8px 0 4px; }

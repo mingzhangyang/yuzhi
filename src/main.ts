@@ -65,7 +65,7 @@ async function boot() {
     document.body.dataset.readOnly = readOnly ? 'true' : 'false';
   };
 
-  const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task', 'diaries', 'schedules']);
+  const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task', 'diaries', 'diary', 'schedules', 'schedule']);
   const guardReadOnlyMutation = (event: Event) => {
     if (!store.isReadOnly || !(event.target instanceof Element)) return;
     const target = event.target;
