@@ -10,6 +10,7 @@ import {
   editSchedule,
   moveTask,
   renameTask,
+  setEventProject,
   settleDay,
 } from '../src/actions';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../src/types';
@@ -110,6 +111,61 @@ describe('unified life book', () => {
 
     expect(lifeBookEntries(h.store.data, { type: 'schedule', id: event.id }).map((entry) => entry.kind))
       .toEqual(['start', 'done']);
+  });
+
+  it('does not let chores reassignment mutate a settled local schedule', () => {
+    const h = makeStore('2026-10-05');
+    const project = createProject(h.store, '项目');
+    const event = createSchedule(h.store, {
+      title: '已经结算的讨论',
+      date: h.today,
+      start: '09:00',
+      end: '10:00',
+      projectId: CHORES,
+    });
+    settleDay(h.store, h.today, new Map([[itemKey('event', event.id), { outcome: 'done' }]]));
+
+    expect(() => setEventProject(h.store, event.id, project.id)).toThrow('已经留下结算记录');
+    expect(h.store.data.events.find((item) => item.id === event.id)?.projectId).toBe(CHORES);
+    expect(scheduleVersions(h.store.data, event.id)).toHaveLength(1);
+  });
+
+  it('migrates a settled v5 local schedule with start before settlement', () => {
+    const data = emptyData();
+    data.events.push({
+      id: 'local|settled',
+      sourceId: LOCAL_CALENDAR_SOURCE_ID,
+      uid: 'settled',
+      title: '已经完成的旧日程',
+      start: new Date(2026, 9, 2, 9, 0, 0).toISOString(),
+      end: new Date(2026, 9, 2, 10, 0, 0).toISOString(),
+      allDay: false,
+      projectId: CHORES,
+      classified: true,
+    });
+    data.entries.push({
+      id: '2026-10-02|event|local|settled',
+      seq: 1,
+      date: '2026-10-02',
+      itemType: 'event',
+      itemId: 'local|settled',
+      outcome: 'done',
+      projectId: CHORES,
+      title: '已经完成的旧日程',
+    });
+
+    const migrated = parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 5,
+      exportedAt: '2026-10-05T00:00:00.000Z',
+      ...data,
+    }));
+
+    const rows = lifeBookEntries(migrated, { type: 'schedule', id: 'local|settled' });
+    expect(rows.map((entry) => [entry.factSeq, entry.kind])).toEqual([
+      [1, 'start'],
+      [2, 'done'],
+    ]);
   });
 
   it('migrates v5 diaries and local schedules into baseline life-book facts', () => {
