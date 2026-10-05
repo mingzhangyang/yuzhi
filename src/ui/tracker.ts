@@ -598,8 +598,20 @@ export class Tracker {
       case 'diaries':
         this.open({ kind: 'diaries' });
         break;
+      case 'diary':
+        this.open({ kind: 'diary', id });
+        break;
       case 'schedules':
         this.open({ kind: 'schedules' });
+        break;
+      case 'schedule':
+        this.open({ kind: 'schedule', id });
+        break;
+      case 'edit-diary':
+        this.editDiary(id);
+        break;
+      case 'edit-schedule':
+        this.editSchedule(id);
         break;
       case 'delete-diary': {
         const entry = s.data.diaries.find((item) => item.id === id);
@@ -607,7 +619,7 @@ export class Tracker {
         const context = s.captureWriteContext();
         const ok = await confirmModal({
           title: '删除这篇日记？',
-          text: `${fmtDay(entry.date)} · ${entry.text.length > 80 ? entry.text.slice(0, 79) + '…' : entry.text}\n\n删除后，花园长势会按剩余日记重新计算。`,
+          text: `${fmtDay(entry.date)} · ${entry.text.length > 80 ? entry.text.slice(0, 79) + '…' : entry.text}\n\n正文会从花园记录中移除，但版本历史和一生之书仍会保留。`,
           ok: '删除',
           danger: true,
         });
@@ -626,7 +638,7 @@ export class Tracker {
         const context = s.captureWriteContext();
         const ok = await confirmModal({
           title: `删除日程「${event.title}」？`,
-          text: `${fmtDay(dateOfStamp(event.start))} ${timeOf(event.start)}–${timeOf(event.end)}。删除后，它会从日程层移除，也不会进入后续结算。`,
+          text: `${fmtDay(dateOfStamp(event.start))} ${timeOf(event.start)}–${timeOf(event.end)}。删除后，它会从日程层移除，也不会进入后续结算；一生之书仍会保留。`,
           ok: '删除',
           danger: true,
         });
@@ -728,6 +740,72 @@ export class Tracker {
     this.body.addEventListener('change', (e) => {
       const el = e.target as HTMLSelectElement;
       if (el.dataset.actChange === 'evproj') A.setEventProject(this.store, el.dataset.id!, el.value || undefined);
+    });
+  }
+
+  private editDiary(id: string) {
+    const s = this.store;
+    const entry = s.data.diaries.find((item) => item.id === id);
+    if (!entry) return;
+    const today = s.today();
+    openModal({
+      title: '编辑日记',
+      body: `<form data-f="edit-diary"><label class="field">记录日期${dateSelect('date', today, { current: entry.date, withNone: false, mode: 'diary' })}</label><label class="field">正文<textarea name="text" class="history-editor" autofocus>${esc(entry.text)}</textarea></label><p class="hint">保存后会产生一个新版本，旧版本不会被覆盖。</p><div class="actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">保存新版本</button></div></form>`,
+      mount(box) {
+        bindDateSelects(box, today);
+        box.querySelector<HTMLFormElement>('form')!.addEventListener('submit', (event) => {
+          event.preventDefault();
+          const form = event.currentTarget as HTMLFormElement;
+          const fd = new FormData(form);
+          const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? entry.date;
+          try {
+            A.editDiary(s, id, { date, text: String(fd.get('text') ?? '') });
+            closeModal(false);
+            toast('日记已保存为新版本');
+          } catch (err) {
+            if (err instanceof A.ActionError) toast(err.message, true);
+            else throw err;
+          }
+        });
+      },
+    });
+  }
+
+  private editSchedule(id: string) {
+    const s = this.store;
+    const event = s.data.events.find((item) => item.id === id && item.sourceId === LOCAL_CALENDAR_SOURCE_ID);
+    if (!event) return;
+    const today = s.today();
+    const date = dateOfStamp(event.start);
+    const projectOptions = s.activeProjects()
+      .map((project) => `<option value="${esc(project.id)}"${project.id === event.projectId ? ' selected' : ''}>${esc(project.name)}</option>`)
+      .join('');
+    openModal({
+      title: '编辑日程',
+      body: `<form data-f="edit-schedule"><label class="field">日程标题<input name="title" value="${esc(event.title)}" autocomplete="off" autofocus></label><label class="field">日期${dateSelect('date', today, { current: date, withNone: false, mode: 'schedule' })}</label><div class="capture-time-grid"><label class="field">开始<input name="start" type="time" value="${timeOf(event.start)}"></label><label class="field">结束<input name="end" type="time" value="${timeOf(event.end)}"></label></div><label class="field">所属项目<select name="proj"><option value="${CHORES}"${event.projectId === CHORES ? ' selected' : ''}>杂务 / 生活</option>${projectOptions}</select></label><p class="hint">保存后会产生一个新版本；已有结算事实的日程不能再修改。</p><div class="actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">保存新版本</button></div></form>`,
+      mount(box) {
+        bindDateSelects(box, today);
+        box.querySelector<HTMLFormElement>('form')!.addEventListener('submit', (submitEvent) => {
+          submitEvent.preventDefault();
+          const form = submitEvent.currentTarget as HTMLFormElement;
+          const fd = new FormData(form);
+          const nextDate = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? date;
+          try {
+            A.editSchedule(s, id, {
+              title: String(fd.get('title') ?? ''),
+              date: nextDate,
+              start: String(fd.get('start') ?? ''),
+              end: String(fd.get('end') ?? ''),
+              projectId: String(fd.get('proj') ?? CHORES),
+            });
+            closeModal(false);
+            toast('日程已保存为新版本');
+          } catch (err) {
+            if (err instanceof A.ActionError) toast(err.message, true);
+            else throw err;
+          }
+        });
+      },
     });
   }
 
