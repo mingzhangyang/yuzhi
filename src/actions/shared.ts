@@ -61,7 +61,9 @@ export function operation(
 export function putSettlementEntry(store: Store, date: ISODate, item: SettleItem, outcome: Outcome, reason?: SkipReason) {
   const id = entryId(date, item.type, item.id);
   const prev = store.data.entries.find((entry) => entry.id === id);
-  if (prev && prev.outcome === outcome && prev.reason === reason) return;
+  // Same outcome is not a no-op when a legacy entry is missing ownership:
+  // itemsForDay may have recovered CHORES from the source calendar event.
+  if (prev && prev.outcome === outcome && prev.reason === reason && prev.projectId === item.projectId) return;
   const projectId = item.projectId;
   const entry: SettlementEntry = {
     id,

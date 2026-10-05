@@ -1,4 +1,4 @@
-import type { CalendarEvent, Data, ISODate, SettlementEntry } from '../types';
+import { CHORES, type CalendarEvent, type Data, type ISODate, type SettlementEntry } from '../types';
 import { addDays, dateOfStamp, diffDays } from '../lib/date';
 import { ARCHIVE_AFTER_DAYS } from './config';
 import { taskStates, taskStatesForDates } from './read-model';
@@ -18,6 +18,20 @@ export interface SettleItem {
 
 export const itemKey = (type: 'task' | 'event', id: string) => `${type}|${id}`;
 export const entryId = (date: ISODate, type: 'task' | 'event', id: string) => `${date}|${type}|${id}`;
+
+/**
+ * Older builds omitted the CHORES sentinel from settlement entries. Recover
+ * that one legacy case only when the same calendar event still exists on the
+ * settled date and is explicitly classified as CHORES. Other ownerless facts
+ * stay ownerless.
+ */
+export function settlementProjectId(data: Data, entry: SettlementEntry): string | undefined {
+  if (entry.projectId !== undefined) return entry.projectId;
+  if (entry.itemType !== 'event') return undefined;
+  const event = data.events.find((candidate) => candidate.id === entry.itemId);
+  if (!event || !event.classified || event.projectId !== CHORES || dateOfStamp(event.start) !== entry.date) return undefined;
+  return CHORES;
+}
 
 /** 一天内可结算的事件：非全天、开始于这一天 */
 export function eventsOn(events: CalendarEvent[], date: ISODate): CalendarEvent[] {
@@ -39,7 +53,7 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
     const key = itemKey('event', ev.id);
     seen.add(key);
     const entry = entries.get(key);
-    out.push({ key, type: 'event', id: ev.id, title: entry?.title ?? ev.title, projectId: entry ? entry.projectId : ev.projectId, start: ev.start, end: ev.end, entry });
+    out.push({ key, type: 'event', id: ev.id, title: entry?.title ?? ev.title, projectId: entry ? settlementProjectId(data, entry) : ev.projectId, start: ev.start, end: ev.end, entry });
   }
   for (const t of tasks) {
     const key = itemKey('task', t.id);
@@ -52,7 +66,7 @@ export function itemsForDay(data: Data, date: ISODate): SettleItem[] {
   // 已结算过、但任务已经改期或完成的条目，也保留在这一天
   for (const [key, e] of entries) {
     if (seen.has(key)) continue;
-    out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: e.projectId, entry: e });
+    out.push({ key, type: e.itemType, id: e.itemId, title: e.title, projectId: settlementProjectId(data, e), entry: e });
   }
   return out;
 }

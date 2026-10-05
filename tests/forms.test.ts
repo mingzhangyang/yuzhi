@@ -45,4 +45,22 @@ describe('calendar dialog', () => {
     const dialog = openModal.mock.calls.at(-1)?.[0] as { title?: string } | undefined;
     expect(dialog?.title).toBe('「」属于哪里？');
   });
+  it('does not fall back to another group when an explicit drift title went stale', () => {
+    const store = new Store(emptyData(), new MemoryPersistence());
+    store.data.events.push({
+      id: 'still-here',
+      sourceId: 's',
+      uid: 'still-here',
+      title: '仍存在的日程',
+      start: new Date(2026, 9, 4, 9).toISOString(),
+      end: new Date(2026, 9, 4, 10).toISOString(),
+      allDay: false,
+      classified: false,
+    });
+    const callsBefore = openModal.mock.calls.length;
+
+    openClassify(store, new Set(), '已经消失的漂流瓶');
+
+    expect(openModal.mock.calls.length).toBe(callsBefore);
+  });
 });

@@ -48,6 +48,39 @@ try {
       await waitReadOnly(reader, true);
       assert(await reader.locator('#tabNotice').isVisible(), 'reader did not expose the read-only tab notice');
 
+      // Put one unclassified event in the shared snapshot and open its drift
+      // inspection while this tab is still a reader. The action is correctly
+      // disabled now, but that permission snapshot must not survive takeover.
+      await writer.evaluate(async () => {
+        const app = window.yuzhi;
+        const now = app.store.clock().getTime();
+        app.store.put('events', {
+          id: 'browser-reader-drift',
+          sourceId: 'browser-smoke',
+          uid: 'browser-reader-drift',
+          title: '接管前漂流瓶',
+          start: new Date(now + 2 * 60 * 60_000).toISOString(),
+          end: new Date(now + 3 * 60 * 60_000).toISOString(),
+          allDay: false,
+          classified: false,
+        });
+        await app.store.flush();
+      });
+      await reader.waitForFunction(
+        () => window.yuzhi.renderer.scene.drifting.some((item) => item.title === '接管前漂流瓶'),
+        undefined,
+        { timeout },
+      );
+      await reader.locator('#map').focus();
+      let readerDriftCard = false;
+      for (let i = 0; i < 240; i++) {
+        await reader.keyboard.press('ArrowRight');
+        readerDriftCard = await reader.locator('#mapinfo .mi-action').isVisible().catch(() => false);
+        if (readerDriftCard) break;
+      }
+      assert(readerDriftCard, 'reader never exposed the drift inspection');
+      assert(!(await reader.locator('#mapinfo .mi-action').isEnabled()), 'reader drift action was unexpectedly enabled');
+
       await writer.evaluate(async () => {
         const app = window.yuzhi;
         app.actions.createProject(app.store, 'Browser writer A');
@@ -162,6 +195,8 @@ try {
       assert(fresh.hasSoon, 'takeover did not install the missed soon event');
       assert(!fresh.bellHandled && fresh.bellRipples === 0 && fresh.stageCues === 0 && fresh.pulses === 0,
         `takeover replayed stale cues: ${JSON.stringify(fresh)}`);
+      assert(await reader.locator('#mapinfo').isHidden(),
+        'takeover left the reader-era drift inspection visible with stale permissions');
 
       await reader.evaluate(async () => {
         const app = window.yuzhi;

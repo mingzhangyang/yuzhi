@@ -82,6 +82,94 @@ describe('scene agenda projection', () => {
     expect(scene.chores.woodpile).toBe(1);
   });
 
+  it('recovers only matching legacy ownerless chore settlements', () => {
+    const { store } = makeStore('2026-10-04');
+    store.data.events.push(
+      {
+        id: 'legacy-chore',
+        sourceId: 's',
+        uid: 'legacy-chore',
+        title: '取快递',
+        start: at(9),
+        end: at(10),
+        allDay: false,
+        projectId: CHORES,
+        classified: true,
+      },
+      {
+        id: 'project-event',
+        sourceId: 's',
+        uid: 'project-event',
+        title: '项目会议',
+        start: at(11),
+        end: at(12),
+        allDay: false,
+        projectId: 'some-project',
+        classified: true,
+      },
+      {
+        id: 'stale-chore-owner',
+        sourceId: 's',
+        uid: 'stale-chore-owner',
+        title: '重新变成未归类',
+        start: at(13),
+        end: at(14),
+        allDay: false,
+        projectId: CHORES,
+        classified: false,
+      },
+    );
+    store.data.entries.push(
+      {
+        id: '2026-10-04|event|legacy-chore',
+        seq: 1,
+        date: '2026-10-04',
+        itemType: 'event',
+        itemId: 'legacy-chore',
+        outcome: 'done',
+        title: '取快递',
+      },
+      {
+        id: '2026-10-04|event|project-event',
+        seq: 2,
+        date: '2026-10-04',
+        itemType: 'event',
+        itemId: 'project-event',
+        outcome: 'done',
+        title: '项目会议',
+      },
+      {
+        id: '2026-10-04|event|missing',
+        seq: 3,
+        date: '2026-10-04',
+        itemType: 'event',
+        itemId: 'missing',
+        outcome: 'done',
+        title: '已经不在日历里的旧记录',
+      },
+      {
+        id: '2026-10-04|event|stale-chore-owner',
+        seq: 4,
+        date: '2026-10-04',
+        itemType: 'event',
+        itemId: 'stale-chore-owner',
+        outcome: 'done',
+        title: '重新变成未归类',
+      },
+    );
+
+    const scene = buildScene(store, null, false, new Date(2026, 9, 4, 20));
+    expect(scene.chores.count).toBe(1);
+    expect(scene.chores.woodpile).toBe(1);
+
+    // Re-settling the same outcome must persist the recovered owner instead
+    // of treating the legacy ownerless fact as an unchanged no-op.
+    settleDay(store, '2026-10-04', new Map([
+      [itemKey('event', 'legacy-chore'), { outcome: 'done' }],
+    ]));
+    expect(store.data.entries.find((entry) => entry.itemId === 'legacy-chore')?.projectId).toBe(CHORES);
+  });
+
   it('keeps a chore in the soon window visible', () => {
     const { store } = makeStore('2026-10-04');
     store.data.events.push({ id: 'c', sourceId: 's', uid: 'c', title: '买菜', start: at(17), end: at(18), allDay: false, projectId: CHORES, classified: true });
