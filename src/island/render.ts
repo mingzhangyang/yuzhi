@@ -176,11 +176,13 @@ export class IslandRenderer extends IslandEffectsPainter {
       if (t.type === 'mountain') put(d, () => this.drawMountain(x, y, t, tw), this.mountainOutline(x, y, t, tw));
       const cultivation = cultivationAt.get(`${t.i},${t.j}`);
       if (cultivation) {
-        put(
-          d + 0.08,
-          () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t),
-          cultivationOutline(cultivation, x, y, tw),
-        );
+        const depth = d + 0.08;
+        queue.push({ d: depth, draw: () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t) });
+        occluders.push({
+          d: depth,
+          poly: cultivationOutline(cultivation, x, y, tw),
+          hit: { kind: 'cultivation', area: cultivation.kind },
+        });
       }
       if (t === m.lighthouse) {
         put(d, () => {
