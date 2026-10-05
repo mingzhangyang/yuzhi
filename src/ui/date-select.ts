@@ -47,12 +47,21 @@ export function readDate(sel: HTMLSelectElement): ISODate | undefined {
 
 export function bindDateSelects(root: ParentNode, today: ISODate) {
   root.querySelectorAll<HTMLSelectElement>('select[data-date-select]').forEach((sel) => {
-    sel.addEventListener('change', () => {
-      if (sel.value !== 'other') return;
+    // "other" is a transient editing sentinel, never a committed date. Keep
+    // the last real selection separately so canceling the native picker is a
+    // no-op instead of silently changing the date.
+    let committedValue = sel.value === 'other' ? '' : sel.value;
 
+    sel.addEventListener('change', () => {
+      if (sel.value !== 'other') {
+        committedValue = sel.value;
+        return;
+      }
+
+      const previousValue = committedValue;
       const input = document.createElement('input');
       input.type = 'date';
-      input.value = today;
+      input.value = previousValue;
       input.setAttribute('aria-label', '选择日期');
 
       const mode = sel.dataset.dateMode as DateSelectMode | undefined;
@@ -74,9 +83,10 @@ export function bindDateSelects(root: ParentNode, today: ISODate) {
             sel.add(new Option(fmtDay(value), value), sel.options[sel.options.length - 1]);
           }
           sel.value = value;
+          committedValue = value;
         } else {
-          const fallback = [...sel.options].find((option) => option.value !== 'other');
-          sel.value = fallback?.value ?? '';
+          sel.value = previousValue;
+          committedValue = previousValue;
         }
         input.remove();
         sel.hidden = false;

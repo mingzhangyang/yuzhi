@@ -50,6 +50,34 @@ try {
     `global Todo should start unassigned and unscheduled: ${JSON.stringify(taskDefaults)}`);
   assert(taskDefaults.hasOtherDate, 'global Todo is missing the arbitrary-date option');
 
+  // Canceling the native custom-date editor must preserve the last committed
+  // value, including the intentionally empty global-Todo date.
+  const taskDateAfterCancel = await page.evaluate(() => {
+    const form = document.querySelector('form[data-f="task"]');
+    const select = form?.querySelector('select[name="date"]');
+    if (!(select instanceof HTMLSelectElement)) throw new Error('task date select missing');
+
+    select.value = 'other';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const input = form?.querySelector('input[type="date"][aria-label="选择日期"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error('native task date input missing');
+    input.value = '';
+    input.dispatchEvent(new Event('blur'));
+
+    return {
+      value: select.value,
+      visible: !select.hidden,
+      nativeInputRemoved: !input.isConnected,
+    };
+  });
+  assert(
+    taskDateAfterCancel.value === ''
+      && taskDateAfterCancel.visible
+      && taskDateAfterCancel.nativeInputRemoved,
+    `canceling custom task date changed the committed value: ${JSON.stringify(taskDateAfterCancel)}`,
+  );
+
   await page.locator('form[data-f="task"] input[name="title"]').fill('捕捉一件稍后安排的事');
   await page.locator('form[data-f="task"] button.primary').click();
   await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
@@ -93,6 +121,13 @@ try {
   // Diary text survives an accidental dismissal and is recovered next time.
   await page.locator('#newBtn').click();
   await page.locator('[data-k="diary"]').click();
+
+  const diaryDateLabel = await page.evaluate(() => {
+    const select = document.querySelector('form[data-f="diary"] select[name="date"]');
+    if (!(select instanceof HTMLSelectElement)) throw new Error('diary date select missing');
+    return [...select.labels].some((label) => label.textContent?.includes('记录日期'));
+  });
+  assert(diaryDateLabel, 'diary date select lost its accessible "记录日期" label');
 
   // The detached native picker must not bypass the diary's max=today rule.
   // Exercise the invalid path with synthetic events so headless Chromium does

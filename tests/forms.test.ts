@@ -83,7 +83,9 @@ describe('unified capture dialog', () => {
     const store = new Store(emptyData(), new MemoryPersistence());
 
     openNew(store, 'diary');
-    expect((openModal.mock.calls.at(-1)?.[0] as { title?: string }).title).toBe('写日记');
+    const diaryDialog = openModal.mock.calls.at(-1)?.[0] as { title?: string; body?: string };
+    expect(diaryDialog.title).toBe('写日记');
+    expect(diaryDialog.body).toContain('<label class="diary-date-row"><span>记录日期</span>');
 
     openNew(store, 'schedule');
     expect((openModal.mock.calls.at(-1)?.[0] as { title?: string; body?: string }).title).toBe('新建日程');

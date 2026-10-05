@@ -80,7 +80,7 @@ export function openNew(
 
       <form class="capture-form diary-form" data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
         <div class="capture-fields">
-          <div class="diary-date-row"><span>记录日期</span>${dateSelect('date', today, { current: diaryDate, withNone: false, mode: 'diary' })}</div>
+          <label class="diary-date-row"><span>记录日期</span>${dateSelect('date', today, { current: diaryDate, withNone: false, mode: 'diary' })}</label>
           <label class="field diary-writing"><span class="sr-only">日记内容</span><textarea name="text" placeholder="发生了什么、想到什么、想记住什么……" ${kind === 'diary' ? 'autofocus' : ''}>${esc(diaryText)}</textarea></label>
           <p class="hint" data-diary-note>${diaryText ? '已恢复上次没有写完的内容。' : '日记不需要结算；写过日记的日子会让花园慢慢繁盛。'}</p>
         </div>
