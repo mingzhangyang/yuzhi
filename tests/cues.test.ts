@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { diffScene, pickBell, type BellCandidate } from '../src/island/cues';
 import type { Scene } from '../src/island/render';
+import { isDeterioratingStageCue } from '../src/island/render/simulation';
 
 function scene(overrides: Partial<Scene> = {}): Scene {
   return {
@@ -73,6 +74,13 @@ describe('场景提示差分', () => {
     const old = scene({ villages: [village({ firedToday: 0 })] });
     const next = scene({ date: '2026-10-05', villages: [village({ firedToday: 2 })] });
     expect(diffScene(old, next).filter((cue) => cue.kind === 'kiln')).toEqual([]);
+  });
+});
+
+describe('阶段转场方向', () => {
+  it('按 from → to 判断恶化与恢复，而不是按目标阶段猜测', () => {
+    expect(isDeterioratingStageCue({ from: 0, to: 1 })).toBe(true);
+    expect(isDeterioratingStageCue({ from: 3, to: 2 })).toBe(false);
   });
 });
 
