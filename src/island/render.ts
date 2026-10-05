@@ -948,10 +948,11 @@ export class IslandRenderer {
     const s = this.scene;
     const ctx = this.infoContext();
     if (!s || !ctx) return null;
-    const interactive = this.hitAt(pt);
-    if (interactive?.kind === 'agenda' || interactive?.kind === 'drift') {
-      return this.inspectAgenda(interactive, pt.x, pt.y, ctx);
-    }
+    // Inspection and click selection intentionally have different semantics:
+    // clicks obey foreground z-order, while inspection can still describe a
+    // visible agenda prop or bottle even when a moving walker crosses it.
+    const inspectable = this.driftHitAt(pt) ?? this.agendaHitAt(pt);
+    if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
     const hw = tw / 2;
