@@ -80,9 +80,10 @@ async function boot() {
       mutating = Boolean(target.closest('#settle .scard'));
     } else {
       const trackerAction = target.closest<HTMLElement>('#tracker [data-act]');
+      const modalAction = target.closest<HTMLElement>('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]');
       mutating = Boolean(
         (trackerAction && !readOnlyNavActions.has(trackerAction.dataset.act ?? ''))
-        || target.closest('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]')
+        || (modalAction && !modalAction.hasAttribute('data-readonly-safe'))
         || target.closest('#settle [data-set], #settle [data-reason], #settle [data-act="all"], #settle [data-act="commit"]')
         || target.closest('#ceremony [data-go]')
       );
@@ -550,6 +551,7 @@ async function boot() {
           ? `这份未加密的 JSON 备份会包含 ${diaryCount} 篇日记全文，以及任务、日程等个人记录。请只保存在你信任的位置。`
           : '这份未加密的 JSON 备份会包含任务、日程等个人记录。请只保存在你信任的位置。',
         ok: '导出备份',
+        readOnlySafe: true,
       });
       if (!ok) return;
       download(`yuzhi-backup-${store.today()}.json`, exportBackup(store.data));
