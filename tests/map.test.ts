@@ -21,6 +21,8 @@ describe('小岛地形', () => {
       expect(key(b.lighthouse)).toBe(key(a.lighthouse));
       expect(key(b.granary)).toBe(key(a.granary));
       expect(key(b.chores)).toBe(key(a.chores));
+      expect(Object.fromEntries(Object.entries(b.cultivation).map(([name, site]) => [name, key(site)])))
+        .toEqual(Object.fromEntries(Object.entries(a.cultivation).map(([name, site]) => [name, key(site)])));
       expect(b.landmarks.slice(0, a.landmarks.length).map(key)).toEqual(a.landmarks.map(key));
       expect(b.radius).toBeGreaterThan(a.radius);
     }
@@ -33,6 +35,16 @@ describe('小岛地形', () => {
       expect(m.at(m.dock.i, m.dock.j + 1)).toBeNull();
     }
   });
+  it('四个培育区互不重叠，也不占村落或地标位', () => {
+    const m = buildIsland(0);
+    const sites = Object.values(m.cultivation);
+    expect(new Set(sites.map(key)).size).toBe(4);
+    for (const site of sites) {
+      expect(site.village).toBe(-1);
+      expect(site.landmark).toBe(-1);
+    }
+  });
+
   it('地标编号对应年轮', () => {
     expect([0, 7, 8, 19, 20].map(ringOfLandmark)).toEqual([0, 0, 1, 1, 2]);
   });
