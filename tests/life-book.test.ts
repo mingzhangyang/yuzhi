@@ -111,6 +111,13 @@ describe('unified life book', () => {
     });
     settleDay(h.store, h.today, new Map([[itemKey('event', event.id), { outcome: 'done' }]]));
 
+    Object.defineProperty(h.store.data.events, 'find', {
+      configurable: true,
+      value: () => {
+        throw new Error('settlement projection must not rescan events per row');
+      },
+    });
+
     expect(lifeBookEntries(h.store.data, { type: 'schedule', id: event.id }).map((entry) => entry.kind))
       .toEqual(['start', 'done']);
   });

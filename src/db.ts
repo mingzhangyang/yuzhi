@@ -397,23 +397,34 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       const diaries = Array.isArray(data.diaries) ? data.diaries : [];
       const events = Array.isArray(data.events) ? data.events : [];
       let seq = 0;
-      for (const value of [...entries, ...operations]) {
+      for (const value of entries) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
         const n = (value as Record<string, unknown>).seq;
         if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
       }
 
-      const hasSubject = (subjectType: string, subjectId: string) => operations.some((value) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-        const payload = (value as Record<string, unknown>).payload;
-        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+      const subjectKey = (subjectType: string, subjectId: string) => `${subjectType}\u0000${subjectId}`;
+      const subjectKeys = new Set<string>();
+      for (const value of operations) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const operation = value as Record<string, unknown>;
+        const n = operation.seq;
+        if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
+        const payload = operation.payload;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
         const life = (payload as Record<string, unknown>).life;
-        return Array.isArray(life) && life.some((snapshot) => {
-          if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+        if (!Array.isArray(life)) continue;
+        for (const snapshot of life) {
+          if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) continue;
           const row = snapshot as Record<string, unknown>;
-          return row.subjectType === subjectType && row.subjectId === subjectId;
-        });
-      });
+          if (typeof row.subjectType === 'string' && typeof row.subjectId === 'string') {
+            subjectKeys.add(subjectKey(row.subjectType, row.subjectId));
+          }
+        }
+      }
+
+      const hasSubject = (subjectType: string, subjectId: string) =>
+        subjectKeys.has(subjectKey(subjectType, subjectId));
 
       for (const value of diaries) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
@@ -431,6 +442,7 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
             life: [{ subjectType: 'diary', subjectId: row.id, kind: 'start', text: '写下这篇日记（既有记录）' }],
           },
         });
+        subjectKeys.add(subjectKey('diary', row.id));
       }
 
       const hm = (stamp: Date) => `${String(stamp.getHours()).padStart(2, '0')}:${String(stamp.getMinutes()).padStart(2, '0')}`;
@@ -462,6 +474,7 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
             life: [{ subjectType: 'schedule', subjectId: row.id, kind: 'start', text: '已有日程纳入一生之书' }],
           },
         });
+        subjectKeys.add(subjectKey('schedule', row.id));
       }
 
       data.operations = operations;

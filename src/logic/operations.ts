@@ -14,12 +14,15 @@ const REASON_TEXT: Record<SkipReason, string> = {
 };
 
 export function settlementLifeEntries(data: Data): LifeEntry[] {
+  const localScheduleIds = new Set(
+    data.events
+      .filter((event) => event.sourceId === LOCAL_CALENDAR_SOURCE_ID)
+      .map((event) => event.id),
+  );
   return data.entries.map((entry) => {
     const title = `「${entry.title}」`;
     const taskId = entry.itemType === 'task' ? entry.itemId : undefined;
-    const localSchedule = entry.itemType === 'event'
-      ? data.events.find((event) => event.id === entry.itemId)?.sourceId === LOCAL_CALENDAR_SOURCE_ID
-      : false;
+    const localSchedule = entry.itemType === 'event' && localScheduleIds.has(entry.itemId);
     const subjectType: LifeSubjectType | undefined = taskId ? 'task' : localSchedule ? 'schedule' : undefined;
     const subjectId = subjectType ? entry.itemId : undefined;
     if (entry.outcome === 'done') {
