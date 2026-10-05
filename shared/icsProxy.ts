@@ -1,6 +1,6 @@
 /**
  * .ics 代理的核心逻辑：只转发，不保存任何数据。
- * 同时被 Cloudflare Worker（worker/index.ts）、Pages Function（functions/api/ics.ts）和 Vite 开发服务器使用。
+ * 同时被 Cloudflare Worker（worker/index.ts）和 Vite 开发服务器使用。
  */
 export const MAX_ICS_BYTES = 5 * 1024 * 1024;
 
