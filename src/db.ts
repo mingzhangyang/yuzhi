@@ -9,6 +9,7 @@ import { runMigrationSteps, type MigrationStep } from './migrations';
 export const COLLECTIONS = {
   projects: 'id',
   tasks: 'id',
+  diaries: 'id',
   sources: 'id',
   events: 'id',
   rules: 'id',
@@ -31,9 +32,9 @@ const FACT_SEQ_KEY = 'factSeq';
  * Schema 8 also repairs databases that were briefly opened by the PR build
  * which reached schema 7 without deleting the legacy stores.
  */
-const STAGING_SCHEMA_VERSION = 7;
-export const IDB_SCHEMA_VERSION = 8;
-export const DATA_VERSION = 4;
+const STAGING_SCHEMA_VERSION = 8;
+export const IDB_SCHEMA_VERSION = 9;
+export const DATA_VERSION = 5;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -69,6 +70,7 @@ export function emptyData(): Data {
   return {
     projects: [],
     tasks: [],
+    diaries: [],
     sources: [],
     events: [],
     rules: [],
@@ -372,6 +374,13 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       delete data.__legacyLifeOrder;
     },
   },
+  {
+    to: 5,
+    run(data) {
+      // v5 introduces diary facts. Older data simply starts with an empty journal.
+      if (!Array.isArray(data.diaries)) data.diaries = [];
+    },
+  },
 ];
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
@@ -473,7 +482,10 @@ export class IdbPersistence implements Persistence {
 
   private assertRequiredStores(db: IDBPDatabase, storeNames = Array.from(db.objectStoreNames)) {
     if (db.version < STAGING_SCHEMA_VERSION) return;
-    const required = ['meta', ...COLL_NAMES];
+    // Schema 8 was the previous production schema and has no diary store.
+    // Reader tabs may still observe it while the writer performs the v9 handoff.
+    const currentCollections = COLL_NAMES.filter((name) => name !== 'diaries' || db.version >= IDB_SCHEMA_VERSION);
+    const required = ['meta', ...currentCollections];
     const missing = required.filter((name) => !storeNames.includes(name));
     if (!missing.length) return;
     const version = db.version;
@@ -519,12 +531,16 @@ export class IdbPersistence implements Persistence {
   private async openWritableDatabase(): Promise<IDBPDatabase> {
     const current = await this.openDatabase(undefined, false);
     this.assertSupportedSchema(current);
-    if (current.version >= STAGING_SCHEMA_VERSION) {
+    if (current.version >= IDB_SCHEMA_VERSION) {
       this.assertRequiredStores(current);
       return current;
     }
+    const currentVersion = current.version;
     current.close();
-    const staged = await this.openDatabase(STAGING_SCHEMA_VERSION, true);
+    // Pre-v8 databases first reach staging schema 8 so legacy business stores
+    // survive migration. Existing production v8 can move straight to v9.
+    const target = currentVersion >= STAGING_SCHEMA_VERSION ? IDB_SCHEMA_VERSION : STAGING_SCHEMA_VERSION;
+    const staged = await this.openDatabase(target, true);
     this.assertRequiredStores(staged);
     return staged;
   }
@@ -983,6 +999,7 @@ const SHAPES: Record<Coll, Shape> = {
     id: isText, 'projectId?': isText, title: isText, 'scheduledFor?': isDate,
     status: oneOf('open', 'done', 'dropped'), createdAt: isDate, 'closedAt?': isDate,
   },
+  diaries: { id: isText, date: isDate, text: isText, createdAt: isStamp },
   sources: { id: isText, name: isStr, 'icsUrl?': isStr, 'lastFetchedAt?': isStamp, 'lastError?': isStr },
   events: {
     id: isText, sourceId: isText, uid: isText, title: isStr, start: isStamp, end: isStamp, allDay: isBool,
