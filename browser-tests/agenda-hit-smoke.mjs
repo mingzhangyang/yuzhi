@@ -188,20 +188,21 @@ try {
 
   await runScenario('进行中：聚在井边的小人都能点开任务', async () => {
     assert(p.walkers.length >= 2, `expected gathered walkers, got ${p.walkers.length}`);
-    let ok = 0;
-    for (const w of p.walkers) {
-      const hit = await hitAt(page, w);
-      if (hit?.kind === 'task') ok++;
-    }
-    // 小人可能互相挡住，但至少大多数要能点到任务，且不能有一个被判成日程
-    const agendaHits = [];
-    for (const w of p.walkers) {
-      const hit = await hitAt(page, w);
-      if (hit?.kind === 'agenda') agendaHits.push(w.id);
-    }
-    assert(agendaHits.length === 0, `walkers resolved to agenda: ${agendaHits.join(', ')}`);
-    assert(ok >= Math.ceil(p.walkers.length / 2), `only ${ok}/${p.walkers.length} walkers hit as tasks`);
-    const r = await click(page, p.walkers[0]);
+    // 站在井后面、被井挡住的小人本就点不到，点在那里落到井（村落或日程）上是对的；
+    // 其余露在外面的小人都必须点到任务，且不能有一个被判成日程。
+    const probes = await page.evaluate((ws) => {
+      const r = window.yuzhi.renderer;
+      return ws.map((w) => {
+        const walker = r.walkers.get(w.id);
+        return { id: w.id, hidden: walker ? r.occludedAt(walker, w.local) : false, hit: r.hitAt(w.local) };
+      });
+    }, p.walkers);
+    const visible = probes.filter((x) => !x.hidden);
+    assert(visible.length >= 1, `every gathered walker is hidden: ${JSON.stringify(probes)}`);
+    const wrong = visible.filter((x) => x.hit?.kind !== 'task');
+    assert(wrong.length === 0, `visible walkers did not hit as tasks: ${JSON.stringify(wrong)}`);
+    const target = p.walkers.find((w) => w.id === visible[0].id);
+    const r = await click(page, target);
     assert(r.view.kind === 'task', `real click on walker opened ${JSON.stringify(r.view)}`);
   });
 
