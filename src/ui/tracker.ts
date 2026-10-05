@@ -18,6 +18,7 @@ import { compareLifeEntries, lifeEntries } from '../logic/operations';
 import { stageLifeEntries } from '../logic/decay';
 import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
+import { cultivationAreas, cultivationState } from '../logic/cultivation';
 
 export type View =
   | { kind: 'overview' }
@@ -206,12 +207,23 @@ export class Tracker {
       })
       .join('');
     const groups = unclassifiedGroups(s.data.events);
+    const cultivated = cultivationAreas(cultivationState(s.data, today));
+    const cultivationRows = cultivated
+      .map((area) => `<div class="row static"><span class="tx"><b>${esc(area.name)} · 长势 ${area.level}/4</b><span>${esc(area.summary)}</span></span></div>`)
+      .join('');
+    const recentDiaries = s.data.diaries
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 3);
     const html = `
       <div class="ptitle">小岛总览 <small>${ps.length} 个村落</small></div>
       <form class="add" data-form="quick"><input name="quick" placeholder="添加一件事…" autocomplete="off" aria-label="新任务"><select name="qproj" aria-label="住进哪个村落"><option value="">停在码头</option>${projOpts}</select><button class="btn primary">添加</button></form>
       <p class="hint">不选村落的任务会先乘船停在码头，等你安排。</p>
       <div class="sect">村落 <button class="linkbtn" data-act="new-project">＋ 新村落</button></div>
       <div class="rows">${rows || '<p class="empty">岛上还没有村落。建一个项目，它就是第一座村落；也可以在「⋯」里放几个示例村落。</p>'}</div>
+      <div class="sect">培育区 <small>现实生活自动映射</small></div>
+      <div class="rows">${cultivationRows}</div>
+      ${recentDiaries.length ? `<div class="sect">最近日记 <small>${recentDiaries.length} 篇</small></div><div class="rows">${recentDiaries.map((entry) => `<div class="row static"><span class="tx"><b>${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 56 ? entry.text.slice(0, 55) + '…' : entry.text)}</span></span></div>`).join('')}</div>` : ''}
       <div class="sect">码头 <small>${b.dock} 船待安排 · ${b.overdue} 件过期</small></div>
       <button class="row" data-act="dock"><i class="sw" style="background:#a8794a"></i><span class="tx"><b>${b.dock ? `${b.dock} 条船停在码头` : '码头空着'}</b><span>${b.dock ? '决定它们住进哪个村落、排在哪天，或者婉拒' : '新任务会先停在这里'}</span></span><span class="end">›</span></button>
       ${this.coastRow()}
