@@ -379,6 +379,16 @@ export abstract class IslandInteraction extends IslandViewport {
     return this.occluders.some((o) => o.d > d && insidePolygon(pt, o.poly));
   }
 
+  /** Frontmost cultivation artwork under this screen point, using the same outline as drawing/occlusion. */
+  protected cultivationHitAt(pt: { x: number; y: number }): Extract<Hit, { kind: 'cultivation' }> | null {
+    let best: (typeof this.occluders)[number] | null = null;
+    for (const o of this.occluders) {
+      if (o.hit?.kind !== 'cultivation' || !insidePolygon(pt, o.poly)) continue;
+      if (!best || o.d >= best.d) best = o;
+    }
+    return best?.hit?.kind === 'cultivation' ? best.hit : null;
+  }
+
   hitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
@@ -398,9 +408,6 @@ export abstract class IslandInteraction extends IslandViewport {
     const { fi, fj } = this.tileCoords(pt);
     const m = this.map;
     const near = (t: Tile, r: number) => Math.hypot(t.i - fi, t.j - fj) < r;
-    for (const area of ['field', 'orchard', 'pond', 'garden'] as const) {
-      if (near(m.cultivation[area], 0.9)) return { kind: 'cultivation', area };
-    }
     if (fj > m.dock.j - 0.6 && Math.abs(fi - m.dock.i) < 1.8 && fj < m.dock.j + m.pierLen + 1) return { kind: 'dock' };
     if (near(m.granary, 0.9)) return { kind: 'granary' };
     if (near(m.chores, 0.9)) return { kind: 'chores' };
@@ -470,20 +477,20 @@ export abstract class IslandInteraction extends IslandViewport {
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
-    const { fi: cultivationI, fj: cultivationJ } = this.tileCoords(pt);
-    for (const area of ['field', 'orchard', 'pond', 'garden'] as const) {
-      const site = m.cultivation[area];
-      if (Math.hypot(site.i - cultivationI, site.j - cultivationJ) >= 0.9) continue;
-      const state = s.cultivation.find((item) => item.kind === area);
-      if (!state) break;
-      const [x, y] = this.iso(site.i, site.j);
-      return this.selectScenery(
-        { kind: 'cultivation', area, level: state.level, score: state.score, summary: state.summary },
-        { i: site.i, j: site.j },
-        x,
-        y - tw * 0.62,
-        ctx,
-      );
+    const cultivationHit = this.cultivationHitAt(pt);
+    if (cultivationHit) {
+      const state = s.cultivation.find((item) => item.kind === cultivationHit.area);
+      const site = m.cultivation[cultivationHit.area];
+      if (state) {
+        const [x, y] = this.iso(site.i, site.j);
+        return this.selectScenery(
+          { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
+          { i: site.i, j: site.j },
+          x,
+          y - tw * 0.62,
+          ctx,
+        );
+      }
     }
     const hw = tw / 2;
     const hh = tw / 4;
