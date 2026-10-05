@@ -210,18 +210,57 @@ export class Tracker {
   }
 
   private diaries(): [string, string, string] {
-    const today = this.store.today();
-    const entries = this.store.data.diaries
+    const s = this.store;
+    const today = s.today();
+    const entries = s.data.diaries
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const currentIds = new Set(entries.map((entry) => entry.id));
+    const deletedIds = lifeBookSubjectIds(s.data, 'diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><div class="tt"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text)}</span></div><div class="acts"><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><div class="tt" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></div><div class="acts"><span class="chip">${diaryVersions(s.data, entry.id).length} 版</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .join('');
+    const deletedRows = deletedIds
+      .map((id) => {
+        const snapshot = diaryLatestSnapshot(s.data, id);
+        if (!snapshot) return '';
+        return `<div class="task history-record"><div class="tt" data-act="diary" data-id="${esc(id)}"><b>${esc(fmtDay(snapshot.date))}</b><span>${esc(snapshot.text.length > 100 ? snapshot.text.slice(0, 99) + '…' : snapshot.text)}</span></div><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
+      })
       .join('');
     return [
-      `${this.back$()}<div class="ptitle">日记 <button class="linkbtn" data-act="new-diary">＋ 写日记</button></div><p class="hint">共 ${entries.length} 篇。日记是现实记录，不需要结算；删除后，花园会按剩余事实重新计算长势。</p><div class="rows">${rows || '<p class="empty">还没有日记。写下今天发生的事，花园就会记住它。</p>'}</div>`,
+      `${this.back$()}<div class="ptitle">日记 <button class="linkbtn" data-act="new-diary">＋ 写日记</button></div><p class="hint">每篇日记都有自己的一生之书和版本历史。删除正文后，历史仍会留在这里。</p><div class="rows">${rows || '<p class="empty">还没有日记。写下今天发生的事，花园就会记住它。</p>'}</div>${deletedRows ? `<div class="sect">已删除的日记 <small>${deletedIds.length}</small></div><div class="rows">${deletedRows}</div>` : ''}`,
       '日记',
-      `${entries.length} 篇 · 培育花园`,
+      `${entries.length} 篇 · ${deletedIds.length} 篇历史归档`,
     ];
+  }
+
+  private diary(id: string): [string, string, string] {
+    const s = this.store;
+    const today = s.today();
+    const current = s.data.diaries.find((entry) => entry.id === id);
+    const snapshot = diaryLatestSnapshot(s.data, id);
+    if (!snapshot) return [`${this.back$('日记')}<p class="empty">这篇日记没有可读的历史。</p>`, '日记', '历史不可用'];
+    const versions = diaryVersions(s.data, id);
+    const life = lifeBookEntries(s.data, { type: 'diary', id });
+    const versionRows = versions
+      .slice()
+      .reverse()
+      .map((version, index) => {
+        const label = version.kind === 'created' ? '初版' : `修订 ${versions.length - index - 1}`;
+        return `<details class="revision"><summary>${label} · ${esc(fmtDay(version.recordedOn))}<span>${esc(fmtDay(version.snapshot.date))} 的记录</span></summary><div class="revision-body">${esc(version.snapshot.text).replace(/\n/g, '<br>')}</div></details>`;
+      })
+      .join('');
+    const html = `
+      ${this.back$('日记')}
+      <div class="who"><div class="emblem" style="background:#9b78a822">✎</div><div><div class="fname">${esc(fmtDay(snapshot.date))} 的日记</div><div class="fmeta">${current ? '正文仍在花园里' : '正文已删除 · 一生之书保留'} · ${versions.length} 个版本</div></div></div>
+      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${current ? '当前日记' : '已删除'}</span><span class="chip">${life.length} 条历史</span></div>
+      <div class="journal-body">${esc(snapshot.text).replace(/\n/g, '<br>')}</div>
+      ${current ? `<div class="btnrow"><button class="btn small primary" data-act="edit-diary" data-id="${esc(id)}">编辑</button><button class="btn small danger" data-act="delete-diary" data-id="${esc(id)}">删除正文</button></div>` : ''}
+      <div class="sect">版本历史 <small>${versions.length}</small></div>
+      ${versionRows || '<p class="empty">还没有版本快照。</p>'}
+      <div class="sect">一生之书 <small>${life.length}</small></div>
+      ${lifeList(life, today)}`;
+    return [html, '日记的一生之书', current ? fmtDay(snapshot.date) : '已删除 · 历史保留'];
   }
 
   private schedules(): [string, string, string] {
@@ -234,6 +273,8 @@ export class Tracker {
       .filter((event) => event.sourceId === LOCAL_CALENDAR_SOURCE_ID)
       .slice()
       .sort((a, b) => b.start.localeCompare(a.start));
+    const currentIds = new Set(events.map((event) => event.id));
+    const deletedIds = lifeBookSubjectIds(s.data, 'schedule').filter((id) => !currentIds.has(id));
     const rows = events
       .map((event) => {
         const date = dateOfStamp(event.start);
@@ -246,14 +287,56 @@ export class Tracker {
         const history = settled
           ? '<span class="chip">已留入历史</span>'
           : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
-        return `<div class="task"><div class="tt"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></div><div class="acts">${history}</div></div>`;
+        return `<div class="task"><div class="tt" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></div><div class="acts"><span class="chip">${scheduleVersions(s.data, event.id).length} 版</span>${history}</div></div>`;
+      })
+      .join('');
+    const deletedRows = deletedIds
+      .map((id) => {
+        const snapshot = scheduleLatestSnapshot(s.data, id);
+        if (!snapshot) return '';
+        return `<div class="task history-record"><div class="tt" data-act="schedule" data-id="${esc(id)}"><b>${esc(snapshot.title)}</b><span>${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)}</span></div><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
       })
       .join('');
     return [
-      `${this.back$()}<div class="ptitle">本地日程 <button class="linkbtn" data-act="new-schedule">＋ 日程</button></div><p class="hint">共 ${events.length} 条。尚未结算的本地日程可以删除；一旦留下结算事实，就成为历史的一部分，不再直接删除。</p><div class="rows">${rows || '<p class="empty">还没有自己创建的日程。添加一个安排，它会进入日历与结算。</p>'}</div>`,
+      `${this.back$()}<div class="ptitle">本地日程 <button class="linkbtn" data-act="new-schedule">＋ 日程</button></div><p class="hint">本地日程的创建、修改、结算和删除都进入同一本一生之书。</p><div class="rows">${rows || '<p class="empty">还没有自己创建的日程。添加一个安排，它会进入日历与结算。</p>'}</div>${deletedRows ? `<div class="sect">已删除的日程 <small>${deletedIds.length}</small></div><div class="rows">${deletedRows}</div>` : ''}`,
       '本地日程',
-      `${events.length} 条 · 培育果园`,
+      `${events.length} 条 · ${deletedIds.length} 条历史归档`,
     ];
+  }
+
+  private schedule(id: string): [string, string, string] {
+    const s = this.store;
+    const today = s.today();
+    const current = s.data.events.find((event) => event.id === id && event.sourceId === LOCAL_CALENDAR_SOURCE_ID);
+    const snapshot = scheduleLatestSnapshot(s.data, id);
+    if (!snapshot) return [`${this.back$('本地日程')}<p class="empty">这条日程没有可读的历史。</p>`, '日程', '历史不可用'];
+    const versions = scheduleVersions(s.data, id);
+    const life = lifeBookEntries(s.data, { type: 'schedule', id });
+    const settled = s.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === id);
+    const where = snapshot.projectId === CHORES
+      ? '杂务 / 生活'
+      : snapshot.projectId
+        ? s.project(snapshot.projectId)?.name ?? '已关闭的项目'
+        : '未归类';
+    const versionRows = versions
+      .slice()
+      .reverse()
+      .map((version, index) => {
+        const label = version.kind === 'created' ? '初版' : `修订 ${versions.length - index - 1}`;
+        const v = version.snapshot;
+        return `<details class="revision"><summary>${label} · ${esc(fmtDay(version.recordedOn))}<span>${esc(fmtDay(v.date))} ${esc(v.start)}–${esc(v.end)}</span></summary><div class="revision-body"><b>${esc(v.title)}</b><br>${esc(v.projectId === CHORES ? '杂务 / 生活' : s.project(v.projectId)?.name ?? '未归类')}</div></details>`;
+      })
+      .join('');
+    const html = `
+      ${this.back$('本地日程')}
+      <div class="who"><div class="emblem" style="background:#7397a722">◷</div><div><div class="fname">${esc(snapshot.title)}</div><div class="fmeta">${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)} · ${esc(where)}</div></div></div>
+      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${current ? '当前日程' : '已删除'}</span>${settled ? '<span class="chip">已有结算事实</span>' : ''}<span class="chip">${versions.length} 个版本</span></div>
+      ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">编辑</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">删除日程</button></div>` : ''}
+      <div class="sect">版本历史 <small>${versions.length}</small></div>
+      ${versionRows || '<p class="empty">还没有版本快照。</p>'}
+      <div class="sect">一生之书 <small>${life.length}</small></div>
+      ${lifeList(life, today)}`;
+    return [html, snapshot.title, current ? '日程的一生之书' : '已删除 · 历史保留'];
   }
 
   private project(p: Project): [string, string, string] {
