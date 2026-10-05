@@ -572,7 +572,14 @@ async function boot() {
   applyTheme();
 
   // 第一次打开
-  if (!store.isReadOnly && !store.data.projects.length && !store.data.tasks.length && !store.data.sources.length) {
+  if (
+    !store.isReadOnly &&
+    !store.data.projects.length &&
+    !store.data.tasks.length &&
+    !store.data.sources.length &&
+    !store.data.events.length &&
+    !store.data.diaries.length
+  ) {
     openWelcome({
       project: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
       calendar: () => openCalendar(store, afterImport),
