@@ -32,21 +32,21 @@ function drawField(c: CanvasRenderingContext2D, x: number, y: number, tw: number
     c.lineTo(x + tw * 0.2 + r * tw * 0.08, y - tw * 0.1);
     c.stroke();
   }
-  if (!level || snow) return;
+  if (!level) return;
   for (let k = 0; k < 2 + level * 2; k++) {
     const col = k % 4;
     const row = Math.floor(k / 4);
     const px = x - tw * 0.25 + col * tw * 0.17 + row * tw * 0.02;
     const py = y + tw * 0.09 - col * tw * 0.035 + row * tw * 0.07;
     const h = tw * (0.06 + level * 0.025);
-    c.strokeStyle = level >= 4 ? '#81762f' : '#4f7c3d';
+    c.strokeStyle = snow ? (level >= 4 ? '#9a8756' : '#7f8274') : level >= 4 ? '#81762f' : '#4f7c3d';
     c.lineWidth = Math.max(1, tw * 0.025);
     c.beginPath();
     c.moveTo(px, py);
     c.lineTo(px, py - h);
     c.stroke();
     if (level >= 2) {
-      c.fillStyle = level >= 4 ? '#d3ab4b' : '#78a84f';
+      c.fillStyle = snow ? (level >= 4 ? '#c4aa73' : '#a8ad98') : level >= 4 ? '#d3ab4b' : '#78a84f';
       c.beginPath();
       c.ellipse(px + tw * 0.025, py - h * 0.72, tw * 0.025, tw * 0.012, -0.5, 0, Math.PI * 2);
       c.fill();
@@ -86,17 +86,17 @@ function drawPond(c: CanvasRenderingContext2D, x: number, y: number, tw: number,
   c.ellipse(x, y, tw * 0.48, tw * 0.22, 0, 0, Math.PI * 2);
   c.fill();
   c.stroke();
-  if (level >= 1 && !frozen) {
-    c.strokeStyle = 'rgba(255,255,255,.6)';
+  if (level >= 1) {
+    c.strokeStyle = frozen ? 'rgba(91,118,126,.55)' : 'rgba(255,255,255,.6)';
     for (let k = 0; k < Math.min(3, level); k++) {
-      const ph = (t * 0.2 + k * 0.31) % 1;
+      const ph = frozen ? 0.35 + k * 0.12 : (t * 0.2 + k * 0.31) % 1;
       c.beginPath();
       c.ellipse(x + (k - 1) * tw * 0.15, y - tw * 0.02, tw * (0.03 + ph * 0.06), tw * (0.012 + ph * 0.025), 0, 0, Math.PI * 2);
       c.stroke();
     }
   }
   if (level >= 2) {
-    c.strokeStyle = '#557f48';
+    c.strokeStyle = frozen ? '#768071' : '#557f48';
     c.lineWidth = Math.max(1, tw * 0.02);
     for (let k = 0; k < level; k++) {
       const px = x - tw * 0.38 + k * tw * 0.11;
@@ -106,12 +106,12 @@ function drawPond(c: CanvasRenderingContext2D, x: number, y: number, tw: number,
       c.stroke();
     }
   }
-  if (level >= 3 && !frozen) {
-    c.strokeStyle = '#355f69';
+  if (level >= 3) {
+    c.strokeStyle = frozen ? '#6d8790' : '#355f69';
     c.lineWidth = Math.max(1, tw * 0.018);
     for (let k = 0; k < level - 1; k++) {
       const px = x - tw * 0.17 + k * tw * 0.13;
-      const py = y + Math.sin(t * 1.2 + k) * tw * 0.025;
+      const py = frozen ? y + (k % 2 ? tw * 0.018 : -tw * 0.018) : y + Math.sin(t * 1.2 + k) * tw * 0.025;
       c.beginPath();
       c.arc(px, py, tw * 0.04, 0.25, Math.PI - 0.25);
       c.stroke();
