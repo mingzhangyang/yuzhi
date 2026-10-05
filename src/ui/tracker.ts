@@ -15,7 +15,7 @@ import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
 import { summarize } from '../logic/summary';
 import { compareLifeEntries, lifeEntries } from '../logic/operations';
-import { diaryLatestSnapshot, diaryVersions, lifeBookEntries, lifeBookSubjectIds, scheduleLatestSnapshot, scheduleVersions } from '../logic/life-book';
+import { buildLifeBookIndex, lifeBookEntries } from '../logic/life-book';
 import { stageLifeEntries } from '../logic/decay';
 import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
@@ -54,13 +54,13 @@ function emblem(color: string, stage: number) {
   return `<svg viewBox="0 0 50 50" aria-hidden="true"><rect width="50" height="50" fill="${color}22"/><path d="M8 34 25 26l17 8-17 8z" fill="#93b65a"/><path d="M17 34v-8l8-4 8 4v8l-8 4z" fill="#efe5cf"/><path d="M15 27 25 16l10 11-10-5z" fill="${roof}"/><rect x="27" y="29" width="3" height="5" fill="#6b5240"/></svg>`;
 }
 
-function lifeList(entries: LifeEntry[], today: ISODate, limit = 60) {
+function lifeList(entries: readonly LifeEntry[], today: ISODate, limit = 60) {
   if (!entries.length) return '<p class="empty">还没有记录。</p>';
   const rows = entries
     .slice()
     .sort((a, b) => compareLifeEntries(b, a))
     .slice(0, limit)
-    .map((e) => `<li class="k-${e.kind}"><time>${esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
+    .map((e) => `<li class="k-${e.kind}"><time>${e.baseline ? '既有记录' : esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
     .join('');
   return `<ol class="life">${rows}</ol>`;
 }
@@ -215,14 +215,15 @@ export class Tracker {
     const entries = s.data.diaries
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const history = buildLifeBookIndex(s.data);
     const currentIds = new Set(entries.map((entry) => entry.id));
-    const deletedIds = lifeBookSubjectIds(s.data, 'diary').filter((id) => !currentIds.has(id));
+    const deletedIds = history.subjectIds('diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${diaryVersions(s.data, entry.id).length} 版</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${history.diaryVersions(entry.id).length} 版</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
-        const snapshot = diaryLatestSnapshot(s.data, id);
+        const snapshot = history.diaryLatest(id);
         if (!snapshot) return '';
         return `<div class="task history-record"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(id)}"><b>${esc(fmtDay(snapshot.date))}</b><span>${esc(snapshot.text.length > 100 ? snapshot.text.slice(0, 99) + '…' : snapshot.text)}</span></button><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
       })
@@ -238,10 +239,11 @@ export class Tracker {
     const s = this.store;
     const today = s.today();
     const current = s.data.diaries.find((entry) => entry.id === id);
-    const snapshot = diaryLatestSnapshot(s.data, id);
+    const history = buildLifeBookIndex(s.data);
+    const snapshot = history.diaryLatest(id);
     if (!snapshot) return [`${this.back$('日记')}<p class="empty">这篇日记没有可读的历史。</p>`, '日记', '历史不可用'];
-    const versions = diaryVersions(s.data, id);
-    const life = lifeBookEntries(s.data, { type: 'diary', id });
+    const versions = history.diaryVersions(id);
+    const life = history.entries({ type: 'diary', id });
     const versionRows = versions
       .slice()
       .reverse()
@@ -273,8 +275,9 @@ export class Tracker {
       .filter((event) => event.sourceId === LOCAL_CALENDAR_SOURCE_ID)
       .slice()
       .sort((a, b) => b.start.localeCompare(a.start));
+    const historyIndex = buildLifeBookIndex(s.data);
     const currentIds = new Set(events.map((event) => event.id));
-    const deletedIds = lifeBookSubjectIds(s.data, 'schedule').filter((id) => !currentIds.has(id));
+    const deletedIds = historyIndex.subjectIds('schedule').filter((id) => !currentIds.has(id));
     const rows = events
       .map((event) => {
         const date = dateOfStamp(event.start);
@@ -287,12 +290,12 @@ export class Tracker {
         const history = settled
           ? '<span class="chip">已留入历史</span>'
           : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
-        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${scheduleVersions(s.data, event.id).length} 版</span>${history}</div></div>`;
+        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${historyIndex.scheduleVersions(event.id).length} 版</span>${history}</div></div>`;
       })
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
-        const snapshot = scheduleLatestSnapshot(s.data, id);
+        const snapshot = historyIndex.scheduleLatest(id);
         if (!snapshot) return '';
         return `<div class="task history-record"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(id)}"><b>${esc(snapshot.title)}</b><span>${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)}</span></button><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
       })
@@ -308,10 +311,11 @@ export class Tracker {
     const s = this.store;
     const today = s.today();
     const current = s.data.events.find((event) => event.id === id && event.sourceId === LOCAL_CALENDAR_SOURCE_ID);
-    const snapshot = scheduleLatestSnapshot(s.data, id);
+    const history = buildLifeBookIndex(s.data);
+    const snapshot = history.scheduleLatest(id);
     if (!snapshot) return [`${this.back$('本地日程')}<p class="empty">这条日程没有可读的历史。</p>`, '日程', '历史不可用'];
-    const versions = scheduleVersions(s.data, id);
-    const life = lifeBookEntries(s.data, { type: 'schedule', id });
+    const versions = history.scheduleVersions(id);
+    const life = history.entries({ type: 'schedule', id });
     const settled = s.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === id);
     const where = snapshot.projectId === CHORES
       ? '杂务 / 生活'
