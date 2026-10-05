@@ -583,7 +583,7 @@ export class Tracker {
         const context = s.captureWriteContext();
         const ok = await confirmModal({
           title: `删除日程「${event.title}」？`,
-          text: `${fmtDay(dateOfStamp(event.start))} ${timeOf(event.start)}–${timeOf(event.end)}。删除后，它也会从果园的培育信号中消失。`,
+          text: `${fmtDay(dateOfStamp(event.start))} ${timeOf(event.start)}–${timeOf(event.end)}。删除后，它会从日程层移除，也不会进入后续结算。`,
           ok: '删除',
           danger: true,
         });
