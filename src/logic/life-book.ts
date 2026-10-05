@@ -55,9 +55,7 @@ function operationSubjects(event: OperationEvent): LifeBookSubject[] {
   if (!Array.isArray(raw)) return [];
   const out: LifeBookSubject[] = [];
   const seen = new Set<string>();
-  for (const value of raw) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const row = value as Record<string, unknown>;
+  for (const row of raw) {
     if (!isSubjectType(row.subjectType) || typeof row.subjectId !== 'string' || !row.subjectId) continue;
     const key = subjectKey(row.subjectType, row.subjectId);
     if (seen.has(key)) continue;
