@@ -12,6 +12,7 @@ import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { HOUSE_SCALE, houseHash, houseVariant, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
+import { cultivationOutline, drawCultivationArea } from './render/cultivation';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
 function rectOutline(x: number, y: number, w: number, h: number, below = 0): [number, number][] {
@@ -164,10 +165,25 @@ export class IslandRenderer extends IslandEffectsPainter {
     for (const vv of s.villages) occupied.set(vv.slot, vv);
     const lmAt = new Map<number, LandmarkView>();
     for (const l of s.landmarks) lmAt.set(l.index, l);
+    const cultivationAt = new Map<string, (typeof s.cultivation)[number]>();
+    for (const area of s.cultivation) {
+      const site = m.cultivation[area.kind];
+      cultivationAt.set(`${site.i},${site.j}`, area);
+    }
     for (const t of m.all) {
       const [x, y] = this.iso(t.i, t.j);
       const d = t.i + t.j;
       if (t.type === 'mountain') put(d, () => this.drawMountain(x, y, t, tw), this.mountainOutline(x, y, t, tw));
+      const cultivation = cultivationAt.get(`${t.i},${t.j}`);
+      if (cultivation) {
+        const depth = d + 0.08;
+        queue.push({ d: depth, draw: () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t) });
+        occluders.push({
+          d: depth,
+          poly: cultivationOutline(cultivation, x, y, tw),
+          hit: { kind: 'cultivation', area: cultivation.kind },
+        });
+      }
       if (t === m.lighthouse) {
         put(d, () => {
           this.drawLighthouse(x, y, tw);
@@ -366,6 +382,11 @@ export class IslandRenderer extends IslandEffectsPainter {
       const [x, y] = this.villageLabelAnchor(vv);
       const shown = this.villageLabel(vv);
       this.label(x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact);
+    }
+    for (const area of s.cultivation) {
+      const site = m.cultivation[area.kind];
+      const [x, y] = this.iso(site.i, site.j);
+      this.label(x, y - tw * 0.62, `${area.name} · ${area.level}/4`, null, false, false, compact);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);

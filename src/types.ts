@@ -35,6 +35,14 @@ export interface Task {
   closedAt?: ISODate;
 }
 
+export interface DiaryEntry {
+  id: string;
+  date: ISODate;
+  text: string;
+  /** 精确创建时刻，仅用于稳定排序；培育只按 date 计数。 */
+  createdAt: string;
+}
+
 export interface CalendarSource {
   id: string;
   name: string;
@@ -62,6 +70,8 @@ export interface CalendarEvent {
 
 /** 归到「杂务」时使用的特殊项目 id */
 export const CHORES = 'chores';
+/** 用户在屿志里直接创建的本地日程使用的保留 sourceId。 */
+export const LOCAL_CALENDAR_SOURCE_ID = 'local';
 
 export interface ClassifyRule {
   id: string;
@@ -192,6 +202,7 @@ export interface Settings {
 export interface Data {
   projects: Project[];
   tasks: Task[];
+  diaries: DiaryEntry[];
   sources: CalendarSource[];
   events: CalendarEvent[];
   rules: ClassifyRule[];

@@ -65,7 +65,7 @@ async function boot() {
     document.body.dataset.readOnly = readOnly ? 'true' : 'false';
   };
 
-  const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task']);
+  const readOnlyNavActions = new Set(['archive', 'back', 'dock', 'project', 'task', 'diaries', 'schedules']);
   const guardReadOnlyMutation = (event: Event) => {
     if (!store.isReadOnly || !(event.target instanceof Element)) return;
     const target = event.target;
@@ -80,9 +80,10 @@ async function boot() {
       mutating = Boolean(target.closest('#settle .scard'));
     } else {
       const trackerAction = target.closest<HTMLElement>('#tracker [data-act]');
+      const modalAction = target.closest<HTMLElement>('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]');
       mutating = Boolean(
         (trackerAction && !readOnlyNavActions.has(trackerAction.dataset.act ?? ''))
-        || target.closest('#mdl [data-ok], #mdl [data-p], #mdl [data-c], #mdl [data-sync], #mdl [data-rm], #mdl [data-rule], #mdl [data-classify], #mdl [data-file], #mdl [data-d], #mdl [data-w]')
+        || (modalAction && !modalAction.hasAttribute('data-readonly-safe'))
         || target.closest('#settle [data-set], #settle [data-reason], #settle [data-act="all"], #settle [data-act="commit"]')
         || target.closest('#ceremony [data-go]')
       );
@@ -209,7 +210,7 @@ async function boot() {
 
   buildStats();
   $('legend').innerHTML =
-    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span><span>告示牌、灯和条幅 = 日程此刻层</span><span>漂流瓶 = 待归类日程</span>`;
+    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的 Todo</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的 Todo</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span><span>农田 / 果园 / 鱼塘 / 花园 = 现实生活培育区</span><span>告示牌、灯和条幅 = 日程此刻层</span><span>漂流瓶 = 待归类日程</span>`;
 
   renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
   let dusk = false;
@@ -365,7 +366,7 @@ async function boot() {
       if (!pickAndClassifyDrift(hit.title)) showInfo(pt);
       return;
     }
-    if (hit.kind === 'agenda') return showInfo(pt);
+    if (hit.kind === 'agenda' || hit.kind === 'cultivation') return showInfo(pt);
     if (hit.kind === 'project' || hit.kind === 'task') tracker.open({ kind: hit.kind, id: hit.id });
     else tracker.open({ kind: hit.kind });
   };
@@ -434,7 +435,7 @@ async function boot() {
     $('fogbar').hidden = !pend.length;
     if (pend.length) setHTML($('fogTxt'), `<b>海雾笼罩着小岛</b><span>${pend.map((d) => esc(relDay(d, today))).join('、')}还没结算。补上记录，雾就散了；超过 3 天会自动归档为「未记录」。</span>`);
     const ps = store.activeProjects().length;
-    setText($('mapDesc'), ps ? `${ps} 座村落。点村落看项目，点小人看任务，点码头安排新任务。` : '项目是村落，任务是住在里面的人。先建一座村落吧。');
+    setText($('mapDesc'), ps ? `${ps} 座村落。Todo、日程、日记和结算会自动培育岛上的四个公共区域。` : '项目是村落；现实里的 Todo、日程、日记和结算会继续把小岛培育起来。');
 
     // 编年史
     const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
@@ -543,8 +544,30 @@ async function boot() {
     menu.hidden = true;
     if (m === 'settings') openSettings(store, applyTheme);
     else if (m === 'export') {
-      download(`yuzhi-backup-${store.today()}.json`, exportBackup(store.data));
-      toast('备份已导出');
+      // Reader tabs may refresh while the privacy confirmation is open.
+      // Warn about one exact Store snapshot and only download that snapshot;
+      // if reload replaced it, re-prompt against the fresh data.
+      while (true) {
+        const warnedData = store.data;
+        const diaryCount = warnedData.diaries.length;
+        const backup = exportBackup(warnedData);
+        const ok = await confirmModal({
+          title: '导出完整备份？',
+          text: diaryCount
+            ? `这份未加密的 JSON 备份会包含 ${diaryCount} 篇日记全文，以及任务、日程等个人记录。请只保存在你信任的位置。`
+            : '这份未加密的 JSON 备份会包含任务、日程等个人记录。请只保存在你信任的位置。',
+          ok: '导出备份',
+          readOnlySafe: true,
+        });
+        if (!ok) return;
+        if (store.data !== warnedData) {
+          toast('数据刚刚已更新，请确认最新备份内容', true);
+          continue;
+        }
+        download(`yuzhi-backup-${store.today()}.json`, backup);
+        toast('完整备份已导出，请妥善保存');
+        break;
+      }
     } else if (m === 'import') {
       const context = store.captureWriteContext();
       const revision = session.revision;
@@ -572,7 +595,14 @@ async function boot() {
   applyTheme();
 
   // 第一次打开
-  if (!store.isReadOnly && !store.data.projects.length && !store.data.tasks.length && !store.data.sources.length) {
+  if (
+    !store.isReadOnly &&
+    !store.data.projects.length &&
+    !store.data.tasks.length &&
+    !store.data.sources.length &&
+    !store.data.events.length &&
+    !store.data.diaries.length
+  ) {
     openWelcome({
       project: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
       calendar: () => openCalendar(store, afterImport),

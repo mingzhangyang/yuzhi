@@ -3,6 +3,7 @@ import type { ISODate } from '../../types';
 import type { Festival, Weather } from '../ambience';
 import type { InfoTarget, MapInfo } from '../info';
 import type { Tile } from '../map';
+import type { CultivationAreaState, CultivationKind } from '../../logic/cultivation';
 
 export interface WalkerView {
   id: string;
@@ -75,6 +76,7 @@ export interface Scene {
   /** 兼容旧调用方；新 UI 从 chores.count 读取。 */
   choresCount: number;
   chores: ChoresView;
+  cultivation: CultivationAreaState[];
   drifting: { title: string }[];
   lighthouseBanners: string[];
   granaryBusy: boolean;
@@ -97,7 +99,12 @@ export type Selection =
   | { kind: 'chores' }
   | { kind: 'archive' };
 
-export type Hit = Selection | { kind: 'agenda'; target: string } | { kind: 'drift'; title: string } | null;
+export type Hit =
+  | Selection
+  | { kind: 'agenda'; target: string }
+  | { kind: 'drift'; title: string }
+  | { kind: 'cultivation'; area: CultivationKind }
+  | null;
 
 export type SceneryFocus = { i: number; j: number; tree?: [number, number, number] };
 

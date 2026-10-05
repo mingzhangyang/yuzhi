@@ -1,8 +1,10 @@
 /** Calendar classification and ingestion mutations. */
-import type { CalendarEvent } from '../types';
-import { CHORES } from '../types';
+import type { CalendarEvent, ISODate } from '../types';
+import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
+import { localDate, startOfLocalDay } from '../lib/date';
+import { ActionError } from './shared';
 import { entryId } from '../logic/days';
 import { applyRules, matchRule } from '../logic/classify';
 
@@ -99,3 +101,79 @@ export const mergeEvents = (...args: Parameters<typeof mergeEventsImpl>): Return
 
 export const removeSource = (...args: Parameters<typeof removeSourceImpl>): ReturnType<typeof removeSourceImpl> =>
   args[0].batch(() => removeSourceImpl(...args));
+
+
+export interface LocalScheduleInput {
+  title: string;
+  date: ISODate;
+  start: string;
+  end: string;
+  projectId?: string;
+}
+
+const LOCAL_HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const LOCAL_YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+function localScheduleStamp(date: ISODate, hm: string): string {
+  const d = startOfLocalDay(date);
+  if (localDate(d) !== date) throw new ActionError('日程日期不存在');
+  const [h, m] = hm.split(':').map(Number);
+  d.setHours(h, m, 0, 0);
+  const actual = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (localDate(d) !== date || actual !== hm) {
+    throw new ActionError('这个当地时间因夏令时切换不存在，请重新选择');
+  }
+  return d.toISOString();
+}
+
+/** 用户在屿志里直接创建日程；它进入和外部日历相同的 agenda / 结算管线。 */
+function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEvent {
+  const title = input.title.trim();
+  if (!title) throw new ActionError('写一句日程标题吧');
+  if (!LOCAL_YMD.test(input.date)) throw new ActionError('日程日期格式不对');
+  if (!LOCAL_HM.test(input.start) || !LOCAL_HM.test(input.end)) {
+    throw new ActionError('日程时间格式不对');
+  }
+  const start = localScheduleStamp(input.date, input.start);
+  const end = localScheduleStamp(input.date, input.end);
+  // Compare actual local instants after Date normalization. During a DST
+  // spring-forward gap, wall-clock string order can be misleading.
+  if (Date.parse(end) <= Date.parse(start)) {
+    throw new ActionError('日程结束时间要晚于开始时间');
+  }
+  const requested = input.projectId;
+  const projectId = requested === CHORES
+    ? CHORES
+    : requested && store.project(requested)?.status === 'active'
+      ? requested
+      : CHORES;
+  const eventUid = uid('schedule');
+  const event: CalendarEvent = {
+    id: `${LOCAL_CALENDAR_SOURCE_ID}|${eventUid}`,
+    sourceId: LOCAL_CALENDAR_SOURCE_ID,
+    uid: eventUid,
+    title,
+    start,
+    end,
+    allDay: false,
+    projectId,
+    classified: true,
+  };
+  store.put('events', event);
+  return event;
+}
+
+function deleteScheduleImpl(store: Store, eventId: string) {
+  const event = store.data.events.find((item) => item.id === eventId);
+  if (!event || event.sourceId !== LOCAL_CALENDAR_SOURCE_ID) return;
+  if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
+    throw new ActionError('这个日程已经留下结算记录，不能直接删除');
+  }
+  store.del('events', eventId);
+}
+
+export const createSchedule = (...args: Parameters<typeof createScheduleImpl>): ReturnType<typeof createScheduleImpl> =>
+  args[0].batch(() => createScheduleImpl(...args));
+
+export const deleteSchedule = (...args: Parameters<typeof deleteScheduleImpl>): ReturnType<typeof deleteScheduleImpl> =>
+  args[0].batch(() => deleteScheduleImpl(...args));

@@ -8,6 +8,7 @@ import { agendaAt, woodpileStep, type Agenda, type AgendaSlot } from '../logic/a
 import { islandRings } from '../actions';
 import { addDays, localDate, seasonOf } from '../lib/date';
 import { readSeenDrifts } from './drift';
+import { cultivationAreas, cultivationState } from '../logic/cultivation';
 
 /** 村落的屋顶颜色，按槽位固定 */
 export const ROOFS = ['#b5553d', '#4c6a84', '#3f7a86', '#8656a6', '#c08a2a', '#5d8a4a', '#a8622a', '#6b5ca5'];
@@ -134,6 +135,7 @@ export function buildScene(
     dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
     choresCount: chores.count,
     chores,
+    cultivation: cultivationAreas(cultivationState(store.data, today)),
     drifting: agenda.drifting.filter((title) => !seen.has(title)).slice(0, DRIFT_BOTTLES_MAX).map((title) => ({ title })),
     lighthouseBanners: agenda.lighthouseBanners,
     granaryBusy: granaryBusy(store, now),

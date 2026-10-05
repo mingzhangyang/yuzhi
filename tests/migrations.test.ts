@@ -100,6 +100,40 @@ describe('数据迁移基础设施', () => {
     db.close();
   });
 
+  it('production schema 8 without diaries upgrades to schema 9 without losing existing facts', async () => {
+    const name = dbName('schema-8-without-diaries');
+    const oldDb = await openDB(name, 8, {
+      upgrade(db) {
+        for (const [store, keyPath] of Object.entries(COLLECTIONS)) {
+          if (store !== 'diaries') db.createObjectStore(store, { keyPath });
+        }
+        db.createObjectStore('meta');
+      },
+    });
+    await oldDb.put('projects', {
+      id: 'p-existing',
+      name: '旧世界项目',
+      createdAt: '2026-10-01',
+      status: 'active',
+      islandSlot: 0,
+    });
+    await oldDb.put('meta', emptyData().settings, 'settings');
+    await oldDb.put('meta', 4, 'dataVersion');
+    oldDb.close();
+
+    const persistence = new IdbPersistence(name);
+    const data = await persistence.load();
+    expect(data.projects.map((project) => project.id)).toContain('p-existing');
+    expect(data.diaries).toEqual([]);
+    await persistence.close();
+
+    const upgraded = await openDB(name);
+    expect(upgraded.version).toBe(IDB_SCHEMA_VERSION);
+    expect(upgraded.objectStoreNames.contains('diaries')).toBe(true);
+    expect(await upgraded.get('projects', 'p-existing')).toMatchObject({ name: '旧世界项目' });
+    upgraded.close();
+  });
+
   it('迁移写回配额失败先回滚并关闭连接，再降级到已恢复快照', async () => {
     const name = dbName('startup-quota');
     await seedLegacyHistory(name, 3);
@@ -365,16 +399,35 @@ describe('数据迁移基础设施', () => {
     await raw.put('interruptions', { id: 'legacy-interruption' });
     raw.close();
 
-    await expect(new IdbPersistence(name).load()).rejects.toThrow('本地数据里的工作开始时间');
+    const failed = new IdbPersistence(name);
+    await expect(failed.load()).rejects.toThrow('本地数据里的工作开始时间');
+    await failed.close();
 
     const staged = await openDB(name);
     expect(staged.version).toBe(IDB_SCHEMA_VERSION - 1);
     expect(Array.from(staged.objectStoreNames)).toEqual(expect.arrayContaining(['life', 'interruptions']));
+    await staged.put('meta', {
+      workStart: '09:00',
+      workEnd: '18:00',
+      firstDay: '2026-10-01',
+      theme: 'auto',
+    }, 'settings');
     staged.close();
+
+    const retry = new IdbPersistence(name);
+    const recovered = await retry.load();
+    expect(lifeEntries(recovered).some((row) => row.text === '旧记录')).toBe(true);
+    await retry.close();
+
+    const final = await openDB(name);
+    expect(final.version).toBe(IDB_SCHEMA_VERSION);
+    expect(Array.from(final.objectStoreNames)).not.toContain('life');
+    expect(Array.from(final.objectStoreNames)).not.toContain('interruptions');
+    final.close();
   });
 
-  it('修复曾到达 schema 7 但遗留 legacy stores 的数据库', async () => {
-    const name = dbName('repair-schema-7');
+  it('修复曾到达 staging schema 8 但遗留 legacy stores 的数据库', async () => {
+    const name = dbName('repair-schema-8');
     const raw = await openDB(name, IDB_SCHEMA_VERSION - 1, {
       upgrade(db) {
         for (const [store, keyPath] of Object.entries(COLLECTIONS)) {

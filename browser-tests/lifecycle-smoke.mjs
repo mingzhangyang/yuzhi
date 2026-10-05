@@ -268,18 +268,24 @@ try {
       const upgrader = await context.newPage();
       await upgrader.goto(`${baseURL}/browser-smoke-secondary.html?schema-upgrade=1`, { waitUntil: 'load' });
       const upgradedVersion = await upgrader.evaluate(() => new Promise((resolve, reject) => {
-        const request = indexedDB.open('yuzhi', 9);
-        request.onupgradeneeded = () => {};
-        request.onsuccess = () => {
-          const db = request.result;
-          const version = db.version;
-          db.close();
-          resolve(version);
+        const inspect = indexedDB.open('yuzhi');
+        inspect.onsuccess = () => {
+          const current = inspect.result.version;
+          inspect.result.close();
+          const request = indexedDB.open('yuzhi', current + 1);
+          request.onupgradeneeded = () => {};
+          request.onsuccess = () => {
+            const db = request.result;
+            const version = db.version;
+            db.close();
+            resolve(version);
+          };
+          request.onblocked = () => reject(new Error('schema upgrade blocked by an old IndexedDB connection'));
+          request.onerror = () => reject(request.error ?? new Error('schema upgrade failed'));
         };
-        request.onblocked = () => reject(new Error('schema upgrade blocked by an old IndexedDB connection'));
-        request.onerror = () => reject(request.error ?? new Error('schema upgrade failed'));
+        inspect.onerror = () => reject(inspect.error ?? new Error('schema inspection failed'));
       }));
-      assert(upgradedVersion === 9, `external schema upgrade reached ${upgradedVersion}, expected 9`);
+      assert(Number.isInteger(upgradedVersion) && upgradedVersion > 1, `external schema upgrade returned invalid version ${upgradedVersion}`);
 
       await waitReadOnly(appPage, true);
       await appPage.waitForFunction(
@@ -314,7 +320,7 @@ try {
       assert(refusal.state === 'reader', `old client ended in ${refusal.state}, expected reader`);
       assert(refusal.actionError.includes('只读'), `old client accepted a new action: ${refusal.actionError}`);
       assert(
-        refusal.takeoverError.includes('schema 9') || refusal.takeoverError.includes('更新版本'),
+        refusal.takeoverError.includes(`schema ${upgradedVersion}`) || refusal.takeoverError.includes('更新版本'),
         `takeover did not report the incompatible schema: ${refusal.takeoverError}`,
       );
     } finally {

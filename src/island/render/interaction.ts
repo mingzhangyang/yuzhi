@@ -379,6 +379,16 @@ export abstract class IslandInteraction extends IslandViewport {
     return this.occluders.some((o) => o.d > d && insidePolygon(pt, o.poly));
   }
 
+  /** Frontmost cultivation artwork under this screen point, using the same outline as drawing/occlusion. */
+  protected cultivationHitAt(pt: { x: number; y: number }): Extract<Hit, { kind: 'cultivation' }> | null {
+    let best: (typeof this.occluders)[number] | null = null;
+    for (const o of this.occluders) {
+      if (o.hit?.kind !== 'cultivation' || !insidePolygon(pt, o.poly)) continue;
+      if (!best || o.d >= best.d) best = o;
+    }
+    return best?.hit?.kind === 'cultivation' ? best.hit : null;
+  }
+
   hitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
@@ -467,6 +477,21 @@ export abstract class IslandInteraction extends IslandViewport {
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
+    const cultivationHit = this.cultivationHitAt(pt);
+    if (cultivationHit) {
+      const state = s.cultivation.find((item) => item.kind === cultivationHit.area);
+      const site = m.cultivation[cultivationHit.area];
+      if (state) {
+        const [x, y] = this.iso(site.i, site.j);
+        return this.selectScenery(
+          { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
+          { i: site.i, j: site.j },
+          x,
+          y - tw * 0.62,
+          ctx,
+        );
+      }
+    }
     const hw = tw / 2;
     const hh = tw / 4;
     const occupied = new Set(s.villages.map((v) => v.slot));
@@ -538,6 +563,17 @@ export abstract class IslandInteraction extends IslandViewport {
         target: target.kind === 'drift' ? target : undefined,
       });
     };
+
+    for (const state of s.cultivation) {
+      const site = m.cultivation[state.kind];
+      const [x, y] = this.iso(site.i, site.j);
+      add(
+        { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
+        { i: site.i, j: site.j },
+        x,
+        y - tw * 0.62,
+      );
+    }
 
     for (const t of m.all) {
       if (!t.trees.length || (t.landmark >= 0 && built.has(t.landmark))) continue;

@@ -41,6 +41,8 @@ export interface VillageSite {
   slots: Tile[];
 }
 
+export type CultivationSiteKind = 'field' | 'orchard' | 'pond' | 'garden';
+
 export interface IslandMap {
   N: number;
   rings: number;
@@ -59,6 +61,8 @@ export interface IslandMap {
   granary: Tile;
   lighthouse: Tile;
   water: Tile[];
+  /** 公共培育区的稳定落点；不占村落槽位，也不参与地标编号。 */
+  cultivation: Record<CultivationSiteKind, Tile>;
 }
 
 export function mulberry32(a: number) {
@@ -304,8 +308,29 @@ export function buildIsland(rings = 0): IslandMap {
   for (const t of all) if (base(t) && t.type === 'grass' && !reserved.has(t) && !nearVillage(t) && water.some((w) => dist(t, w.i, w.j) < 1.2) && tileHash(t.i, t.j, 9) < 0.45) t.type = 'field';
   for (const t of all) t.trees.sort((a, b) => a.dx + a.dy - (b.dx + b.dy));
 
+  // 四个公共培育区只占视觉锚点，不改 Tile.type，也不进入项目 / 地标分配。
+  // 因此旧世界的村落、地标和随机地形身份都保持不变。
+  const cultivationBase = (t: Tile) =>
+    base(t) &&
+    !t.edge &&
+    !reserved.has(t) &&
+    t.village < 0 &&
+    t.landmark < 0 &&
+    t.type === 'grass' &&
+    t.trees.length === 0;
+  const fieldSite = nearest(8.0 + O, 17.0 + O, cultivationBase);
+  const orchardSite = nearest(16.0 + O, 15.2 + O, (t) => cultivationBase(t) && t !== fieldSite);
+  const pondSite = nearest(4.8 + O, 13.6 + O, (t) => cultivationBase(t) && t !== fieldSite && t !== orchardSite);
+  const gardenSite = nearest(13.0 + O, 17.3 + O, (t) => cultivationBase(t) && t !== fieldSite && t !== orchardSite && t !== pondSite);
+  const cultivation: Record<CultivationSiteKind, Tile> = {
+    field: fieldSite,
+    orchard: orchardSite,
+    pond: pondSite,
+    garden: gardenSite,
+  };
+
   all.sort((a, b) => a.i + a.j - (b.i + b.j) || a.i - b.i);
-  const m: IslandMap = { N, rings, radius: BASE_RADIUS + rings * RING_WIDTH, all, at, villages, landmarks, dock, pierDir: [0, 1], pierLen: 3, chores, granary, lighthouse, water };
+  const m: IslandMap = { N, rings, radius: BASE_RADIUS + rings * RING_WIDTH, all, at, villages, landmarks, dock, pierDir: [0, 1], pierLen: 3, chores, granary, lighthouse, water, cultivation };
   cache.set(rings, m);
   return m;
 }

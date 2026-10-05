@@ -9,6 +9,7 @@ import { runMigrationSteps, type MigrationStep } from './migrations';
 export const COLLECTIONS = {
   projects: 'id',
   tasks: 'id',
+  diaries: 'id',
   sources: 'id',
   events: 'id',
   rules: 'id',
@@ -24,16 +25,21 @@ export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 const DB_NAME = 'yuzhi';
 const FACT_SEQ_KEY = 'factSeq';
 /**
- * Schema 7 is a staging schema: it keeps legacy stores available long enough
- * for the business-data migration to read them. Schema 8 drops those stores
- * after the migrated data has been durably written.
+ * Schema 8 is both the previous production schema and the migration staging
+ * schema. Presence of legacy stores disambiguates them:
  *
- * Schema 8 also repairs databases that were briefly opened by the PR build
- * which reached schema 7 without deleting the legacy stores.
+ * - schema 8 without legacy stores: previous production data, safe to upgrade
+ *   directly to schema 9 (which adds diaries);
+ * - schema 8 with life / interruptions: an older-schema migration is staged or
+ *   being retried. Keep it at schema 8 until business migration succeeds and
+ *   the migrated data is durably written; only then may schema 9 delete the
+ *   legacy stores.
+ *
+ * Schema 9 is the current final schema.
  */
-const STAGING_SCHEMA_VERSION = 7;
-export const IDB_SCHEMA_VERSION = 8;
-export const DATA_VERSION = 4;
+const STAGING_SCHEMA_VERSION = 8;
+export const IDB_SCHEMA_VERSION = 9;
+export const DATA_VERSION = 5;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -69,6 +75,7 @@ export function emptyData(): Data {
   return {
     projects: [],
     tasks: [],
+    diaries: [],
     sources: [],
     events: [],
     rules: [],
@@ -372,6 +379,13 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       delete data.__legacyLifeOrder;
     },
   },
+  {
+    to: 5,
+    run(data) {
+      // v5 introduces diary facts. Older data simply starts with an empty journal.
+      if (!Array.isArray(data.diaries)) data.diaries = [];
+    },
+  },
 ];
 function ensureCurrentCollections(raw: RawData): RawData {
   for (const c of COLL_NAMES) if (raw[c] === undefined) raw[c] = [];
@@ -473,7 +487,10 @@ export class IdbPersistence implements Persistence {
 
   private assertRequiredStores(db: IDBPDatabase, storeNames = Array.from(db.objectStoreNames)) {
     if (db.version < STAGING_SCHEMA_VERSION) return;
-    const required = ['meta', ...COLL_NAMES];
+    // Schema 8 was the previous production schema and has no diary store.
+    // Reader tabs may still observe it while the writer performs the v9 handoff.
+    const currentCollections = COLL_NAMES.filter((name) => name !== 'diaries' || db.version >= IDB_SCHEMA_VERSION);
+    const required = ['meta', ...currentCollections];
     const missing = required.filter((name) => !storeNames.includes(name));
     if (!missing.length) return;
     const version = db.version;
@@ -519,12 +536,25 @@ export class IdbPersistence implements Persistence {
   private async openWritableDatabase(): Promise<IDBPDatabase> {
     const current = await this.openDatabase(undefined, false);
     this.assertSupportedSchema(current);
-    if (current.version >= STAGING_SCHEMA_VERSION) {
+    if (current.version >= IDB_SCHEMA_VERSION) {
       this.assertRequiredStores(current);
       return current;
     }
+    const currentVersion = current.version;
+    const hasLegacy = LEGACY_COLLECTIONS.some((name) => current.objectStoreNames.contains(name));
+
+    // Schema 8 is ambiguous by version alone. If legacy stores remain, this is
+    // a staged / interrupted migration and load() still needs those inputs.
+    if (currentVersion === STAGING_SCHEMA_VERSION && hasLegacy) {
+      this.assertRequiredStores(current);
+      return current;
+    }
+
     current.close();
-    const staged = await this.openDatabase(STAGING_SCHEMA_VERSION, true);
+    // Pre-v8 databases first reach staging schema 8 so legacy business stores
+    // survive migration. A clean production schema 8 can move directly to 9.
+    const target = currentVersion >= STAGING_SCHEMA_VERSION ? IDB_SCHEMA_VERSION : STAGING_SCHEMA_VERSION;
+    const staged = await this.openDatabase(target, true);
     this.assertRequiredStores(staged);
     return staged;
   }
@@ -983,6 +1013,7 @@ const SHAPES: Record<Coll, Shape> = {
     id: isText, 'projectId?': isText, title: isText, 'scheduledFor?': isDate,
     status: oneOf('open', 'done', 'dropped'), createdAt: isDate, 'closedAt?': isDate,
   },
+  diaries: { id: isText, date: isDate, text: isText, createdAt: isStamp },
   sources: { id: isText, name: isStr, 'icsUrl?': isStr, 'lastFetchedAt?': isStamp, 'lastError?': isStr },
   events: {
     id: isText, sourceId: isText, uid: isText, title: isStr, start: isStamp, end: isStamp, allDay: isBool,

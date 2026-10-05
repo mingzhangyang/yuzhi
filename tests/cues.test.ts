@@ -14,6 +14,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     dockShips: 0,
     choresCount: 0,
     chores: { count: 0, woodpile: 0, later: 0, ended: 0 },
+    cultivation: [],
     drifting: [],
     lighthouseBanners: [],
     granaryBusy: false,
