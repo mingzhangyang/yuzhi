@@ -84,6 +84,7 @@ jobs:
           curl --fail --silent http://127.0.0.1:4173/ > /dev/null
 
           node browser-tests/input-focus-smoke.mjs
+          node browser-tests/capture-smoke.mjs
           node browser-tests/agenda-hit-smoke.mjs
           node browser-tests/lifecycle-smoke.mjs
 
