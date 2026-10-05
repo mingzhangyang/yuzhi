@@ -29,6 +29,9 @@ function setEventProjectImpl(store: Store, eventId: string, projectId: string | 
   if (!e) return;
   const nextProjectId = projectId || CHORES;
   if (e.sourceId === LOCAL_CALENDAR_SOURCE_ID && e.projectId !== nextProjectId) {
+    if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
+      throw new ActionError('这个日程已经留下结算记录，不能直接修改');
+    }
     const before = scheduleSnapshot(e);
     const next = { ...e, projectId: nextProjectId, classified: true };
     operation(store, {
