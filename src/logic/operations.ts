@@ -113,6 +113,7 @@ export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
       // They were appended to the immutable stream, so their persisted seq is
       // intentionally not used as historical occurrence order in the read model.
       factSeq: syntheticBaseline ? undefined : event.seq,
+      baseline: syntheticBaseline || undefined,
       ...snapshot,
       subjectType,
       subjectId,
@@ -125,6 +126,7 @@ export function operationLifeEntries(event: OperationEvent): LifeEntry[] {
  * 旧版本 life 行会在迁移阶段转成带快照的 operation，不再保留第二份业务事实。
  */
 export function compareLifeEntries(a: LifeEntry, b: LifeEntry): number {
+  if (!!a.baseline !== !!b.baseline) return a.baseline ? -1 : 1;
   const byDate = a.date.localeCompare(b.date);
   if (byDate) return byDate;
   if (a.factSeq !== undefined && b.factSeq !== undefined && a.factSeq !== b.factSeq) return a.factSeq - b.factSeq;
