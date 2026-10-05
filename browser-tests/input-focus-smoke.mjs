@@ -32,6 +32,14 @@ try {
   await page.waitForFunction(() => Boolean(window.yuzhi?.renderer && window.yuzhi?.store), undefined, { timeout });
   await page.waitForFunction(() => document.body.dataset.readOnly === 'false', undefined, { timeout });
 
+  // A fresh profile intentionally opens the first-run welcome dialog. Dismiss
+  // that real startup state before exercising the separate "New" flow; forcing
+  // the click through the overlay would hide an invalid test precondition.
+  if (await page.locator('#mdl').isVisible()) {
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
+  }
+
   // The collapsed tracker already contains a quick-add input/select.
   const baseControls = await page.evaluate(() =>
     [...document.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), textarea, select')]
