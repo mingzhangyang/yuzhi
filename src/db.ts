@@ -1,6 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { Data, LifeKind, OperationKind, Settings } from './types';
-import { CHORES } from './types';
+import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from './types';
 import { localDate } from './lib/date';
 import { MAX_VILLAGES } from './logic/config';
 import { runMigrationSteps, type MigrationStep } from './migrations';
@@ -39,7 +39,7 @@ const FACT_SEQ_KEY = 'factSeq';
  */
 const STAGING_SCHEMA_VERSION = 8;
 export const IDB_SCHEMA_VERSION = 9;
-export const DATA_VERSION = 5;
+export const DATA_VERSION = 6;
 const LEGACY_DATA_VERSION = 1;
 export const BACKUP_FORMAT = 'yuzhi-backup';
 export const BACKUP_VERSION = DATA_VERSION;
@@ -384,6 +384,87 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
     run(data) {
       // v5 introduces diary facts. Older data simply starts with an empty journal.
       if (!Array.isArray(data.diaries)) data.diaries = [];
+    },
+  },
+  {
+    to: 6,
+    run(data) {
+      // v6 adds generic Life Book subjects. Existing diaries and local
+      // schedules get one immutable baseline fact; existing factSeq values
+      // remain untouched so replay semantics stay stable.
+      const operations = Array.isArray(data.operations) ? data.operations.slice() : [];
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      const diaries = Array.isArray(data.diaries) ? data.diaries : [];
+      const events = Array.isArray(data.events) ? data.events : [];
+      let seq = 0;
+      for (const value of [...entries, ...operations]) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const n = (value as Record<string, unknown>).seq;
+        if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
+      }
+
+      const hasSubject = (subjectType: string, subjectId: string) => operations.some((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        const payload = (value as Record<string, unknown>).payload;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+        const life = (payload as Record<string, unknown>).life;
+        return Array.isArray(life) && life.some((snapshot) => {
+          if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+          const row = snapshot as Record<string, unknown>;
+          return row.subjectType === subjectType && row.subjectId === subjectId;
+        });
+      });
+
+      for (const value of diaries) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (typeof row.id !== 'string' || typeof row.date !== 'string' || typeof row.text !== 'string') continue;
+        if (hasSubject('diary', row.id)) continue;
+        operations.push({
+          id: `op|v6-diary-baseline|${row.id}`,
+          seq: ++seq,
+          date: row.date,
+          kind: 'diary-created',
+          payload: {
+            source: 'migration',
+            after: { date: row.date, text: row.text },
+            life: [{ subjectType: 'diary', subjectId: row.id, kind: 'start', text: '写下这篇日记（既有记录）' }],
+          },
+        });
+      }
+
+      const hm = (stamp: Date) => `${String(stamp.getHours()).padStart(2, '0')}:${String(stamp.getMinutes()).padStart(2, '0')}`;
+      for (const value of events) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const row = value as Record<string, unknown>;
+        if (row.sourceId !== LOCAL_CALENDAR_SOURCE_ID || typeof row.id !== 'string' || typeof row.title !== 'string') continue;
+        if (typeof row.start !== 'string' || typeof row.end !== 'string' || hasSubject('schedule', row.id)) continue;
+        const start = new Date(row.start);
+        const end = new Date(row.end);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+        const date = localDate(start);
+        const snapshot = {
+          title: row.title,
+          date,
+          start: hm(start),
+          end: hm(end),
+          ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
+        };
+        operations.push({
+          id: `op|v6-schedule-baseline|${row.id}`,
+          seq: ++seq,
+          date,
+          kind: 'schedule-created',
+          ...(typeof row.projectId === 'string' && row.projectId !== CHORES ? { projectId: row.projectId } : {}),
+          payload: {
+            source: 'migration',
+            after: snapshot,
+            life: [{ subjectType: 'schedule', subjectId: row.id, kind: 'start', text: '已有日程纳入一生之书' }],
+          },
+        });
+      }
+
+      data.operations = operations;
     },
   },
 ];
@@ -983,18 +1064,27 @@ const REASON = oneOf('interrupted', 'no_energy', 'not_important', 'postponed');
 const ITEM_TYPE = oneOf('task', 'event');
 const OPERATION_KIND = oneOf(
   'project-created', 'project-renamed', 'project-restarted', 'project-trimmed', 'project-closed',
-  'project-completed', 'project-resting-changed', 'task-created', 'task-arranged', 'task-rescheduled',
-  'task-moved', 'task-dropped', 'task-state-baseline', 'migration-boundary', 'legacy-life',
+  'project-completed', 'project-resting-changed', 'task-created', 'task-renamed', 'task-arranged', 'task-rescheduled',
+  'task-moved', 'task-dropped', 'diary-created', 'diary-edited', 'diary-deleted',
+  'schedule-created', 'schedule-edited', 'schedule-deleted',
+  'task-state-baseline', 'migration-boundary', 'legacy-life',
 );
 const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete');
 const OPERATION_LIFE = arrayOf({
-  'projectId?': isText, 'taskId?': isText, text: isStr, kind: LIFE_KIND, 'reason?': REASON,
+  'projectId?': isText, 'taskId?': isText,
+  'subjectType?': oneOf('project', 'task', 'diary', 'schedule'), 'subjectId?': isText,
+  text: isStr, kind: LIFE_KIND, 'reason?': REASON,
 });
 const OPERATION_PAYLOAD: Check = (v) => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
   const o = v as Record<string, unknown>;
   if (o.legacyLifeId !== undefined && (typeof o.legacyLifeId !== 'string' || !o.legacyLifeId.trim())) return false;
   if (o.life !== undefined && !OPERATION_LIFE(o.life)) return false;
+  if (Array.isArray(o.life)) {
+    for (const snapshot of o.life as Record<string, unknown>[]) {
+      if ((snapshot.subjectType === undefined) !== (snapshot.subjectId === undefined)) return false;
+    }
+  }
   // A migrated legacy row suppresses the original life record. Never accept
   // that suppression marker unless the replacement snapshot is present.
   if (o.legacyLifeId !== undefined && (!Array.isArray(o.life) || o.life.length === 0)) return false;
