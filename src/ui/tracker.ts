@@ -4,7 +4,7 @@
  */
 import type { Store } from '../store';
 import type { ISODate, LifeEntry, Project } from '../types';
-import { CHORES } from '../types';
+import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 import { $, esc, setHTML, setText, toast } from './dom';
 import { closeModal, confirmModal, openModal } from './modal';
 import { roofOf, houseCount } from './scene';
@@ -27,6 +27,8 @@ export type View =
   | { kind: 'dock' }
   | { kind: 'granary' }
   | { kind: 'chores' }
+  | { kind: 'diaries' }
+  | { kind: 'schedules' }
   | { kind: 'archive' };
 
 export interface TrackerHooks {
@@ -164,6 +166,12 @@ export class Tracker {
       case 'chores':
         [html, title, sub] = this.chores();
         break;
+      case 'diaries':
+        [html, title, sub] = this.diaries();
+        break;
+      case 'schedules':
+        [html, title, sub] = this.schedules();
+        break;
       case 'archive':
         [html, title, sub] = this.archive();
         break;
@@ -211,10 +219,17 @@ export class Tracker {
     const cultivationRows = cultivated
       .map((area) => `<div class="row static"><span class="tx"><b>${esc(area.name)} · 长势 ${area.level}/4</b><span>${esc(area.summary)}</span></span></div>`)
       .join('');
-    const recentDiaries = s.data.diaries
+    const diaries = s.data.diaries
       .slice()
-      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-      .slice(0, 3);
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const localSchedules = s.data.events
+      .filter((event) => event.sourceId === LOCAL_CALENDAR_SOURCE_ID)
+      .slice()
+      .sort((a, b) => b.start.localeCompare(a.start));
+    const latestDiary = diaries[0];
+    const nextSchedule = localSchedules
+      .filter((event) => dateOfStamp(event.start) >= today)
+      .sort((a, b) => a.start.localeCompare(b.start))[0] ?? localSchedules[0];
     const html = `
       <div class="ptitle">小岛总览 <small>${ps.length} 个村落</small></div>
       <form class="add" data-form="quick"><input name="quick" placeholder="添加一件事…" autocomplete="off" aria-label="新任务"><select name="qproj" aria-label="住进哪个村落"><option value="">停在码头</option>${projOpts}</select><button class="btn primary">添加</button></form>
@@ -223,13 +238,62 @@ export class Tracker {
       <div class="rows">${rows || '<p class="empty">岛上还没有村落。建一个项目，它就是第一座村落；也可以在「⋯」里放几个示例村落。</p>'}</div>
       <div class="sect">培育区 <small>现实生活自动映射</small></div>
       <div class="rows">${cultivationRows}</div>
-      ${recentDiaries.length ? `<div class="sect">最近日记 <small>${recentDiaries.length} 篇</small></div><div class="rows">${recentDiaries.map((entry) => `<div class="row static"><span class="tx"><b>${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 56 ? entry.text.slice(0, 55) + '…' : entry.text)}</span></span></div>`).join('')}</div>` : ''}
+      <div class="sect">现实输入 <small>可回看与管理</small></div>
+      <button class="row" data-act="diaries"><i class="sw" style="background:#9b78a8"></i><span class="tx"><b>日记 · ${diaries.length} 篇</b><span>${latestDiary ? `${fmtDay(latestDiary.date)} · ${esc(latestDiary.text.length > 46 ? latestDiary.text.slice(0, 45) + '…' : latestDiary.text)}` : '把经历、感受和线索写下来'}</span></span><span class="end">›</span></button>
+      <button class="row" data-act="schedules"><i class="sw" style="background:#7397a7"></i><span class="tx"><b>本地日程 · ${localSchedules.length} 条</b><span>${nextSchedule ? `${relDay(dateOfStamp(nextSchedule.start), today)} ${timeOf(nextSchedule.start)} · ${esc(nextSchedule.title)}` : '自己创建的日程会进入日历与结算'}</span></span><span class="end">›</span></button>
       <div class="sect">码头 <small>${b.dock} 船待安排 · ${b.overdue} 件过期</small></div>
       <button class="row" data-act="dock"><i class="sw" style="background:#a8794a"></i><span class="tx"><b>${b.dock ? `${b.dock} 条船停在码头` : '码头空着'}</b><span>${b.dock ? '决定它们住进哪个村落、排在哪天，或者婉拒' : '新任务会先停在这里'}</span></span><span class="end">›</span></button>
       ${this.coastRow()}
       ${groups.length ? `<div class="sect">日历 <small>${groups.length} 类事件待归类</small></div><button class="row" data-act="classify"><i class="sw" style="background:var(--dusk)"></i><span class="tx"><b>有新的日历事件不知道归哪</b><span>指定一次，以后同类自动归位</span></span><span class="end">›</span></button>` : ''}
     `;
     return [html, '小岛总览', `${ps.length} 个村落 · 码头 ${b.dock} 船`];
+  }
+
+  private diaries(): [string, string, string] {
+    const today = this.store.today();
+    const entries = this.store.data.diaries
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const rows = entries
+      .map((entry) => `<div class="task"><div class="tt"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text)}</span></div><div class="acts"><button class="iconbtn" data-act="delete-diary" data-id="${entry.id}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .join('');
+    return [
+      `${this.back$()}<div class="ptitle">日记 <small>${entries.length} 篇</small></div><p class="hint">日记是现实记录，不需要结算。删除后，花园会按剩余事实重新计算长势。</p><div class="rows">${rows || '<p class="empty">还没有日记。用「＋ 新建」写下今天、昨天或前天。</p>'}</div>`,
+      '日记',
+      `${entries.length} 篇 · 培育花园`,
+    ];
+  }
+
+  private schedules(): [string, string, string] {
+    const s = this.store;
+    const today = s.today();
+    const settledIds = new Set(
+      s.data.entries.filter((entry) => entry.itemType === 'event').map((entry) => entry.itemId),
+    );
+    const events = s.data.events
+      .filter((event) => event.sourceId === LOCAL_CALENDAR_SOURCE_ID)
+      .slice()
+      .sort((a, b) => b.start.localeCompare(a.start));
+    const rows = events
+      .map((event) => {
+        const date = dateOfStamp(event.start);
+        const settled = settledIds.has(event.id);
+        const where = event.projectId === CHORES
+          ? '杂务 / 生活'
+          : event.projectId
+            ? s.project(event.projectId)?.name ?? '已关闭的项目'
+            : '未归类';
+        const history = settled
+          ? '<span class="chip">已留入历史</span>'
+          : `<button class="iconbtn" data-act="delete-schedule" data-id="${event.id}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
+        return `<div class="task"><div class="tt"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></div><div class="acts">${history}</div></div>`;
+      })
+      .join('');
+    return [
+      `${this.back$()}<div class="ptitle">本地日程 <small>${events.length} 条</small></div><p class="hint">尚未结算的本地日程可以删除；一旦留下结算事实，就成为历史的一部分，不再直接删除。</p><div class="rows">${rows || '<p class="empty">还没有自己创建的日程。用「＋ 新建」添加。</p>'}</div>`,
+      '本地日程',
+      `${events.length} 条 · 培育果园`,
+    ];
   }
 
   private project(p: Project): [string, string, string] {
@@ -488,6 +552,51 @@ export class Tracker {
       case 'dock':
         this.open({ kind: 'dock' });
         break;
+      case 'diaries':
+        this.open({ kind: 'diaries' });
+        break;
+      case 'schedules':
+        this.open({ kind: 'schedules' });
+        break;
+      case 'delete-diary': {
+        const entry = s.data.diaries.find((item) => item.id === id);
+        if (!entry) break;
+        const context = s.captureWriteContext();
+        const ok = await confirmModal({
+          title: '删除这篇日记？',
+          text: `${fmtDay(entry.date)} · ${entry.text.length > 80 ? entry.text.slice(0, 79) + '…' : entry.text}\n\n删除后，花园长势会按剩余日记重新计算。`,
+          ok: '删除',
+          danger: true,
+        });
+        if (!ok || !context.isCurrent()) break;
+        A.deleteDiary(s, id);
+        toast('日记已删除');
+        break;
+      }
+      case 'delete-schedule': {
+        const event = s.data.events.find((item) => item.id === id && item.sourceId === LOCAL_CALENDAR_SOURCE_ID);
+        if (!event) break;
+        if (s.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === id)) {
+          toast('这个日程已经留下结算记录，不能直接删除', true);
+          break;
+        }
+        const context = s.captureWriteContext();
+        const ok = await confirmModal({
+          title: `删除日程「${event.title}」？`,
+          text: `${fmtDay(dateOfStamp(event.start))} ${timeOf(event.start)}–${timeOf(event.end)}。删除后，它也会从果园的培育信号中消失。`,
+          ok: '删除',
+          danger: true,
+        });
+        if (!ok || !context.isCurrent()) break;
+        try {
+          A.deleteSchedule(s, id);
+          toast('日程已删除');
+        } catch (err) {
+          if (err instanceof A.ActionError) toast(err.message, true);
+          else throw err;
+        }
+        break;
+      }
       case 'classify':
         this.hooks.openClassify();
         break;
