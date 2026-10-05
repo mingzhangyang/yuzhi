@@ -94,6 +94,42 @@ try {
   await archivedScheduleLink.focus();
   assert(await archivedScheduleLink.evaluate((el) => document.activeElement === el), 'deleted schedule history cannot receive keyboard focus');
 
+  // A second tab is a reader. Pure detail navigation must stay available there
+  // without asking the user to take over the writer lock.
+  await page.evaluate(() => window.yuzhi.store.flush());
+  const reader = await context.newPage();
+  await reader.goto(baseURL, { waitUntil: 'domcontentloaded' });
+  await reader.waitForFunction(() => Boolean(window.yuzhi?.tracker && window.yuzhi?.store), undefined, { timeout });
+  await reader.waitForFunction(() => document.body.dataset.readOnly === 'true', undefined, { timeout });
+
+  await reader.evaluate(() => window.yuzhi.tracker.open({ kind: 'diaries' }));
+  await reader.locator('.history-record button[data-act="diary"]').first().click();
+  await reader.waitForFunction(
+    () => document.querySelectorAll('.revision').length === 2
+      && document.querySelector('#trackerBody')?.textContent?.includes('正文已删除'),
+    undefined,
+    { timeout },
+  );
+  assert(
+    (await reader.locator('#trackerBody').textContent()).includes('一生之书 smoke 第二版'),
+    'reader tab could not open deleted diary history',
+  );
+  assert(await reader.evaluate(() => document.body.dataset.readOnly === 'true'), 'detail navigation took over writer access');
+
+  await reader.evaluate(() => window.yuzhi.tracker.open({ kind: 'schedules' }));
+  await reader.locator('.history-record button[data-act="schedule"]').first().click();
+  await reader.waitForFunction(
+    () => document.querySelectorAll('.revision').length === 2
+      && document.querySelector('#trackerBody')?.textContent?.includes('已删除'),
+    undefined,
+    { timeout },
+  );
+  assert(
+    (await reader.locator('#trackerBody').textContent()).includes('一生之书 smoke 日程第二版'),
+    'reader tab could not open deleted schedule history',
+  );
+  assert(await reader.evaluate(() => document.body.dataset.readOnly === 'true'), 'schedule detail navigation took over writer access');
+
   await context.close();
 } finally {
   await browser.close();
