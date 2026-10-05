@@ -230,6 +230,38 @@ try {
       `departing walker was intercepted by dock: ${JSON.stringify(probe)}`);
   });
 
+  await runScenario('告示牌挡住的小人：点牌子落到日程；站在牌子前面的小人仍优先', async () => {
+    const probe = await page.evaluate((target) => {
+      const r = window.yuzhi.renderer;
+      const v = r.scene.villages.find((x) => x.projectId === target);
+      const walker = [...r.walkers.values()].find((w) => w.slot === v.slot);
+      if (!walker) return null;
+      const c = r.map.villages[v.slot].center;
+      const [bx, by] = r.villageAgendaAnchor(v);
+      const original = { x: walker.x, y: walker.y, tx: walker.tx, ty: walker.ty };
+      const s0 = Math.max(4, r.view.tw * 0.15);
+      // 脚落在牌子落地点的正后方 / 正前方一点（屏幕上略高 / 略低），身体正好压在牌面上
+      const place = (dy) => {
+        const at = r.tileCoords({ x: bx, y: by + dy });
+        walker.x = walker.tx = at.fi;
+        walker.y = walker.ty = at.fj;
+        r.draw();
+        const [wx, wy] = r.iso(walker.x, walker.y);
+        return { hit: r.hitAt({ x: wx, y: wy - s0 * 0.7 }), depth: walker.x + walker.y };
+      };
+      const step = r.view.tw * 0.03;
+      const behind = place(-step);
+      const front = place(step);
+      const boardDepth = c.i + c.j - 1.44;
+      if (!(behind.depth < boardDepth && front.depth > boardDepth)) return { bad: [behind.depth, front.depth, boardDepth] };
+      Object.assign(walker, original);
+      return { behind: behind.hit, front: front.hit, taskId: walker.id };
+    }, p['评审'].id);
+    assert(probe, 'no walker in the soon village to probe the notice board');
+    assert(probe.behind?.kind === 'agenda', `walker hidden behind the board still took the tap: ${JSON.stringify(probe)}`);
+    assert(probe.front?.kind === 'task' && probe.front.id === probe.taskId, `walker in front of the board lost the tap: ${JSON.stringify(probe)}`);
+  });
+
   await runScenario('只有待结算日程：村名标签可点击，键盘也能浏览到说明', async () => {
     const v = p['结算'];
     assert(v.label?.phase === 'ended' && v.label.ended === 1, `ended-only agenda: ${JSON.stringify(v.label)}`);

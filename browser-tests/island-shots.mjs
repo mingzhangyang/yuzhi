@@ -73,8 +73,11 @@ try {
       // 项目和任务的 id 决定小人的外貌、落脚点和哪几户亮灯；固定随机源，改前改后两次运行才画出同一个场景。
       await context.addInitScript(() => {
         let seed = 20260714;
+        let n = 0;
+        // 随机数和 id 计数器一起归位：重铺数据时分配到的 id 与第一次完全相同
         window.__reseed = () => {
           seed = 20260714;
+          n = 0;
         };
         const rand = () => {
           seed = (seed + 0x6d2b79f5) | 0;
@@ -83,7 +86,6 @@ try {
           return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
         };
         Math.random = rand;
-        let n = 0;
         crypto.randomUUID = () => {
           n++;
           // uid() 只取前 16 位，计数器放在最前面保证唯一

@@ -188,15 +188,24 @@ export class IslandRenderer extends IslandEffectsPainter {
       if (t.type === 'plaza' && t.village >= 0) {
         const vv = occupied.get(t.village);
         if (vv) {
+          const agenda = vv.agenda;
           put(d, () => {
             this.drawWell(x, y, tw, vv, t);
-            if (vv.agenda) {
-              const [ax, ay] = this.villageAgendaAnchor(vv);
-              if (this.hasNoticeBoard(vv.agenda)) this.drawNoticeBoard(ax, ay, tw, vv.agenda);
-              if (vv.agenda.ended) this.drawUnfiredBricks(x, y, tw, vv.agenda.ended);
-              for (const b of this.villageBannerLayout(vv)) this.drawBanner(b.x, b.y, tw, b.title, vv.roof);
-            }
+            if (agenda?.ended) this.drawUnfiredBricks(x, y, tw, agenda.ended);
           }, ...this.wellOutline(x, y, tw));
+          if (agenda) {
+            // 告示牌和条幅立在井的左后方（villageAgendaAnchor：中心 −0.72, −0.72），按它们自己的落地点排深度；
+            // 轮廓与 agendaHitAt 的范围一致，挡在小人前面时点击落到日程上。
+            const [ax, ay] = this.villageAgendaAnchor(vv);
+            const board = this.hasNoticeBoard(agenda);
+            const banners = this.villageBannerLayout(vv);
+            const outlines: [number, number][][] = banners.map((b) => rectOutline(b.x, b.y, b.w * 0.48, Math.max(tw * 0.2, 6), Math.max(tw * 0.15, 5)));
+            if (board) outlines.push(rectOutline(ax, ay, tw * 0.16, tw * 0.15, tw * 0.15));
+            put(d - 1.44, () => {
+              if (board) this.drawNoticeBoard(ax, ay, tw, agenda);
+              for (const b of banners) this.drawBanner(b.x, b.y, tw, b.title, vv.roof);
+            }, ...outlines);
+          }
         }
       }
       if (t.village >= 0 && t.slotIdx >= 0) {
