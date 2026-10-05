@@ -1,5 +1,5 @@
 import type { Data, ISODate } from '../types';
-import { addDays, dateOfStamp } from '../lib/date';
+import { addDays } from '../lib/date';
 
 export type CultivationKind = 'field' | 'orchard' | 'pond' | 'garden';
 export type CultivationLevel = 0 | 1 | 2 | 3 | 4;
@@ -37,22 +37,19 @@ export function cultivationState(data: Data, today: ISODate): CultivationState {
   }
   const fieldScore = taskDone * 2 + taskPartial;
 
-  const orchardStart = addDays(today, -7);
-  const orchardEnd = addDays(today, 7);
-  const plannedDays = new Set<ISODate>();
-  for (const event of data.events) {
-    if (event.allDay) continue;
-    const date = dateOfStamp(event.start);
-    if (date >= orchardStart && date <= orchardEnd) plannedDays.add(date);
-  }
+  const orchardStart = addDays(today, -13);
   let eventDone = 0;
   let eventPartial = 0;
+  let eventSkipped = 0;
   for (const entry of data.entries) {
     if (entry.itemType !== 'event' || entry.date < orchardStart || entry.date > today) continue;
     if (entry.outcome === 'done') eventDone++;
     else if (entry.outcome === 'partial') eventPartial++;
+    else if (entry.outcome === 'skipped') eventSkipped++;
   }
-  const orchardScore = plannedDays.size + eventDone + eventPartial * 0.5;
+  // Planning alone never grows the orchard. Only schedules that have passed
+  // through settlement become cultivation facts.
+  const orchardScore = eventDone * 2 + eventPartial + eventSkipped * 0.5;
 
   const pondStart = addDays(today, -13);
   const settledDays = new Set(
@@ -81,11 +78,11 @@ export function cultivationState(data: Data, today: ISODate): CultivationState {
     orchard: {
       kind: 'orchard',
       name: '果园',
-      level: levelFrom(orchardScore, [1, 3, 7, 12]),
+      level: levelFrom(orchardScore, [0.5, 2, 5, 9]),
       score: orchardScore,
-      summary: plannedDays.size || eventDone || eventPartial
-        ? `前后 7 天有 ${plannedDays.size} 天安排了定时日程；最近已确认完成 ${eventDone} 场，部分完成 ${eventPartial} 场。`
-        : '最近没有定时日程，果园安静地等着下一段安排。',
+      summary: eventDone || eventPartial || eventSkipped
+        ? `最近 14 天有 ${eventDone + eventPartial + eventSkipped} 场日程经过结算：完成 ${eventDone} 场、部分完成 ${eventPartial} 场、未完成 ${eventSkipped} 场。`
+        : '最近 14 天还没有经过结算的定时日程。未来安排只显示在日程层，不会直接让果园生长。',
     },
     pond: {
       kind: 'pond',
