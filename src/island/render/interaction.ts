@@ -398,6 +398,9 @@ export abstract class IslandInteraction extends IslandViewport {
     const { fi, fj } = this.tileCoords(pt);
     const m = this.map;
     const near = (t: Tile, r: number) => Math.hypot(t.i - fi, t.j - fj) < r;
+    for (const area of ['field', 'orchard', 'pond', 'garden'] as const) {
+      if (near(m.cultivation[area], 0.9)) return { kind: 'cultivation', area };
+    }
     if (fj > m.dock.j - 0.6 && Math.abs(fi - m.dock.i) < 1.8 && fj < m.dock.j + m.pierLen + 1) return { kind: 'dock' };
     if (near(m.granary, 0.9)) return { kind: 'granary' };
     if (near(m.chores, 0.9)) return { kind: 'chores' };
@@ -467,6 +470,21 @@ export abstract class IslandInteraction extends IslandViewport {
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
+    const { fi: cultivationI, fj: cultivationJ } = this.tileCoords(pt);
+    for (const area of ['field', 'orchard', 'pond', 'garden'] as const) {
+      const site = m.cultivation[area];
+      if (Math.hypot(site.i - cultivationI, site.j - cultivationJ) >= 0.9) continue;
+      const state = s.cultivation.find((item) => item.kind === area);
+      if (!state) break;
+      const [x, y] = this.iso(site.i, site.j);
+      return this.selectScenery(
+        { kind: 'cultivation', area, level: state.level, score: state.score, summary: state.summary },
+        { i: site.i, j: site.j },
+        x,
+        y - tw * 0.62,
+        ctx,
+      );
+    }
     const hw = tw / 2;
     const hh = tw / 4;
     const occupied = new Set(s.villages.map((v) => v.slot));
@@ -538,6 +556,17 @@ export abstract class IslandInteraction extends IslandViewport {
         target: target.kind === 'drift' ? target : undefined,
       });
     };
+
+    for (const state of s.cultivation) {
+      const site = m.cultivation[state.kind];
+      const [x, y] = this.iso(site.i, site.j);
+      add(
+        { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
+        { i: site.i, j: site.j },
+        x,
+        y - tw * 0.62,
+      );
+    }
 
     for (const t of m.all) {
       if (!t.trees.length || (t.landmark >= 0 && built.has(t.landmark))) continue;
