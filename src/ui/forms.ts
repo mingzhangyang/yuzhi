@@ -48,7 +48,7 @@ export function openNew(
         <label class="field">结束<input name="end" type="time" value="10:00"></label>
       </div>
       <label class="field">时间花在哪<select name="proj"><option value="${CHORES}">杂务 / 生活</option>${projectOptions}</select></label>
-      <p class="hint">自己创建的日程和导入日历走同一套规则：结束后仍要由你结算；日程会培育果园。</p>
+      <p class="hint">自己创建的日程和导入日历走同一套规则：计划本身不会让果园生长；日程经过现实并由你结算后，才会成为培育事实。</p>
       <div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">创建日程</button></div>
     </form>
     <form data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
