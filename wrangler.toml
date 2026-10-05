@@ -1,13 +1,17 @@
-# 默认部署方式：Cloudflare Worker + 静态资源（npm run deploy）
-#   - dist/ 里的页面作为静态资源
-#   - /api/ics 由 worker/index.ts 处理（只转发 .ics，不保存任何数据）
-# 也可以部署成 Cloudflare Pages（npm run deploy:pages），那时 /api/ics 由 functions/api/ics.ts 提供，
-# 本文件会被 Pages 忽略。
+# Production deployment: Cloudflare Worker + Static Assets.
+# Cloudflare Workers Builds should publish only the main branch with Preview Builds disabled.
 name = "yuzhi"
 main = "worker/index.ts"
 compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
+
+[[routes]]
+pattern = "yuzhi.orangely.xyz"
+custom_domain = true
 
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
