@@ -9,7 +9,7 @@ import { tileHash } from './map';
 import type { LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
 import { isDeterioratingStageCue } from './render/simulation';
-import { HOUSE_SCALE, personSize, SNOW, WARM } from './render/style';
+import { HOUSE_SCALE, houseHash, houseVariant, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
@@ -182,7 +182,7 @@ export class IslandRenderer extends IslandEffectsPainter {
           this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
           // 即将开始：扫帚靠在门口；进行中：扫帚动起来
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
-        }, this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
+        }, ...this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
       }
       if (t === m.dock) put(d, () => this.drawHarborProps(tw));
       if (t.type === 'plaza' && t.village >= 0) {
@@ -220,25 +220,29 @@ export class IslandRenderer extends IslandEffectsPainter {
           const wall = boarded ? '#cfc4ab' : vv.stage >= 2 ? '#e6dcc6' : '#efe5cf';
           // 越冷清的村落，夜里亮灯的人家越少
           const litFrac = [0.9, 0.5, 0.25, 0.12][vv.stage];
+          // 房屋样式：四坡顶居多，夹几座双坡顶、两层和带披屋的
+          const variant = houseVariant(vv.projectId, t.slotIdx);
           put(d, () => {
-            this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, hash(vv.projectId + t.slotIdx) < litFrac);
+            this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, houseHash(vv.projectId, t.slotIdx, 2) < litFrac, variant);
             if (vv.stage >= 2 && t.slotIdx % 2 === 0) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
-          }, this.houseOutline(x, y, tw * HOUSE_SCALE * k));
+          }, ...this.houseOutline(x, y, tw * HOUSE_SCALE * k, variant));
         }
       }
       const lm = t.landmark >= 0 ? lmAt.get(t.landmark) : undefined;
       if (lm) {
         const g = this.grow.get('lm:' + lm.projectId);
         const anim = g ? g.anim : 1;
-        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId), this.landmarkOutline(x, y, tw, lm, anim));
+        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId));
+        // 地标的轮廓既挡人，也是点击地标本身的范围：塔顶、风车帆、钟楼小旗都能点开项目
+        for (const poly of this.landmarkOutline(x, y, tw, lm, anim)) occluders.push({ d, poly, hit: { kind: 'project', id: lm.projectId } });
         continue;
       }
       for (const tr of t.trees) {
         const tx = x + (tr.dx - tr.dy) * hw;
         const ty = y + (tr.dx + tr.dy) * hh;
         const ts = tw * 0.42 * tr.s;
-        const crown = this.treeOutline(tx, ty, ts, tr.kind);
-        put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100))), ...(crown ? [crown] : []));
+        const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
+        put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, seed), ...this.treeOutline(tx, ty, ts, tr.kind, seed));
       }
     }
 
