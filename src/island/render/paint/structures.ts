@@ -703,25 +703,50 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
         [x + r * 1.3, y - r * 1.9],
       ],
     ];
-    const tree = this.amb.fest.has('christmas') ? this.treeOutline(x + tw * 0.24, y - tw * 0.02, tw * 0.4, 'pine') : null;
-    if (tree) outlines.push(tree);
+    if (this.amb.fest.has('christmas')) outlines.push(...this.treeOutline(x + tw * 0.24, y - tw * 0.02, tw * 0.4, 'pine', 0.1));
     return outlines;
   }
 
-  /** 地标：石台加楼体，高度按样式（钟楼最高），随建成动画纵向伸展 */
-  protected landmarkOutline(x: number, y: number, tw: number, l: LandmarkView, anim: number): [number, number][] {
+  /**
+   * 地标：石台加楼体，高度按样式；风车再加一圈帆扫过的圆，钟楼再加顶上的小旗。
+   * 都随建成动画纵向伸展（与 drawLandmark 的 scale(1, k) 一致）。
+   */
+  protected landmarkOutline(x: number, y: number, tw: number, l: LandmarkView, anim: number): [number, number][][] {
     const k = 0.25 + 0.75 * anim;
     const sc = l.size >= 6 ? 1.12 : 0.92;
     const kind = landmarkKind(l.index);
     const h = kind === 'clock' ? 1.33 : kind === 'library' ? 0.86 : 0.98;
-    const top = y - tw * h * sc * k;
-    return [
-      [x - tw * 0.39, y + tw * 0.1],
-      [x, y + tw * 0.28],
-      [x + tw * 0.39, y + tw * 0.1],
-      [x + tw * 0.39, top],
-      [x - tw * 0.39, top],
+    const sy = (py: number) => y + (py - y) * k;
+    const top = sy(y - tw * h * sc);
+    const outlines: [number, number][][] = [
+      [
+        [x - tw * 0.39, y + tw * 0.1],
+        [x, y + tw * 0.28],
+        [x + tw * 0.39, y + tw * 0.1],
+        [x + tw * 0.39, top],
+        [x - tw * 0.39, top],
+      ],
     ];
+    if (kind === 'windmill') {
+      // 与 drawWindmill 一致：轴心在塔顶左前方，帆长 0.52tw·sc，横向压扁到 0.82
+      const hx = x - tw * 0.15 * sc * 0.55;
+      const hy = y + tw * 0.04 - tw * 0.62 * sc + tw * 0.02;
+      const len = tw * 0.52 * sc;
+      outlines.push(Array.from({ length: 16 }, (_, i): [number, number] => {
+        const th = (i / 16) * Math.PI * 2;
+        return [hx + Math.cos(th) * len * 0.82, sy(hy + Math.sin(th) * len)];
+      }));
+    } else if (kind === 'clock') {
+      // 攒尖顶尖上的小旗（drawFlag：旗杆高 0.5·0.5tw，旗面宽 0.26·0.5tw）
+      const apex = y - tw * h * sc;
+      outlines.push([
+        [x - tw * 0.01, sy(apex + tw * 0.02)],
+        [x + tw * 0.14, sy(apex + tw * 0.02)],
+        [x + tw * 0.14, sy(apex - tw * 0.24)],
+        [x - tw * 0.01, sy(apex - tw * 0.24)],
+      ]);
+    }
+    return outlines;
   }
 
   protected drawLandmark(x: number, y: number, tw: number, l: LandmarkView, anim: number, selected: boolean): [number, number] {

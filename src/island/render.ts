@@ -232,15 +232,15 @@ export class IslandRenderer extends IslandEffectsPainter {
       if (lm) {
         const g = this.grow.get('lm:' + lm.projectId);
         const anim = g ? g.anim : 1;
-        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId), this.landmarkOutline(x, y, tw, lm, anim));
+        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId), ...this.landmarkOutline(x, y, tw, lm, anim));
         continue;
       }
       for (const tr of t.trees) {
         const tx = x + (tr.dx - tr.dy) * hw;
         const ty = y + (tr.dx + tr.dy) * hh;
         const ts = tw * 0.42 * tr.s;
-        const crown = this.treeOutline(tx, ty, ts, tr.kind);
-        put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100))), ...(crown ? [crown] : []));
+        const seed = tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100));
+        put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, seed), ...this.treeOutline(tx, ty, ts, tr.kind, seed));
       }
     }
 

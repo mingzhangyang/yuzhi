@@ -156,7 +156,11 @@ async function click(page, p) {
  */
 async function boardInfo(page, p) {
   const hit = await hitAt(page, p);
-  if (hit?.kind === 'agenda') return (await click(page, p)).info;
+  if (hit?.kind === 'agenda') {
+    // 探测和真实点击之间小人可能正好走到牌子前面接走点击，这时同样改取渲染器的说明
+    const info = (await click(page, p)).info;
+    if (info) return info;
+  }
   return page.evaluate((pt) => {
     const info = window.yuzhi.renderer.inspect(pt)?.info;
     return info ? [info.title, ...info.lines].join('\n') : null;

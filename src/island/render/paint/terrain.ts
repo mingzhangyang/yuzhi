@@ -21,6 +21,51 @@ export function smoothNoise(i: number, j: number, scale: number, salt = 7): numb
   return a + (b - a) * su + (c - a) * sw + (a - b - c + d) * su * sw;
 }
 
+/**
+ * 松树的分层：[底边高, 顶点高, 半宽]，单位是树的尺寸 s。层数、宽窄和高矮随树而变：有的瘦高，有的矮胖。
+ * drawTree 和 treeOutline 共用，画出来的和挡人的轮廓一致。
+ */
+export function pineTiers(seed: number): [number, number, number][] {
+  const r1 = (seed * 7.13) % 1;
+  const r2 = (seed * 3.71) % 1;
+  const fat = 0.85 + r1 * 0.35;
+  const tall = 0.9 + r2 * 0.25;
+  if (r2 < 0.3) {
+    return [
+      [0.2, 0.72 * tall, 0.38 * fat],
+      [0.55, 1.18 * tall, 0.25 * fat],
+    ];
+  }
+  if (r2 > 0.8) {
+    return [
+      [0.16, 0.52 * tall, 0.36 * fat],
+      [0.38, 0.78 * tall, 0.3 * fat],
+      [0.6, 1.04 * tall, 0.23 * fat],
+      [0.84, 1.36 * tall, 0.15 * fat],
+    ];
+  }
+  return [
+    [0.18, 0.62 * tall, 0.36 * fat],
+    [0.46, 0.92 * tall, 0.28 * fat],
+    [0.72, 1.28 * tall, 0.2 * fat],
+  ];
+}
+
+/** 阔叶树冠的叶团：[横向偏移, 纵向偏移, 半径]，相对树冠中心、单位 s；数量、位置和大小随树而变，轮廓不对称 */
+export function roundLobes(seed: number): [number, number, number][] {
+  const lobes: [number, number, number][] = [];
+  const n = 3 + Math.floor(((seed * 5.3) % 1) * 3);
+  const lean = (((seed * 9.7) % 1) - 0.5) * 0.12;
+  for (let k = 0; k < n; k++) {
+    const q = (seed * (13.1 + k * 7.7)) % 1;
+    const ang = (k / n) * Math.PI * 2 + q * 1.1;
+    const d = 0.1 + q * 0.08;
+    lobes.push([Math.cos(ang) * d * 1.25 + lean, Math.sin(ang) * d * 0.9 - 0.02, 0.19 + ((seed * (5.9 + k * 3.3)) % 1) * 0.1]);
+  }
+  lobes.push([lean * 0.5, -0.1, 0.24]);
+  return lobes;
+}
+
 /** Ground cache, sea, vegetation, mountains, and water-bound scenery. */
 export abstract class IslandTerrainPainter extends IslandPaintBase {
   protected palette() {
@@ -272,7 +317,8 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
         const ri = di ? di * out : u * 0.8;
         const rj = dj ? dj * out : u * 0.8;
         const rx = x + (ri - rj) * hw;
-        const ry = y + (ri + rj) * hh + D;
+        // 岛前面的崖壁露在外面，水线在崖脚（+D）；岛背后看不到崖壁，水线就是顶面的边（浪花也这样画）
+        const ry = y + (ri + rj) * hh + (back ? 0 : D);
         const r = tw * (0.12 + tileHash(t.i, t.j, 132 + k) * 0.13);
         this.drawRock(rx, ry, r, tileHash(t.i, t.j, 136 + k), a.cover);
         if (tileHash(t.i, t.j, 140 + k) < 0.5) this.drawRock(rx + r * 1.2, ry + r * 0.25, r * 0.55, tileHash(t.i, t.j, 144 + k), a.cover);
@@ -552,20 +598,25 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
 
   /* ---------------- 物件 ---------------- */
 
-  /** 树冠的屏幕轮廓；落叶后只剩枝条，不算遮挡 */
-  protected treeOutline(x: number, y: number, s: number, kind: 'pine' | 'round'): [number, number][] | null {
+  /** 树冠的屏幕轮廓：松树每层一个三角，阔叶树每团叶子一个八边形，与 drawTree 用同一份分层和叶团；落叶后只剩枝条，不算遮挡 */
+  protected treeOutline(x: number, y: number, s: number, kind: 'pine' | 'round', seed: number): [number, number][][] {
     const a = this.amb;
     if (kind === 'pine') {
-      return [
-        [x - s * 0.36, y - s * 0.18],
-        [x, y - s * 1.3],
-        [x + s * 0.36, y - s * 0.18],
-      ];
+      return pineTiers(seed).map(([b, top, w]): [number, number][] => [
+        [x - s * w, y - s * b],
+        [x, y - s * top],
+        [x + s * w, y - s * b],
+      ]);
     }
-    if (a.season === 3 || (a.season === 2 && a.progress > 0.85)) return null;
-    const cy = y - s * 0.66;
-    const r = s * 0.36;
-    return Array.from({ length: 8 }, (_, k): [number, number] => [x + Math.cos((k / 8) * Math.PI * 2) * r, cy + Math.sin((k / 8) * Math.PI * 2) * r]);
+    if (a.season === 3 || (a.season === 2 && a.progress > 0.85)) return [];
+    const thin = a.season === 2 ? 1 - a.progress * 0.25 : 1;
+    const ty = y - s * 0.66;
+    return roundLobes(seed).map(([dx, dy, r]) => {
+      const cx = x + dx * s;
+      const cy = ty + dy * s;
+      const rr = r * s * thin;
+      return Array.from({ length: 8 }, (_, k): [number, number] => [cx + Math.cos((k / 8) * Math.PI * 2) * rr, cy + Math.sin((k / 8) * Math.PI * 2) * rr]);
+    });
   }
 
   /** 山的屏幕轮廓：与点击判定用的三角形外框一致 */
@@ -596,29 +647,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     if (kind === 'pine') {
       // 三层松枝：左侧受光、右侧背光，冬天每层顶上压着雪
       const col = se === 3 ? '#4f6f4f' : se === 0 ? '#55874a' : '#45743f';
-      // 层数、宽窄和高矮随树而变：有的瘦高，有的矮胖
-      const r1 = (seed * 7.13) % 1;
-      const r2 = (seed * 3.71) % 1;
-      const fat = 0.85 + r1 * 0.35;
-      const tall = 0.9 + r2 * 0.25;
-      const tiers: [number, number, number][] =
-        r2 < 0.3
-          ? [
-              [0.2, 0.72 * tall, 0.38 * fat],
-              [0.55, 1.18 * tall, 0.25 * fat],
-            ]
-          : r2 > 0.8
-            ? [
-                [0.16, 0.52 * tall, 0.36 * fat],
-                [0.38, 0.78 * tall, 0.3 * fat],
-                [0.6, 1.04 * tall, 0.23 * fat],
-                [0.84, 1.36 * tall, 0.15 * fat],
-              ]
-            : [
-                [0.18, 0.62 * tall, 0.36 * fat],
-                [0.46, 0.92 * tall, 0.28 * fat],
-                [0.72, 1.28 * tall, 0.2 * fat],
-              ];
+      const tiers = pineTiers(seed);
       for (let k = 0; k < tiers.length; k++) {
         const [b, top, w] = tiers[k];
         const ox = sway * (0.5 + k * 0.4);
@@ -692,17 +721,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     }
     // 三四团叶子叠出树冠：暗底、中间、受光的高光
     const thin = se === 2 ? 1 - a.progress * 0.25 : 1;
-    // 叶团的数量、位置和大小随树而变，树冠轮廓不对称
-    const lobes: [number, number, number][] = [];
-    const n = 3 + Math.floor(((seed * 5.3) % 1) * 3);
-    const lean = (((seed * 9.7) % 1) - 0.5) * 0.12;
-    for (let k = 0; k < n; k++) {
-      const q = (seed * (13.1 + k * 7.7)) % 1;
-      const ang = (k / n) * Math.PI * 2 + q * 1.1;
-      const d = 0.1 + q * 0.08;
-      lobes.push([Math.cos(ang) * d * 1.25 + lean, Math.sin(ang) * d * 0.9 - 0.02, 0.19 + ((seed * (5.9 + k * 3.3)) % 1) * 0.1]);
-    }
-    lobes.push([lean * 0.5, -0.1, 0.24]);
+    const lobes = roundLobes(seed);
     for (const [dx, dy, r] of lobes) this.dot(tx + dx * s, ty + dy * s, r * s * thin, shade(col, -0.2));
     for (const [dx, dy, r] of lobes) this.dot(tx + dx * s - s * 0.03, ty + dy * s - s * 0.04, r * s * 0.82 * thin, col);
     this.dot(tx - s * 0.1, ty - s * 0.16, s * 0.12 * thin, shade(col, 0.2));
