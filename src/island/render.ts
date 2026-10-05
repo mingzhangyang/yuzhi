@@ -349,14 +349,19 @@ export class IslandRenderer {
     this.clearQueuedCues();
   }
 
-  /** 持续压制提示直到调用方安装完 durable baseline；允许恢复与接管嵌套。 */
-  beginCueSuppression() {
+  /**
+   * 持续压制提示直到调用方安装完 durable baseline；允许恢复与接管嵌套。
+   * 返回的一次性 release 绑定这一层 scope，避免异步早退时误留 suppression。
+   */
+  beginCueSuppression(): () => void {
     this.cueSuppressionDepth++;
     this.clearQueuedCues();
-  }
-
-  endCueSuppression() {
-    if (this.cueSuppressionDepth > 0) this.cueSuppressionDepth--;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (this.cueSuppressionDepth > 0) this.cueSuppressionDepth--;
+    };
   }
 
   setScene(s: Scene) {
@@ -588,6 +593,15 @@ export class IslandRenderer {
     const ctr = this.map.villages[v.slot].center;
     const [x, y] = this.iso(ctr.i, ctr.j);
     return [x, y - this.view.tw * 1.05];
+  }
+
+  private choresLabelText(ch: ChoresView): string {
+    const parts = [`杂务 ${ch.count}`];
+    if (ch.live) parts.push(`${ch.live.title} 至 ${this.timeText(ch.live.until)}`);
+    else if (ch.soon) parts.push(`${ch.soon.title} 将开始`);
+    if (ch.later) parts.push(`稍后 ${ch.later}`);
+    if (ch.ended) parts.push(`待结算 ${ch.ended}`);
+    return parts.join(' · ');
   }
 
   private labelHitAt(pt: { x: number; y: number }, x: number, y: number, text: string, dot: boolean): boolean {
@@ -3132,12 +3146,7 @@ export class IslandRenderer {
       const ch = s.chores;
       if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        const choresText = ch.live
-          ? `杂务 · ${ch.live.title} 至 ${this.timeText(ch.live.until)}`
-          : ch.soon
-            ? `杂务 · ${ch.soon.title} 将开始`
-            : [`杂务 ${ch.count}`, ch.later ? `稍后 ${ch.later}` : '', ch.ended ? `待结算 ${ch.ended}` : ''].filter(Boolean).join(' · ');
-        this.label(cx2, cy2 + tw * 0.3, choresText, '#8a8578', sel?.kind === 'chores', true);
+        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true);
       }
     }
     for (const l of s.landmarks) {

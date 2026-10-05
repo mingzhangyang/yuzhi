@@ -175,6 +175,54 @@ try {
     }
   });
 
+  await runScenario('interrupted visibility refreshes release every cue-suppression scope', async () => {
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await openApp(page);
+      await waitReadOnly(page, false);
+
+      await page.evaluate(() => {
+        const app = window.yuzhi;
+        let visibility = 'hidden';
+        const waiters = [];
+        Object.defineProperty(document, 'visibilityState', {
+          configurable: true,
+          get: () => visibility,
+        });
+        app.session.whenIdle = () => new Promise((resolve) => { waiters.push(resolve); });
+        window.__visibilityCueTest = {
+          set(value) {
+            visibility = value;
+            document.dispatchEvent(new Event('visibilitychange'));
+          },
+          resolve(index) { waiters[index]?.(); },
+          pending() { return waiters.length; },
+          depth() { return app.renderer.cueSuppressionDepth; },
+        };
+      });
+
+      await page.evaluate(() => {
+        window.__visibilityCueTest.set('hidden');
+        window.__visibilityCueTest.set('visible');
+      });
+      await page.waitForFunction(() => window.__visibilityCueTest.pending() === 1 && window.__visibilityCueTest.depth() === 1, undefined, { timeout });
+
+      await page.evaluate(() => {
+        window.__visibilityCueTest.set('hidden');
+        window.__visibilityCueTest.set('visible');
+      });
+      await page.waitForFunction(() => window.__visibilityCueTest.pending() === 2 && window.__visibilityCueTest.depth() === 2, undefined, { timeout });
+
+      await page.evaluate(() => window.__visibilityCueTest.resolve(0));
+      await page.waitForFunction(() => window.__visibilityCueTest.depth() === 1, undefined, { timeout });
+      await page.evaluate(() => window.__visibilityCueTest.resolve(1));
+      await page.waitForFunction(() => window.__visibilityCueTest.depth() === 0, undefined, { timeout });
+    } finally {
+      await context.close();
+    }
+  });
+
   await runScenario('real IndexedDB versionchange upgrades and old client stays fail-closed', async () => {
     const context = await browser.newContext();
     try {

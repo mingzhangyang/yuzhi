@@ -110,6 +110,7 @@ async function points(page) {
       broom: page(broom),
       broomTip: page([broom[0] + tw * 0.1, broom[1] - tw * 0.38]),
       view: scene.chores,
+      labelText: r.choresLabelText(scene.chores),
     };
     out.walkers = walkers;
     const [lx, ly] = r.iso(r.map.lighthouse.i, r.map.lighthouse.j);
@@ -309,6 +310,8 @@ try {
     await page.waitForTimeout(600);
     p = await points(page);
     assert(p.chores.view.soon?.title === '买菜', `chores not soon: ${JSON.stringify(p.chores.view)}`);
+    assert(p.chores.labelText.includes('杂务 0') && p.chores.labelText.includes('买菜 将开始') && p.chores.labelText.includes('待结算 1'),
+      `soon chores label hid count or ended total: ${p.chores.labelText}`);
     const broom = await click(page, p.chores.broom);
     assert(broom.info?.includes('17:00 开始'), `soon broom info: ${JSON.stringify(broom)}`);
     await shot(page, '4a-1650-chores-soon');
@@ -335,6 +338,8 @@ try {
     await page.waitForTimeout(600);
     p = await points(page);
     assert(p.chores.view.live?.title === '买菜', `chores not live: ${JSON.stringify(p.chores.view)}`);
+    assert(p.chores.labelText.includes('杂务 0') && p.chores.labelText.includes('买菜 至') && p.chores.labelText.includes('待结算 1'),
+      `live chores label hid count or ended total: ${p.chores.labelText}`);
     const broom = await click(page, p.chores.broom);
     assert(broom.info?.includes('买菜'), `broom info: ${JSON.stringify(broom)}`);
     await shot(page, '4-1730-chores-live');

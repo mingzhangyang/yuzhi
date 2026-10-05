@@ -50,7 +50,7 @@ async function boot() {
   }
   const store = session.store;
   let renderer!: IslandRenderer;
-  let preparingCueBaseline = false;
+  let releasePreparingCueBaseline: (() => void) | undefined;
 
   const syncReadOnlyUi = (readOnly: boolean) => {
     for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
@@ -109,9 +109,8 @@ async function boot() {
     // the silent baseline there, so missed broadcasts cannot replay old cues.
     // Initial startup has no renderer yet; visibility restoration owns its
     // separate (nestable) suppression scope.
-    if (state === 'preparing' && renderer && !preparingCueBaseline) {
-      preparingCueBaseline = true;
-      renderer.beginCueSuppression();
+    if (state === 'preparing' && renderer && !releasePreparingCueBaseline) {
+      releasePreparingCueBaseline = renderer.beginCueSuppression();
     }
 
     const readOnly = state !== 'writer';
@@ -129,24 +128,25 @@ async function boot() {
     }
     if (takeOver) takeOver.disabled = !session.supportsWriterLock || state !== 'reader';
 
-    if (!preparingCueBaseline || !renderer) return;
+    if (!releasePreparingCueBaseline || !renderer) return;
     if (state === 'writer') {
       // AppSession runs writer activation after state listeners. A microtask
       // therefore installs one final scene after daily/refresh duties while
-      // suppression is still active, then releases only this preparation scope.
+      // suppression is still active, then releases exactly this scope.
+      const release = releasePreparingCueBaseline;
       queueMicrotask(() => {
-        if (!preparingCueBaseline || session.state !== 'writer') return;
         try {
-          update();
+          if (releasePreparingCueBaseline === release && session.state === 'writer') update();
         } finally {
-          renderer.endCueSuppression();
-          preparingCueBaseline = false;
+          release();
+          if (releasePreparingCueBaseline === release) releasePreparingCueBaseline = undefined;
         }
       });
     } else if (state !== 'preparing') {
-      // Failed/cancelled takeover: do not leave the renderer permanently muted.
-      renderer.endCueSuppression();
-      preparingCueBaseline = false;
+      // Failed/cancelled takeover: release the exact scope that preparation acquired.
+      const release = releasePreparingCueBaseline;
+      releasePreparingCueBaseline = undefined;
+      release();
     }
   };
   session.subscribeState(syncWriterState);
@@ -460,10 +460,10 @@ async function boot() {
       return;
     }
     const generation = ++visibilityRefresh;
-    renderer.beginCueSuppression();
+    const releaseCueSuppression = renderer.beginCueSuppression();
     const applyFreshBaseline = () => {
-      if (document.visibilityState !== 'visible' || generation !== visibilityRefresh) return;
       try {
+        if (document.visibilityState !== 'visible' || generation !== visibilityRefresh) return;
         if (store.today() !== lastToday && !store.isReadOnly) {
           daily();
           lastToday = store.today();
@@ -473,7 +473,7 @@ async function boot() {
         // soon / growth transitions from the hidden interval.
         update();
       } finally {
-        renderer.endCueSuppression();
+        releaseCueSuppression();
       }
     };
     void session.whenIdle().then(applyFreshBaseline, applyFreshBaseline);
