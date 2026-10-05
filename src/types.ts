@@ -124,17 +124,29 @@ export type OperationKind =
   | 'project-completed'
   | 'project-resting-changed'
   | 'task-created'
+  | 'task-renamed'
   | 'task-arranged'
   | 'task-rescheduled'
   | 'task-moved'
   | 'task-dropped'
+  | 'diary-created'
+  | 'diary-edited'
+  | 'diary-deleted'
+  | 'schedule-created'
+  | 'schedule-edited'
+  | 'schedule-deleted'
   | 'task-state-baseline'
   | 'migration-boundary'
   | 'legacy-life';
 
+export type LifeSubjectType = 'project' | 'task' | 'diary' | 'schedule';
+
 export interface OperationLifeSnapshot {
   projectId?: string;
   taskId?: string;
+  /** Generic identity for the first-class record whose own Life Book receives this row. */
+  subjectType?: LifeSubjectType;
+  subjectId?: string;
   text: string;
   kind: LifeKind;
   reason?: SkipReason;
@@ -168,6 +180,9 @@ export interface LifeEntry {
   factSeq?: number;
   projectId?: string;
   taskId?: string;
+  /** Primary item whose own 一生之书 this row belongs to. */
+  subjectType?: LifeSubjectType;
+  subjectId?: string;
   text: string;
   kind: LifeKind;
   reason?: SkipReason;
