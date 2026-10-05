@@ -3,7 +3,7 @@ import type { CalendarEvent, ISODate } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
-import { startOfLocalDay } from '../lib/date';
+import { localDate, startOfLocalDay } from '../lib/date';
 import { ActionError } from './shared';
 import { entryId } from '../logic/days';
 import { applyRules, matchRule } from '../logic/classify';
@@ -116,8 +116,13 @@ const LOCAL_YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 function localScheduleStamp(date: ISODate, hm: string): string {
   const d = startOfLocalDay(date);
+  if (localDate(d) !== date) throw new ActionError('日程日期不存在');
   const [h, m] = hm.split(':').map(Number);
   d.setHours(h, m, 0, 0);
+  const actual = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (localDate(d) !== date || actual !== hm) {
+    throw new ActionError('这个当地时间因夏令时切换不存在，请重新选择');
+  }
   return d.toISOString();
 }
 
