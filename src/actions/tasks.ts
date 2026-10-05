@@ -101,7 +101,21 @@ function editTaskPlanImpl(store: Store, taskId: string, projectId: string | unde
 function renameTaskImpl(store: Store, taskId: string, title: string) {
   const t = store.taskRecord(taskId);
   const n = title.trim();
-  if (t && n) store.put('tasks', { ...t, title: n });
+  if (!t || !n || n === t.title) return;
+  operation(store, {
+    date: store.today(),
+    kind: 'task-renamed',
+    projectId: t.projectId,
+    taskId,
+    payload: { fromTitle: t.title, toTitle: n },
+    life: [{
+      projectId: t.projectId,
+      taskId,
+      kind: 'event',
+      text: `改名：${q(t.title)} → ${q(n)}`,
+    }],
+  });
+  store.put('tasks', { ...t, title: n });
 }
 
 /** 不重要了：任务移出，不算惩罚 */
