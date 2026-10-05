@@ -10,7 +10,7 @@ import { closeModal, confirmModal, openModal } from './modal';
 import { roofOf, houseCount } from './scene';
 import * as A from '../actions';
 import { STAGE_NAMES } from '../logic/config';
-import { addDays, dateOfStamp, diffDays, fmtDay, relDay, startOfLocalDay } from '../lib/date';
+import { addDays, dateOfStamp, diffDays, fmtDay, relDay } from '../lib/date';
 import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
 import { summarize } from '../logic/summary';
@@ -19,6 +19,7 @@ import { stageLifeEntries } from '../logic/decay';
 import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
 import { cultivationAreas, cultivationState } from '../logic/cultivation';
+import { bindDateSelects, dateSelect, readDate } from './date-select';
 
 export type View =
   | { kind: 'overview' }
@@ -32,7 +33,7 @@ export type View =
   | { kind: 'archive' };
 
 export interface TrackerHooks {
-  openNewProject(): void;
+  openNew(kind: 'project' | 'diary' | 'schedule'): void;
   openClassify(): void;
   openPrompt(p: Project): void;
   openSettings(): void;
@@ -59,56 +60,6 @@ function lifeList(entries: LifeEntry[], today: ISODate, limit = 60) {
     .map((e) => `<li class="k-${e.kind}"><time>${esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
     .join('');
   return `<ol class="life">${rows}</ol>`;
-}
-
-/** 日期快捷选项 */
-function dateSelect(name: string, today: ISODate, current?: ISODate, withNone = true) {
-  const opts: [string, string][] = [];
-  if (withNone) opts.push(['', '不定日期']);
-  opts.push([today, '今天'], [addDays(today, 1), '明天'], [addDays(today, 2), '后天']);
-  const wd = startOfLocalDay(today).getDay();
-  const nextMon = addDays(today, ((8 - wd) % 7) || 7);
-  if (!opts.some((o) => o[0] === nextMon)) opts.push([nextMon, `下周一（${fmtDay(nextMon)}）`]);
-  if (current && !opts.some((o) => o[0] === current)) opts.push([current, fmtDay(current)]);
-  opts.push(['other', '其他日期…']);
-  return `<select name="${name}" data-date-select>${opts.map(([v, l]) => `<option value="${v}"${v === (current ?? '') ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
-}
-
-/** 读出日期选择：选了「其他日期」时弹出系统日期框 */
-function readDate(sel: HTMLSelectElement): ISODate | undefined {
-  return sel.value && sel.value !== 'other' ? sel.value : undefined;
-}
-
-function bindDateSelects(root: HTMLElement, today: ISODate) {
-  root.querySelectorAll<HTMLSelectElement>('select[data-date-select]').forEach((sel) => {
-    sel.addEventListener('change', () => {
-      if (sel.value !== 'other') return;
-      const inp = document.createElement('input');
-      inp.type = 'date';
-      inp.value = today;
-      inp.min = addDays(today, -60);
-      const done = () => {
-        const v = inp.value;
-        if (v) {
-          if (![...sel.options].some((o) => o.value === v)) sel.add(new Option(fmtDay(v), v), sel.options[sel.options.length - 1]);
-          sel.value = v;
-        } else sel.value = '';
-        inp.remove();
-        sel.hidden = false;
-        sel.dispatchEvent(new Event('input', { bubbles: true }));
-      };
-      inp.addEventListener('change', done);
-      inp.addEventListener('blur', done);
-      sel.hidden = true;
-      sel.after(inp);
-      inp.focus();
-      try {
-        inp.showPicker?.();
-      } catch {
-        /* 有的浏览器不允许 */
-      }
-    });
-  });
 }
 
 export class Tracker {
@@ -258,7 +209,7 @@ export class Tracker {
       .map((entry) => `<div class="task"><div class="tt"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text)}</span></div><div class="acts"><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
       .join('');
     return [
-      `${this.back$()}<div class="ptitle">日记 <small>${entries.length} 篇</small></div><p class="hint">日记是现实记录，不需要结算。删除后，花园会按剩余事实重新计算长势。</p><div class="rows">${rows || '<p class="empty">还没有日记。用「＋ 新建」写下今天、昨天或前天。</p>'}</div>`,
+      `${this.back$()}<div class="ptitle">日记 <button class="linkbtn" data-act="new-diary">＋ 写日记</button></div><p class="hint">共 ${entries.length} 篇。日记是现实记录，不需要结算；删除后，花园会按剩余事实重新计算长势。</p><div class="rows">${rows || '<p class="empty">还没有日记。写下今天发生的事，花园就会记住它。</p>'}</div>`,
       '日记',
       `${entries.length} 篇 · 培育花园`,
     ];
@@ -290,7 +241,7 @@ export class Tracker {
       })
       .join('');
     return [
-      `${this.back$()}<div class="ptitle">本地日程 <small>${events.length} 条</small></div><p class="hint">尚未结算的本地日程可以删除；一旦留下结算事实，就成为历史的一部分，不再直接删除。</p><div class="rows">${rows || '<p class="empty">还没有自己创建的日程。用「＋ 新建」添加。</p>'}</div>`,
+      `${this.back$()}<div class="ptitle">本地日程 <button class="linkbtn" data-act="new-schedule">＋ 日程</button></div><p class="hint">共 ${events.length} 条。尚未结算的本地日程可以删除；一旦留下结算事实，就成为历史的一部分，不再直接删除。</p><div class="rows">${rows || '<p class="empty">还没有自己创建的日程。添加一个安排，它会进入日历与结算。</p>'}</div>`,
       '本地日程',
       `${events.length} 条 · 培育果园`,
     ];
@@ -337,7 +288,7 @@ export class Tracker {
       ${p.closeReason ? `<p class="hint">停下的原因：${esc(p.closeReason)}</p>` : ''}
       ${active && !open.length && done.length ? `<div class="ready"><span>村里的事都做完了。要举行落成仪式吗？</span><button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">落成仪式</button></div>` : ''}
       ${p.status === 'done' ? '' : `<div class="sect">住在这里的任务 <small>${open.length}</small></div>`}
-      ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="添加任务…" autocomplete="off" aria-label="新任务">${dateSelect('pdate', today, today)}<button class="btn primary">添加</button></form>` : ''}
+      ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="添加任务…" autocomplete="off" aria-label="新任务">${dateSelect('pdate', today, { current: today, withNone: true, mode: 'task' })}<button class="btn primary">添加</button></form>` : ''}
       ${p.status === 'done' ? '' : `<div>${taskRows || (active ? '<p class="empty">村里还没有人。添加一件要做的事吧。</p>' : '')}</div>`}
       ${done.length ? `<details class="hint"><summary>已完成 ${done.length} 件</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
       <div class="sect">一生之书 <small>${life.length} 条</small></div>
@@ -370,7 +321,7 @@ export class Tracker {
       <div class="nums"><div><b>${entries.filter((e) => e.outcome !== 'skipped').length}</b><span>做过</span></div><div><b>${entries.filter((e) => e.outcome === 'skipped').length}</b><span>没做</span></div><div><b>${diffDays(t.createdAt, today)}</b><span>来岛天数</span></div></div>
       ${
         t.status === 'open'
-          ? `<form class="add" data-form="tedit" data-id="${esc(t.id)}"><select name="tproj" aria-label="所属村落"><option value="">停在码头</option>${projOpts}</select>${dateSelect('tdate', today, t.scheduledFor)}<button class="btn small">保存</button></form>
+          ? `<form class="add" data-form="tedit" data-id="${esc(t.id)}"><select name="tproj" aria-label="所属村落"><option value="">停在码头</option>${projOpts}</select>${dateSelect('tdate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small">保存</button></form>
              <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${esc(t.id)}">今天做完了</button>` : ''}<button class="btn small" data-act="trename" data-id="${esc(t.id)}">改名</button><button class="btn small" data-act="drop" data-id="${esc(t.id)}">不重要了</button></div>`
           : ''
       }
@@ -387,7 +338,7 @@ export class Tracker {
     const projOpts = s.activeProjects().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const shipRows = ships
       .map(
-        (t) => `<form class="ship" data-form="arrange" data-id="${esc(t.id)}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="住进哪个村落">${projOpts || '<option value="">（先建一个村落）</option>'}</select>${dateSelect('adate', today, t.scheduledFor)}<button class="btn small primary"${projOpts ? '' : ' disabled'}>安排</button><button type="button" class="btn small" data-act="decline" data-id="${esc(t.id)}">婉拒</button></div></form>`,
+        (t) => `<form class="ship" data-form="arrange" data-id="${esc(t.id)}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="住进哪个村落">${projOpts || '<option value="">（先建一个村落）</option>'}</select>${dateSelect('adate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small primary"${projOpts ? '' : ' disabled'}>安排</button><button type="button" class="btn small" data-act="decline" data-id="${esc(t.id)}">婉拒</button></div></form>`,
       )
       .join('');
     const ints = interruptions(s.data).sort((a, b) => b.date.localeCompare(a.date));
@@ -500,8 +451,8 @@ export class Tracker {
         case 'quick': {
           const title = String(fd.get('quick') ?? '');
           const pid = String(fd.get('qproj') ?? '');
-          const t = A.createTask(s, { title, projectId: pid || undefined, scheduledFor: pid ? s.today() : undefined });
-          toast(t.projectId ? `「${t.title}」住进了「${s.project(t.projectId)?.name}」，排在今天` : `「${t.title}」乘船停在了码头`);
+          const t = A.createTask(s, { title, projectId: pid || undefined });
+          toast(t.projectId ? `「${t.title}」住进了「${s.project(t.projectId)?.name}」` : `「${t.title}」乘船停在了码头`);
           break;
         }
         case 'ptask': {
@@ -601,7 +552,13 @@ export class Tracker {
         this.hooks.openClassify();
         break;
       case 'new-project':
-        this.hooks.openNewProject();
+        this.hooks.openNew('project');
+        break;
+      case 'new-diary':
+        this.hooks.openNew('diary');
+        break;
+      case 'new-schedule':
+        this.hooks.openNew('schedule');
         break;
       case 'settings':
         this.hooks.openSettings();
