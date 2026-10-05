@@ -232,7 +232,9 @@ export class IslandRenderer extends IslandEffectsPainter {
       if (lm) {
         const g = this.grow.get('lm:' + lm.projectId);
         const anim = g ? g.anim : 1;
-        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId), ...this.landmarkOutline(x, y, tw, lm, anim));
+        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId));
+        // 地标的轮廓既挡人，也是点击地标本身的范围：塔顶、风车帆、钟楼小旗都能点开项目
+        for (const poly of this.landmarkOutline(x, y, tw, lm, anim)) occluders.push({ d, poly, hit: { kind: 'project', id: lm.projectId } });
         continue;
       }
       for (const tr of t.trees) {

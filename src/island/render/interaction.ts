@@ -358,6 +358,10 @@ export abstract class IslandInteraction extends IslandViewport {
     if (drift) return drift;
     const agendaHit = this.agendaHitAt(pt);
     if (agendaHit) return agendaHit;
+    // 画在最前面的轮廓若带着点击目标（地标），就选它；被房子、树挡住时仍按下面的地面规则判断
+    let front: (typeof this.occluders)[number] | null = null;
+    for (const o of this.occluders) if ((!front || o.d >= front.d) && insidePolygon(pt, o.poly)) front = o;
+    if (front?.hit) return front.hit;
     const { fi, fj } = this.tileCoords(pt);
     const m = this.map;
     const near = (t: Tile, r: number) => Math.hypot(t.i - fi, t.j - fj) < r;

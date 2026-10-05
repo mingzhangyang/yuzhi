@@ -692,7 +692,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
 
   /**
    * 山：每块山地是一组高矮宽窄不同的岩块，主峰在后，矮岩在前。
-   * 主峰高度沿用原来的 0.75–1.3 倍地块宽，点击判定的外框不变。
+   * 主峰高度沿用原来的 0.75–1.3 倍地块宽，山顶落在点击判定与遮挡轮廓的同一高度上。
    */
   protected drawMountain(x: number, y: number, t: Tile, tw: number) {
     const a = this.amb;
@@ -700,7 +700,8 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const h = (k: number) => tileHash(t.i, t.j, 170 + k);
     const snow = clamp([0.3, 0.16, 0.24, 0.42][a.season] + a.cover * 0.35, 0, 0.85);
     // [横向偏移（地块宽）, 底边下移（地块宽）, 半宽（地块宽）, 高（主峰高）]
-    const blocks: [number, number, number, number][] = [[(h(0) - 0.5) * 0.1, 0, 0.36 + h(1) * 0.1, 0.92]];
+    // 主峰的岩脊最高点在 drawRockMass 里是 0.94–1.0 倍块高，取 1，让画出来的山顶落在点击判定的 s 上
+    const blocks: [number, number, number, number][] = [[(h(0) - 0.5) * 0.1, 0, 0.36 + h(1) * 0.1, 1]];
     if (h(5) < 0.45) blocks.push([h(2) < 0.5 ? -0.26 : 0.26, 0.07, 0.18 + h(3) * 0.08, 0.32 + h(4) * 0.2]);
     for (let k = 0; k < blocks.length; k++) {
       const [dx, dy, w, hk] = blocks[k];

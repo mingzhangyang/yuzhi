@@ -738,13 +738,15 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     const h = kind === 'clock' ? 1.33 : kind === 'library' ? 0.86 : 0.98;
     const sy = (py: number) => y + (py - y) * k;
     const top = sy(y - tw * h * sc);
+    // 半宽：石台 0.39tw；大藏书阁的第一重檐角在 ±(wi + wj + 2o)/2 = ±0.42tw，按 drawLibrary 的尺寸取
+    const hw = kind === 'library' ? Math.max(0.39, (0.54 * sc + 0.24) / 2) * tw : tw * 0.39;
     const outlines: [number, number][][] = [
       [
         [x - tw * 0.39, y + tw * 0.1],
         [x, y + tw * 0.28],
         [x + tw * 0.39, y + tw * 0.1],
-        [x + tw * 0.39, top],
-        [x - tw * 0.39, top],
+        [x + hw, top],
+        [x - hw, top],
       ],
     ];
     if (kind === 'windmill') {
