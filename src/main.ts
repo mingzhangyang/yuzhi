@@ -544,18 +544,30 @@ async function boot() {
     menu.hidden = true;
     if (m === 'settings') openSettings(store, applyTheme);
     else if (m === 'export') {
-      const diaryCount = store.data.diaries.length;
-      const ok = await confirmModal({
-        title: '导出完整备份？',
-        text: diaryCount
-          ? `这份未加密的 JSON 备份会包含 ${diaryCount} 篇日记全文，以及任务、日程等个人记录。请只保存在你信任的位置。`
-          : '这份未加密的 JSON 备份会包含任务、日程等个人记录。请只保存在你信任的位置。',
-        ok: '导出备份',
-        readOnlySafe: true,
-      });
-      if (!ok) return;
-      download(`yuzhi-backup-${store.today()}.json`, exportBackup(store.data));
-      toast('完整备份已导出，请妥善保存');
+      // Reader tabs may refresh while the privacy confirmation is open.
+      // Warn about one exact Store snapshot and only download that snapshot;
+      // if reload replaced it, re-prompt against the fresh data.
+      while (true) {
+        const warnedData = store.data;
+        const diaryCount = warnedData.diaries.length;
+        const backup = exportBackup(warnedData);
+        const ok = await confirmModal({
+          title: '导出完整备份？',
+          text: diaryCount
+            ? `这份未加密的 JSON 备份会包含 ${diaryCount} 篇日记全文，以及任务、日程等个人记录。请只保存在你信任的位置。`
+            : '这份未加密的 JSON 备份会包含任务、日程等个人记录。请只保存在你信任的位置。',
+          ok: '导出备份',
+          readOnlySafe: true,
+        });
+        if (!ok) return;
+        if (store.data !== warnedData) {
+          toast('数据刚刚已更新，请确认最新备份内容', true);
+          continue;
+        }
+        download(`yuzhi-backup-${store.today()}.json`, backup);
+        toast('完整备份已导出，请妥善保存');
+        break;
+      }
     } else if (m === 'import') {
       const context = store.captureWriteContext();
       const revision = session.revision;
