@@ -218,13 +218,13 @@ export class Tracker {
     const currentIds = new Set(entries.map((entry) => entry.id));
     const deletedIds = lifeBookSubjectIds(s.data, 'diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><div class="tt" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></div><div class="acts"><span class="chip">${diaryVersions(s.data, entry.id).length} 版</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${diaryVersions(s.data, entry.id).length} 版</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
         const snapshot = diaryLatestSnapshot(s.data, id);
         if (!snapshot) return '';
-        return `<div class="task history-record"><div class="tt" data-act="diary" data-id="${esc(id)}"><b>${esc(fmtDay(snapshot.date))}</b><span>${esc(snapshot.text.length > 100 ? snapshot.text.slice(0, 99) + '…' : snapshot.text)}</span></div><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
+        return `<div class="task history-record"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(id)}"><b>${esc(fmtDay(snapshot.date))}</b><span>${esc(snapshot.text.length > 100 ? snapshot.text.slice(0, 99) + '…' : snapshot.text)}</span></button><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
       })
       .join('');
     return [
@@ -287,14 +287,14 @@ export class Tracker {
         const history = settled
           ? '<span class="chip">已留入历史</span>'
           : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
-        return `<div class="task"><div class="tt" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></div><div class="acts"><span class="chip">${scheduleVersions(s.data, event.id).length} 版</span>${history}</div></div>`;
+        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${scheduleVersions(s.data, event.id).length} 版</span>${history}</div></div>`;
       })
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
         const snapshot = scheduleLatestSnapshot(s.data, id);
         if (!snapshot) return '';
-        return `<div class="task history-record"><div class="tt" data-act="schedule" data-id="${esc(id)}"><b>${esc(snapshot.title)}</b><span>${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)}</span></div><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
+        return `<div class="task history-record"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(id)}"><b>${esc(snapshot.title)}</b><span>${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)}</span></button><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
       })
       .join('');
     return [
@@ -739,7 +739,17 @@ export class Tracker {
   bindChange() {
     this.body.addEventListener('change', (e) => {
       const el = e.target as HTMLSelectElement;
-      if (el.dataset.actChange === 'evproj') A.setEventProject(this.store, el.dataset.id!, el.value || undefined);
+      if (el.dataset.actChange !== 'evproj') return;
+      try {
+        A.setEventProject(this.store, el.dataset.id!, el.value || undefined);
+      } catch (err) {
+        if (err instanceof A.ActionError) {
+          toast(err.message, true);
+          this.render();
+        } else {
+          throw err;
+        }
+      }
     });
   }
 
