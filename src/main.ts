@@ -51,6 +51,9 @@ async function boot() {
   const store = session.store;
   let renderer!: IslandRenderer;
   let releasePreparingCueBaseline: (() => void) | undefined;
+  // Map inspections capture the permission state used to build their actions.
+  // A session generation change invalidates that UI snapshot.
+  let clearSessionSensitiveMapInfo: () => void = () => {};
 
   const syncReadOnlyUi = (readOnly: boolean) => {
     for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
@@ -116,6 +119,7 @@ async function boot() {
     const readOnly = state !== 'writer';
     store.setReadOnly(readOnly);
     syncReadOnlyUi(readOnly);
+    clearSessionSensitiveMapInfo();
     if (readOnly) {
       closeModal(false);
       settle?.discard();
@@ -285,6 +289,7 @@ async function boot() {
     setText(infoAnnounce, '');
     renderer.clearFocus();
   };
+  clearSessionSensitiveMapInfo = hideInfo;
   function pickAndClassifyDrift(title: string): boolean {
     // Pointer, keyboard and card button share the same writer guard.
     if (store.isReadOnly) return false;
