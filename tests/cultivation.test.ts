@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDiary, createProject, createSchedule, createTask, settleDay } from '../src/actions';
+import { createDiary, createProject, createSchedule, createTask, deleteDiary, deleteSchedule, settleDay } from '../src/actions';
 import { cultivationState } from '../src/logic/cultivation';
 import { itemKey } from '../src/logic/days';
 import { exportBackup, parseBackup } from '../src/db';
@@ -39,7 +39,7 @@ describe('real-life cultivation read model', () => {
     expect(cultivationState(store.data, '2026-10-05').orchard.score).toBeGreaterThan(1);
   });
 
-  it('rejects a local schedule that inverts after DST-gap normalization', () => {
+  it('rejects a nonexistent DST wall-clock time even when the normalized interval stays positive', () => {
     vi.stubEnv('TZ', 'America/New_York');
     try {
       const { store } = makeStore('2026-03-08');
@@ -47,9 +47,10 @@ describe('real-life cultivation read model', () => {
         title: 'DST gap',
         date: '2026-03-08',
         start: '02:30',
-        end: '03:00',
+        end: '04:00',
         projectId: CHORES,
-      })).toThrow('日程结束时间要晚于开始时间');
+      })).toThrow('这个当地时间因夏令时切换不存在，请重新选择');
+      expect(store.data.events).toHaveLength(0);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -66,6 +67,42 @@ describe('real-life cultivation read model', () => {
     expect(cultivationState(store.data, '2026-10-05').garden.score).toBe(2);
 
     expect(parseBackup(exportBackup(store.data)).diaries).toHaveLength(3);
+  });
+
+  it('deleting a diary immediately recalculates the garden from remaining facts', () => {
+    const { store, setToday } = makeStore('2026-10-04');
+    const first = createDiary(store, { text: '第一天' });
+    setToday('2026-10-05');
+    createDiary(store, { text: '第二天' });
+    expect(cultivationState(store.data, '2026-10-05').garden.score).toBe(2);
+
+    deleteDiary(store, first.id);
+    expect(store.data.diaries.map((entry) => entry.text)).toEqual(['第二天']);
+    expect(cultivationState(store.data, '2026-10-05').garden.score).toBe(1);
+  });
+
+  it('deletes only unsettled local schedules and preserves settled history', () => {
+    const { store } = makeStore('2026-10-05');
+    const removable = createSchedule(store, {
+      title: '可删日程',
+      date: '2026-10-05',
+      start: '11:00',
+      end: '12:00',
+      projectId: CHORES,
+    });
+    deleteSchedule(store, removable.id);
+    expect(store.data.events.some((event) => event.id === removable.id)).toBe(false);
+
+    const historical = createSchedule(store, {
+      title: '历史日程',
+      date: '2026-10-05',
+      start: '18:00',
+      end: '19:00',
+      projectId: CHORES,
+    });
+    settleDay(store, '2026-10-05', new Map([[itemKey('event', historical.id), { outcome: 'done' }]]));
+    expect(() => deleteSchedule(store, historical.id)).toThrow('这个日程已经留下结算记录，不能直接删除');
+    expect(store.data.events.some((event) => event.id === historical.id)).toBe(true);
   });
 
   it('lets an honestly settled hard day nourish the pond even when the Todo was skipped', () => {
