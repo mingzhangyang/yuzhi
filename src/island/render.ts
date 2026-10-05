@@ -1066,7 +1066,7 @@ export class IslandRenderer {
     else this.sceneryIndex = (this.sceneryIndex + step + candidates.length) % candidates.length;
     const current = candidates[this.sceneryIndex];
     this.focus = current.focus;
-    return { info: current.info, x: current.x, y: current.y };
+    return { info: current.info, x: current.x, y: current.y, target: current.target };
   }
 
   clearFocus() {
