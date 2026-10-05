@@ -204,14 +204,14 @@ export class Tracker {
     const ps = s.activeProjects();
     const vs = s.villages();
     const b = backlog(s.data, today);
-    const projOpts = ps.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    const projOpts = ps.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const rows = ps
       .map((p) => {
         const v = vs.get(p.id)!;
         const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
         const progressAt = lastProgressAt(s.data, p.id);
         const since = progressAt ? `距上次推进 ${diffDays(progressAt, today)} 天` : `立项 ${diffDays(p.createdAt, today)} 天，还没推进`;
-        return `<button class="row" data-act="project" data-id="${p.id}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${open} 件未完成 · ${since}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${STAGE_NAMES[v.stage]}</span></button>`;
+        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${open} 件未完成 · ${since}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${STAGE_NAMES[v.stage]}</span></button>`;
       })
       .join('');
     const groups = unclassifiedGroups(s.data.events);
@@ -255,7 +255,7 @@ export class Tracker {
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
     const rows = entries
-      .map((entry) => `<div class="task"><div class="tt"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text)}</span></div><div class="acts"><button class="iconbtn" data-act="delete-diary" data-id="${entry.id}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><div class="tt"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text)}</span></div><div class="acts"><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
       .join('');
     return [
       `${this.back$()}<div class="ptitle">日记 <small>${entries.length} 篇</small></div><p class="hint">日记是现实记录，不需要结算。删除后，花园会按剩余事实重新计算长势。</p><div class="rows">${rows || '<p class="empty">还没有日记。用「＋ 新建」写下今天、昨天或前天。</p>'}</div>`,
@@ -285,7 +285,7 @@ export class Tracker {
             : '未归类';
         const history = settled
           ? '<span class="chip">已留入历史</span>'
-          : `<button class="iconbtn" data-act="delete-schedule" data-id="${event.id}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
+          : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
         return `<div class="task"><div class="tt"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></div><div class="acts">${history}</div></div>`;
       })
       .join('');
@@ -321,7 +321,7 @@ export class Tracker {
       .map((t) => {
         const late = t.scheduledFor && t.scheduledFor < today;
         const meta = [t.scheduledFor ? relDay(t.scheduledFor, today) + (late ? ' · 过期' : '') : '无日期', t.postponeCount ? `推迟 ${t.postponeCount} 次` : '', stage === 3 ? '可能放弃' : ''].filter(Boolean).join(' · ');
-        return `<div class="task"><div class="tt" data-act="task" data-id="${t.id}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${t.id}" title="今天做完了" aria-label="今天做完了">✓</button><button class="iconbtn" data-act="resched" data-id="${t.id}" title="改日期" aria-label="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${t.id}" title="不重要了" aria-label="不重要了">✕</button></div>` : ''}</div>`;
+        return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="今天做完了" aria-label="今天做完了">✓</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="改日期" aria-label="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="不重要了" aria-label="不重要了">✕</button></div>` : ''}</div>`;
       })
       .join('');
     const life = lifeEntries(s.data, stageLifeEntries(s.data, today)).filter((l) => l.projectId === p.id);
@@ -335,21 +335,21 @@ export class Tracker {
           : `<div class="nums"><div><b>${open.length}</b><span>未完成</span></div><div><b>${done.length}</b><span>已完成</span></div><div><b>${since ?? '—'}</b><span>距上次推进（天）</span></div></div>`
       }
       ${p.closeReason ? `<p class="hint">停下的原因：${esc(p.closeReason)}</p>` : ''}
-      ${active && !open.length && done.length ? `<div class="ready"><span>村里的事都做完了。要举行落成仪式吗？</span><button class="btn small primary" data-act="complete" data-id="${p.id}">落成仪式</button></div>` : ''}
+      ${active && !open.length && done.length ? `<div class="ready"><span>村里的事都做完了。要举行落成仪式吗？</span><button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">落成仪式</button></div>` : ''}
       ${p.status === 'done' ? '' : `<div class="sect">住在这里的任务 <small>${open.length}</small></div>`}
-      ${active ? `<form class="add" data-form="ptask" data-id="${p.id}"><input name="ptask" placeholder="添加任务…" autocomplete="off" aria-label="新任务">${dateSelect('pdate', today, today)}<button class="btn primary">添加</button></form>` : ''}
+      ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="添加任务…" autocomplete="off" aria-label="新任务">${dateSelect('pdate', today, today)}<button class="btn primary">添加</button></form>` : ''}
       ${p.status === 'done' ? '' : `<div>${taskRows || (active ? '<p class="empty">村里还没有人。添加一件要做的事吧。</p>' : '')}</div>`}
-      ${done.length ? `<details class="hint"><summary>已完成 ${done.length} 件</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${t.id}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
+      ${done.length ? `<details class="hint"><summary>已完成 ${done.length} 件</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
       <div class="sect">一生之书 <small>${life.length} 条</small></div>
       ${lifeList(life, today)}
       <div class="btnrow">
-        ${active ? `<button class="btn small primary" data-act="complete" data-id="${p.id}">完成项目 · 落成仪式</button>` : ''}
-        ${active ? `<button class="btn small" data-act="rename" data-id="${p.id}">改名</button>` : ''}
-        ${active && stage >= 1 ? `<button class="btn small" data-act="prompt" data-id="${p.id}">重新启动 / 缩小规模</button>` : ''}
-        ${active ? `<button class="btn small danger" data-act="close" data-id="${p.id}">正式关闭</button>` : ''}
-        ${p.status === 'closed' ? `<button class="btn small" data-act="reopen" data-id="${p.id}">重新立起</button>` : ''}
-        ${p.status === 'done' && p.resting === 'landmark' ? `<button class="btn small" data-act="rest" data-to="archive" data-id="${p.id}">收进档案馆</button>` : ''}
-        ${p.status === 'done' && p.resting !== 'landmark' ? `<button class="btn small primary" data-act="rest" data-to="landmark" data-id="${p.id}">重新立为地标</button>` : ''}
+        ${active ? `<button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">完成项目 · 落成仪式</button>` : ''}
+        ${active ? `<button class="btn small" data-act="rename" data-id="${esc(p.id)}">改名</button>` : ''}
+        ${active && stage >= 1 ? `<button class="btn small" data-act="prompt" data-id="${esc(p.id)}">重新启动 / 缩小规模</button>` : ''}
+        ${active ? `<button class="btn small danger" data-act="close" data-id="${esc(p.id)}">正式关闭</button>` : ''}
+        ${p.status === 'closed' ? `<button class="btn small" data-act="reopen" data-id="${esc(p.id)}">重新立起</button>` : ''}
+        ${p.status === 'done' && p.resting === 'landmark' ? `<button class="btn small" data-act="rest" data-to="archive" data-id="${esc(p.id)}">收进档案馆</button>` : ''}
+        ${p.status === 'done' && p.resting !== 'landmark' ? `<button class="btn small primary" data-act="rest" data-to="landmark" data-id="${esc(p.id)}">重新立为地标</button>` : ''}
       </div>`;
     return [html, p.name, active ? STAGE_NAMES[stage] + ` · ${open.length} 件未完成` : p.status === 'done' ? (p.resting === 'landmark' ? '海岸上的地标' : '灯塔里的档案') : '已关闭'];
   }
@@ -362,7 +362,7 @@ export class Tracker {
     const statusChip = t.status === 'open' ? `<span class="chip ok">进行中</span>` : t.status === 'done' ? `<span class="chip ok">已完成</span>` : `<span class="chip">已放下</span>`;
     const entries = s.data.entries.filter((e) => e.itemType === 'task' && e.itemId === t.id);
     const life = lifeEntries(s.data, stageLifeEntries(s.data, today)).filter((l) => l.taskId === t.id);
-    const projOpts = s.activeProjects().map((x) => `<option value="${x.id}"${x.id === t.projectId ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+    const projOpts = s.activeProjects().map((x) => `<option value="${esc(x.id)}"${x.id === t.projectId ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
     const html = `
       ${this.back$(p ? p.name : '码头')}
       <div class="who"><div class="emblem" style="background:${p ? roofOf(p.islandSlot) + '22' : 'var(--chip)'}">${p ? '🧑‍🌾' : '⛵'}</div><div><div class="fname">${esc(t.title)}</div><div class="fmeta">${p ? `住在「${esc(p.name)}」` : '停在码头，等你安排'} · ${fmtDay(t.createdAt)}来到岛上</div></div></div>
@@ -370,8 +370,8 @@ export class Tracker {
       <div class="nums"><div><b>${entries.filter((e) => e.outcome !== 'skipped').length}</b><span>做过</span></div><div><b>${entries.filter((e) => e.outcome === 'skipped').length}</b><span>没做</span></div><div><b>${diffDays(t.createdAt, today)}</b><span>来岛天数</span></div></div>
       ${
         t.status === 'open'
-          ? `<form class="add" data-form="tedit" data-id="${t.id}"><select name="tproj" aria-label="所属村落"><option value="">停在码头</option>${projOpts}</select>${dateSelect('tdate', today, t.scheduledFor)}<button class="btn small">保存</button></form>
-             <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${t.id}">今天做完了</button>` : ''}<button class="btn small" data-act="trename" data-id="${t.id}">改名</button><button class="btn small" data-act="drop" data-id="${t.id}">不重要了</button></div>`
+          ? `<form class="add" data-form="tedit" data-id="${esc(t.id)}"><select name="tproj" aria-label="所属村落"><option value="">停在码头</option>${projOpts}</select>${dateSelect('tdate', today, t.scheduledFor)}<button class="btn small">保存</button></form>
+             <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${esc(t.id)}">今天做完了</button>` : ''}<button class="btn small" data-act="trename" data-id="${esc(t.id)}">改名</button><button class="btn small" data-act="drop" data-id="${esc(t.id)}">不重要了</button></div>`
           : ''
       }
       <div class="sect">一生之书</div>
@@ -384,10 +384,10 @@ export class Tracker {
     const today = s.today();
     const ships = s.tasks().filter((t) => t.status === 'open' && !t.projectId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const overdue = s.tasks().filter((t) => t.status === 'open' && t.projectId && t.scheduledFor && t.scheduledFor < today).sort((a, b) => a.scheduledFor!.localeCompare(b.scheduledFor!));
-    const projOpts = s.activeProjects().map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    const projOpts = s.activeProjects().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const shipRows = ships
       .map(
-        (t) => `<form class="ship" data-form="arrange" data-id="${t.id}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="住进哪个村落">${projOpts || '<option value="">（先建一个村落）</option>'}</select>${dateSelect('adate', today, t.scheduledFor)}<button class="btn small primary"${projOpts ? '' : ' disabled'}>安排</button><button type="button" class="btn small" data-act="decline" data-id="${t.id}">婉拒</button></div></form>`,
+        (t) => `<form class="ship" data-form="arrange" data-id="${esc(t.id)}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="住进哪个村落">${projOpts || '<option value="">（先建一个村落）</option>'}</select>${dateSelect('adate', today, t.scheduledFor)}<button class="btn small primary"${projOpts ? '' : ' disabled'}>安排</button><button type="button" class="btn small" data-act="decline" data-id="${esc(t.id)}">婉拒</button></div></form>`,
       )
       .join('');
     const ints = interruptions(s.data).sort((a, b) => b.date.localeCompare(a.date));
@@ -406,7 +406,7 @@ export class Tracker {
         overdue
           .map((t) => {
             const p = s.project(t.projectId);
-            return `<div class="task"><div class="tt" data-act="task" data-id="${t.id}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · 原定${relDay(t.scheduledFor!, today)}</span></div><div class="acts"><button class="btn small" data-act="to-today" data-id="${t.id}">排到今天</button><button class="iconbtn" data-act="resched" data-id="${t.id}" aria-label="改日期" title="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${t.id}" aria-label="不重要了" title="不重要了">✕</button></div></div>`;
+            return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · 原定${relDay(t.scheduledFor!, today)}</span></div><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">排到今天</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="改日期" title="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="不重要了" title="不重要了">✕</button></div></div>`;
           })
           .join('') || '<p class="empty">没有过期的事。</p>'
       }
@@ -448,7 +448,7 @@ export class Tracker {
     const books = done.filter((p) => p.resting !== 'landmark');
     const closed = s.data.projects.filter((p) => p.status === 'closed');
     const row = (p: Project, meta: string) =>
-      `<button class="row" data-act="project" data-id="${p.id}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(meta)}</span></span><span class="end">›</span></button>`;
+      `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(meta)}</span></span><span class="end">›</span></button>`;
     const byYear = (ps: Project[], dateOf: (p: Project) => string | undefined, meta: (p: Project) => string) => {
       const years = new Map<string, Project[]>();
       for (const p of ps) {
@@ -479,7 +479,7 @@ export class Tracker {
     const s = this.store;
     const today = s.today();
     const evs = s.data.events.filter((e) => e.projectId === CHORES && !e.allDay && dateOfStamp(e.start) > addDays(today, -7) && dateOfStamp(e.start) <= addDays(today, 7)).sort((a, b) => a.start.localeCompare(b.start));
-    const projOpts = s.activeProjects().map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    const projOpts = s.activeProjects().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const html = `
       ${this.back$()}
       <div class="ptitle" style="margin-top:8px">杂务区 <small>没有归属的日历事件</small></div>
@@ -777,7 +777,7 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
           } else if (c === 'trim') {
             openModal({
               title: `缩小「${p.name}」的规模`,
-              body: `<p>勾选的任务留下；取消勾选的任务会被放下（不算惩罚）。</p><div class="checklist">${open.map((t) => `<label><input type="checkbox" value="${t.id}" checked> ${esc(t.title)}</label>`).join('') || '<p class="empty">村里没有未完成的任务。</p>'}</div><div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>就这样</button></div>`,
+              body: `<p>勾选的任务留下；取消勾选的任务会被放下（不算惩罚）。</p><div class="checklist">${open.map((t) => `<label><input type="checkbox" value="${esc(t.id)}" checked> ${esc(t.title)}</label>`).join('') || '<p class="empty">村里没有未完成的任务。</p>'}</div><div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>就这样</button></div>`,
               mount(b2) {
                 b2.querySelector('[data-ok]')!.addEventListener('click', () => {
                   const drop = [...b2.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].filter((x) => !x.checked).map((x) => x.value);
