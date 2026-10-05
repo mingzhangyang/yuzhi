@@ -103,7 +103,7 @@ async function points(page) {
     }
     const walkers = [...r.walkers.values()].filter((w) => w.slot === village('团队').slot).map((w) => {
       const [x, y] = r.iso(w.x, w.y);
-      return { id: w.id, ...page([x, y - Math.max(5, tw * 0.2) * 0.7]) };
+      return { id: w.id, ...page([x, y - Math.max(4, tw * 0.15) * 0.7]) };
     });
     const [hx, hy] = r.iso(r.map.chores.i, r.map.chores.j);
     const broom = r.choresAgendaAnchor();

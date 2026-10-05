@@ -4,6 +4,7 @@ import { moonPhase } from '../ambience';
 import { describe, type InfoContext, type InfoTarget } from '../info';
 import { tileHash, type Tile } from '../map';
 import type { AgendaView, Ambience, ChoresView, Hit, SceneryCandidate, SceneryFocus, SceneryInspection, VillageView, Walker } from './model';
+import { personSize } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
 
@@ -322,7 +323,7 @@ export abstract class IslandInteraction extends IslandViewport {
 
   /** 前景可动实体永远优先于其经过的码头、瓶子和日程道具。 */
   protected walkerHitAt(pt: { x: number; y: number }): Hit {
-    const s0 = Math.max(5, this.view.tw * 0.2);
+    const s0 = personSize(this.view.tw);
     let best: Walker | null = null;
     let bd = Math.max(16, s0 * 1.4);
     for (const p of this.walkers.values()) {

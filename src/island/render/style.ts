@@ -5,3 +5,11 @@ export const SNOW_SHADE = '#d6e0e8';
 export const WARM = '255,206,110';
 export const LANTERN = '255,120,70';
 export const FIREWORK = ['#ffd36b', '#ff7a6b', '#8fd3ff', '#c99bff', '#9dff9b', '#ffffff', '#ffb3d9'];
+
+/** 村落房屋相对地块宽度的比例。 */
+export const HOUSE_SCALE = 0.42;
+
+/** 小人的绘制尺寸：约为地块宽的 0.15，手机上不小于 4px，身高大致与屋檐齐平。 */
+export function personSize(tw: number): number {
+  return Math.max(4, tw * 0.15);
+}

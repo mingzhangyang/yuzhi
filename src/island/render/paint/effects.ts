@@ -1,7 +1,7 @@
 import { moonPhase } from '../../ambience';
 import type { Scene, Walker } from '../model';
 import { SNOW } from '../style';
-import { clamp, hash, rgb, shade } from '../utils';
+import { clamp, hash, luma, mix, rgb, shade } from '../utils';
 import { IslandStructurePainter } from './structures';
 
 /** People, selection overlays, sky/weather effects, lighting, and labels. */
@@ -405,11 +405,14 @@ export abstract class IslandEffectsPainter extends IslandStructurePainter {
     const w = c.measureText(txt).width;
     const bw = w + (dot ? 22 : 14);
     const bh = tw < 30 ? 18 : 21;
-    c.globalAlpha = muted ? 0.82 : 1;
+    // 夜里浅色标签压暗、变淡，让窗灯、路灯和灯塔成为画面里最亮的东西；
+    // 深色主题的标签本来就暗，不再处理。选中的标签保持清晰。
+    const night = hl || !(luma(this.theme.label) >= 150) ? 0 : this.day.night;
+    c.globalAlpha = (muted ? 0.82 : 1) * (1 - 0.18 * night);
     c.fillStyle = 'rgba(20,30,20,.12)';
     this.rrect(x - bw / 2, y - bh / 2 + 1.5, bw, bh, bh / 2);
     c.fill();
-    c.fillStyle = this.theme.label;
+    c.fillStyle = night > 0.01 ? mix(this.theme.label, '#4a5068', 0.6 * night) : this.theme.label;
     c.strokeStyle = hl ? this.theme.accent : this.theme.line;
     c.lineWidth = hl ? 2.2 : 1;
     this.rrect(x - bw / 2, y - bh / 2, bw, bh, bh / 2);
@@ -429,3 +432,4 @@ export abstract class IslandEffectsPainter extends IslandStructurePainter {
 
   /* ---------------- 每帧 ---------------- */
 }
+
