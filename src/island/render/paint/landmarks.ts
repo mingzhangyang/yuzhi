@@ -5,6 +5,25 @@ import { IslandStructurePainter } from './structures';
 
 const f = (...q: [number, number][]) => q.flat();
 
+/** 山亭后那棵花树：落地点在亭子局部坐标 (−0.34, 0.12)，尺寸 0.5tw·sc */
+const PAVILION_TREE = { pi: -0.34, pj: 0.12, size: 0.5 };
+
+/**
+ * 花树的树冠叶团：[横向偏移, 纵向偏移, 半径]，单位是树的尺寸、相对树根；冬天落尽，没有树冠。
+ * drawPavilion 和 landmarkOutline 共用，树冠伸出石台的那一截也能点到、也能挡人。
+ */
+function pavilionCrown(seed: number, season: number): [number, number, number][] {
+  if (season === 3) return [];
+  const jitter = (((seed * 0.37) % 1) - 0.5) * 0.04;
+  const lobes: [number, number, number][] = [
+    [-0.16, -0.66, 0.2],
+    [0.18, -0.7, 0.19],
+    [0.02, -0.82, 0.22],
+    [0, -0.6, 0.18],
+  ];
+  return [...lobes.map(([dx, dy, r]): [number, number, number] => [dx + jitter, dy, r]), [-0.06, -0.86, 0.12]];
+}
+
 /**
  * 永久地标：石台 + 八种楼体，按地标位轮换（landmarkKind）。钟楼、藏书阁、风车画在 structures.ts，
  * 观星台、玻璃温室、海港会馆、纪念塔、山亭画在这里；造型参考 docs/art/landmark-concepts.webp，
@@ -120,9 +139,9 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     this.shadow(x + tw * 0.08, y + tw * 0.08, tw * 0.42, tw * 0.17);
     this.isoBox(P, -wi, wi, -wj, wj, 0, z0, '#cfc6b0', '#b5ab94');
     // 后面两面玻璃墙（透过前墙能看到）
-    const backGlass = this.lit ? 'rgba(236,214,150,.85)' : 'rgba(170,205,198,.9)';
-    this.poly(backGlass, ...f(P(-wi, -wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(-wi, -wj, H)));
-    this.poly(shade(backGlass, -0.08), ...f(P(-wi, -wj, z0), P(-wi, wj, z0), P(-wi, wj, H), P(-wi, -wj, H)));
+    // shade() 只认十六进制颜色，半透明的玻璃色直接写出亮、暗两面
+    this.poly(this.lit ? 'rgba(236,214,150,.85)' : 'rgba(170,205,198,.9)', ...f(P(-wi, -wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(-wi, -wj, H)));
+    this.poly(this.lit ? 'rgba(217,197,138,.85)' : 'rgba(156,189,182,.9)', ...f(P(-wi, -wj, z0), P(-wi, wj, z0), P(-wi, wj, H), P(-wi, -wj, H)));
     // 里面的绿植与花：叶色随季节
     const leaf = a.cover > 0.3 ? '#6f8f6a' : ['#6fae55', '#5f9a48', '#8a9a48', '#5f8a5a'][a.season] ?? '#6fae55';
     const bloom = ['#f2a6c0', '#f6d36b', '#e88a5a', '#e9e4f2'][a.season] ?? '#f2a6c0';
@@ -133,9 +152,8 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
       this.dot(px + tw * 0.02, py - tw * 0.1 * s * sc, tw * 0.016, bloom);
     }
     // 前面两面玻璃墙
-    const glass = this.lit ? 'rgba(255,226,150,.5)' : 'rgba(214,238,232,.5)';
-    this.poly(glass, ...f(P(-wi, wj, z0), P(wi, wj, z0), P(wi, wj, H), P(-wi, wj, H)));
-    this.poly(shade(glass, -0.06), ...f(P(wi, wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(wi, wj, H)));
+    this.poly(this.lit ? 'rgba(255,226,150,.5)' : 'rgba(214,238,232,.5)', ...f(P(-wi, wj, z0), P(wi, wj, z0), P(wi, wj, H), P(-wi, wj, H)));
+    this.poly(this.lit ? 'rgba(240,212,141,.5)' : 'rgba(201,224,218,.5)', ...f(P(wi, wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(wi, wj, H)));
     // 双坡玻璃顶：屋脊沿 i 方向，朝左前的一坡和右侧的山墙
     const R0 = P(-wi, 0, H + rh);
     const R1 = P(wi, 0, H + rh);
@@ -348,8 +366,8 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const pillar = '#9a3a2c';
     this.shadow(x + tw * 0.08, y + tw * 0.07, tw * 0.36, tw * 0.14);
     // 亭后的花树：春天粉、夏天绿、秋天橙红，冬天落尽只剩枝
-    const [tx, ty] = P(-0.34, 0.12, 0);
-    const ts = tw * 0.5 * sc;
+    const [tx, ty] = P(PAVILION_TREE.pi, PAVILION_TREE.pj, 0);
+    const ts = tw * PAVILION_TREE.size * sc;
     c.strokeStyle = '#6b4a30';
     c.lineCap = 'round';
     c.lineWidth = Math.max(1, ts * 0.07);
@@ -361,13 +379,11 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     c.moveTo(tx + ts * 0.03, ty - ts * 0.45);
     c.lineTo(tx + ts * 0.2, ty - ts * 0.7);
     c.stroke();
-    if (a.season !== 3) {
+    const lobes = pavilionCrown(seed, a.season);
+    if (lobes.length) {
       const crown = ['#f3b6c8', '#6fae55', '#e0904a'][a.season];
-      const r0 = (seed * 0.37) % 1;
-      for (const [dx, dy, r] of [[-0.16, -0.66, 0.2], [0.18, -0.7, 0.19], [0.02, -0.82, 0.22], [0, -0.6, 0.18]] as const) {
-        this.dot(tx + ts * (dx + (r0 - 0.5) * 0.04), ty + ts * dy, ts * r, crown);
-      }
-      this.dot(tx - ts * 0.06, ty - ts * 0.86, ts * 0.12, shade(crown, 0.15));
+      // 最后一团是树顶的高光，颜色亮一些
+      lobes.forEach(([dx, dy, r], k) => this.dot(tx + ts * dx, ty + ts * dy, ts * r, k === lobes.length - 1 ? shade(crown, 0.15) : crown));
       if (a.season === 0) for (const [dx, dy] of [[-0.2, -0.6], [0.12, -0.78], [0.22, -0.62]] as const) this.dot(tx + ts * dx, ty + ts * dy, ts * 0.025, '#fff1f5');
     } else if (a.cover > 0.15) {
       c.strokeStyle = SNOW;
@@ -471,6 +487,16 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
         const th = (i / 16) * Math.PI * 2;
         return [hx + Math.cos(th) * len * 0.82, sy(hy + Math.sin(th) * len)];
       }));
+    } else if (kind === 'pavilion') {
+      // 花树的树冠伸出石台左侧：每个叶团一个圆
+      const [tx, ty] = [x + ((PAVILION_TREE.pi - PAVILION_TREE.pj) * tw) / 2, y + ((PAVILION_TREE.pi + PAVILION_TREE.pj) * tw) / 4];
+      const ts = tw * PAVILION_TREE.size * sc;
+      for (const [dx, dy, r] of pavilionCrown(l.index, this.amb.season)) {
+        outlines.push(Array.from({ length: 12 }, (_, i): [number, number] => {
+          const th = (i / 12) * Math.PI * 2;
+          return [tx + ts * (dx + Math.cos(th) * r), sy(ty + ts * (dy + Math.sin(th) * r))];
+        }));
+      }
     } else if (kind === 'clock') {
       // 攒尖顶尖上的小旗（drawFlag：旗杆高 0.5·0.5tw，旗面宽 0.26·0.5tw）
       const apex = y - tw * h * sc;

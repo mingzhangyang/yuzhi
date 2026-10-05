@@ -247,7 +247,10 @@ export class IslandRenderer extends IslandEffectsPainter {
     }
 
     // 码头、村落广场和院落里的道具：按各自的落地点排深度，不透明，也登记遮挡轮廓
+    // 贴图还没加载好（或加载失败）时既不画也不登记轮廓，免得一块看不见的道具挡住后面的小人；
+    // ready() 第一次被问到时开始加载。
     for (const p of islandProps(m, s.villages, a.cover)) {
+      if (!this.propArt.ready(p.id)) continue;
       const [x, y] = this.iso(p.i, p.j);
       put(p.i + p.j, () => this.drawProp(p, x, y, tw), propOutline(p.id, x, y, tw * p.w));
     }

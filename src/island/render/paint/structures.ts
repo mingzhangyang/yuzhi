@@ -1013,9 +1013,8 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
   }
 
   /** 环境道具：先画一圈落地阴影，再按锚点贴图；带灯笼的道具夜里点灯 */
+  /** 调用方先确认 propArt.ready(p.id)：没加载好的道具不入绘制队列，也不登记遮挡轮廓 */
   protected drawProp(p: PlacedProp, x: number, y: number, tw: number) {
-    // 贴图还没加载好时什么也不画，免得地上先冒出一块孤零零的阴影
-    if (!this.propArt.ready(p.id)) return;
     const width = tw * p.w;
     const { hw, top } = propBox(p.id, width);
     this.shadow(x + hw * 0.12, y, hw * 0.95, hw * 0.3, 0.16);
