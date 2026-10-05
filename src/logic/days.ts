@@ -29,7 +29,7 @@ export function settlementProjectId(data: Data, entry: SettlementEntry): string 
   if (entry.projectId !== undefined) return entry.projectId;
   if (entry.itemType !== 'event') return undefined;
   const event = data.events.find((candidate) => candidate.id === entry.itemId);
-  if (!event || event.projectId !== CHORES || dateOfStamp(event.start) !== entry.date) return undefined;
+  if (!event || !event.classified || event.projectId !== CHORES || dateOfStamp(event.start) !== entry.date) return undefined;
   return CHORES;
 }
 
