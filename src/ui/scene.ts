@@ -3,7 +3,7 @@ import type { AgendaView, ChoresView, Light, Scene, Selection, VillageView } fro
 import { CHORES } from '../types';
 import { BRICKS_PER_HOUSE, DRIFT_BOTTLES_MAX, MAX_WALKERS } from '../logic/config';
 import { granary, progressWeight } from '../logic/metrics';
-import { pendingDays } from '../logic/days';
+import { pendingDays, settlementProjectId } from '../logic/days';
 import { agendaAt, woodpileStep, type Agenda, type AgendaSlot } from '../logic/agenda';
 import { islandRings } from '../actions';
 import { addDays, localDate, seasonOf } from '../lib/date';
@@ -59,7 +59,7 @@ function choresOf(store: Store, agenda: Agenda, today: string): ChoresView {
   const slot = agenda.slots.get(CHORES);
   // 柴堆只算真正做了的杂务；没做的不留柴
   const count = store.data.entries.filter((entry) =>
-    entry.projectId === CHORES && (entry.outcome === 'done' || entry.outcome === 'partial')
+    settlementProjectId(store.data, entry) === CHORES && (entry.outcome === 'done' || entry.outcome === 'partial')
       && entry.date > addDays(today, -7) && entry.date <= today,
   ).length;
   const live = slot?.live[0];
