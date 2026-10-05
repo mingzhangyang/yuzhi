@@ -168,6 +168,7 @@ export interface BellRipple {
 
 export interface StageCue {
   projectId: string;
+  from: Stage;
   to: Stage;
   t: number;
 }
