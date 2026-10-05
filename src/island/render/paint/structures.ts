@@ -267,10 +267,10 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     ];
   }
 
-  /** 井：井身和井顶是实心的，两根立柱之间是空的 */
+  /** 井：井身和井顶是实心的，两根立柱之间是空的；圣诞节井边那棵松树也算（drawWell 里画在 x + 0.24tw） */
   protected wellOutline(x: number, y: number, tw: number): [number, number][][] {
     const r = tw * 0.1;
-    return [
+    const outlines: [number, number][][] = [
       [
         [x - r, y + r * 0.5],
         [x + r, y + r * 0.5],
@@ -283,6 +283,9 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
         [x + r * 1.3, y - r * 1.9],
       ],
     ];
+    const tree = this.amb.fest.has('christmas') ? this.treeOutline(x + tw * 0.24, y - tw * 0.02, tw * 0.4, 'pine') : null;
+    if (tree) outlines.push(tree);
+    return outlines;
   }
 
   /** 地标：石台加主楼（规模大的还有后面的塔），随建成动画纵向伸展 */
