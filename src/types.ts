@@ -115,6 +115,8 @@ export interface ChronicleLine {
   kind: ChronicleKind;
 }
 
+export type HistorySubjectType = 'project' | 'task' | 'diary' | 'schedule';
+
 export type OperationKind =
   | 'project-created'
   | 'project-renamed'
@@ -165,6 +167,9 @@ export interface OperationEvent {
   seq: number;
   date: ISODate;
   kind: OperationKind;
+  /** Generic subject for the unified 一生之书. Older facts infer this from taskId/projectId. */
+  subjectType?: HistorySubjectType;
+  subjectId?: string;
   projectId?: string;
   taskId?: string;
   payload?: OperationPayload;
@@ -173,6 +178,18 @@ export interface OperationEvent {
 export type LifeKind = 'start' | 'task' | 'done' | 'partial' | 'skip' | 'stage' | 'close' | 'restart' | 'trim' | 'drop' | 'event' | 'complete';
 
 /** 一生之书里的一行 */
+export interface LifeBookEntry {
+  id: string;
+  date: ISODate;
+  factSeq?: number;
+  subjectType: HistorySubjectType;
+  subjectId: string;
+  text: string;
+  /** Optional version snapshot shown for diary/schedule history. */
+  snapshot?: string;
+  kind: 'start' | 'change' | 'done' | 'partial' | 'skip' | 'delete' | 'event';
+}
+
 export interface LifeEntry {
   id: string;
   date: ISODate;
