@@ -111,6 +111,8 @@ export interface SceneryInspection {
   info: MapInfo;
   x: number;
   y: number;
+  /** 可从说明卡执行的对象；目前只有漂流瓶需要动作。 */
+  target?: Extract<InfoTarget, { kind: 'drift' }>;
 }
 
 interface SceneryCandidate extends SceneryInspection {
@@ -723,7 +725,30 @@ export class IslandRenderer {
     return this.driftBottleSpots()[index] ?? this.driftBottleSpots()[0];
   }
 
-  /** 漂流瓶在海上，不和陆地上的东西重叠，可以最先判断。窄屏重叠时取离点击点最近的瓶子。 */
+  /** 实际画出来的岸边码头和每一段栈桥；扩大的海上命中区不能抢走这里的点击。 */
+  private dockHitAt(pt: { x: number; y: number }): boolean {
+    const m = this.map;
+    const { fi, fj } = this.tileCoords(pt);
+    // 岸边码头地块本身。
+    if (Math.abs(fi - m.dock.i) + Math.abs(fj - m.dock.j) <= 0.95) return true;
+
+    const [di, dj] = m.pierDir;
+    for (let k = 0; k <= m.pierLen; k++) {
+      const pi = m.dock.i + di * (k + 0.2);
+      const pj = m.dock.j + dj * (k + 0.2);
+      const w = 0.28;
+      const deck: [number, number][] = [
+        this.iso(pi - w, pj - 0.5),
+        this.iso(pi + w, pj - 0.5),
+        this.iso(pi + w, pj + 0.5),
+        this.iso(pi - w, pj + 0.5),
+      ];
+      if (this.pointInPolygon(pt, deck)) return true;
+    }
+    return false;
+  }
+
+  /** 漂流瓶在海上；窄屏重叠时取离点击点最近的瓶子，但不覆盖真实码头/栈桥。 */
   private driftHitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
@@ -830,6 +855,7 @@ export class IslandRenderer {
   hitAt(pt: { x: number; y: number }): Hit {
     const s = this.scene;
     if (!s) return null;
+    if (this.dockHitAt(pt)) return { kind: 'dock' };
     const drift = this.driftHitAt(pt);
     if (drift) return drift;
     const s0 = Math.max(5, this.view.tw * 0.2);
@@ -898,7 +924,12 @@ export class IslandRenderer {
 
   private selectScenery(target: InfoTarget, focus: SceneryFocus | null, x: number, y: number, ctx: InfoContext): SceneryInspection {
     this.focus = focus;
-    return { info: describe(target, ctx), x, y };
+    return {
+      info: describe(target, ctx),
+      x,
+      y,
+      target: target.kind === 'drift' ? target : undefined,
+    };
   }
 
   /** 点到的景物（树、山、田、溪、空地、海）及其说明；anchor 是信息卡指向的位置 */
@@ -971,7 +1002,13 @@ export class IslandRenderer {
       const key = [info.title, info.sub ?? '', ...info.lines].join('\u0000');
       if (seen.has(key)) return;
       seen.add(key);
-      candidates.push({ info, focus, x, y });
+      candidates.push({
+        info,
+        focus,
+        x,
+        y,
+        target: target.kind === 'drift' ? target : undefined,
+      });
     };
 
     for (const t of m.all) {

@@ -277,19 +277,36 @@ async function boot() {
   const infoBox = $('mapinfo');
   const infoAnnounce = $('mapAnnounce');
   const mapCanvas = $('map') as HTMLCanvasElement;
+  let currentInspection: SceneryInspection | null = null;
   const hideInfo = () => {
+    currentInspection = null;
     if (infoBox.hidden) return;
     infoBox.hidden = true;
     setText(infoAnnounce, '');
     renderer.clearFocus();
   };
+  function pickAndClassifyDrift(title: string): boolean {
+    // Pointer, keyboard and card button share the same writer guard.
+    if (store.isReadOnly) return false;
+    hideInfo();
+    renderer.pickDrift(title);
+    markDriftSeen(title);
+    update();
+    openClassify(store, new Set(), title);
+    return true;
+  }
   const showInspection = (r: SceneryInspection | null) => {
     if (!r) return hideInfo();
+    currentInspection = r;
     const { info } = r;
+    const driftAction = r.target?.kind === 'drift'
+      ? `<div class="mi-actions"><button type="button" class="mi-action"${store.isReadOnly ? ' disabled' : ''}>${store.isReadOnly ? '只读标签页无法归类' : '捞起并归类'}</button></div>`
+      : '';
     setHTML(
       infoBox,
       `<div class="mi-head"><b>${esc(info.title)}</b>${info.sub ? `<small>${esc(info.sub)}</small>` : ''}<button type="button" class="mi-x" aria-label="关闭">×</button></div>` +
-        info.lines.map((l) => `<p>${esc(l)}</p>`).join(''),
+        info.lines.map((l) => `<p>${esc(l)}</p>`).join('') +
+        driftAction,
     );
     infoBox.hidden = false;
     // 播报通道永久留在可访问性树里；可视卡片可以自由 hidden/unhidden。
@@ -306,11 +323,22 @@ async function boot() {
     infoBox.style.top = `${below ? Math.min(r.y + 14, wrap.clientHeight - bh - 8) : r.y - bh - 12}px`;
     infoBox.style.setProperty('--arrow', `${Math.min(Math.max(14, r.x - left), bw - 14)}px`);
     infoBox.querySelector<HTMLButtonElement>('.mi-x')!.onclick = hideInfo;
+    const action = infoBox.querySelector<HTMLButtonElement>('.mi-action');
+    if (action && r.target?.kind === 'drift') {
+      const title = r.target.title;
+      action.onclick = () => { pickAndClassifyDrift(title); };
+    }
   };
   const showInfo = (pt: { x: number; y: number }) => showInspection(renderer.inspect(pt));
 
   mapCanvas.addEventListener('pointerdown', hideInfo);
   mapCanvas.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && currentInspection?.target?.kind === 'drift') {
+      e.preventDefault();
+      $('tip').style.opacity = '0';
+      pickAndClassifyDrift(currentInspection.target.title);
+      return;
+    }
     let step: 1 | -1 | null = null;
     if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowDown') step = 1;
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') step = -1;
@@ -328,12 +356,8 @@ async function boot() {
     $('tip').style.opacity = '0';
     if (!hit) return showInfo(pt);
     if (hit.kind === 'drift') {
-      // 只读标签页不能归类；这时捞起并记下「已捞起」会让写入页的瓶子也消失，只显示说明
-      if (store.isReadOnly) return showInfo(pt);
-      renderer.pickDrift(hit.title);
-      markDriftSeen(hit.title);
-      update();
-      openClassify(store, new Set(), hit.title);
+      // 只读标签页不能归类；统一动作返回 false 时只显示说明。
+      if (!pickAndClassifyDrift(hit.title)) showInfo(pt);
       return;
     }
     if (hit.kind === 'agenda') return showInfo(pt);

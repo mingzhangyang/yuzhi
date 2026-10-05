@@ -126,6 +126,10 @@ async function points(page) {
       const at = r.driftBottleAnchor(k);
       return { title: d.title, onSea: r.onSea(at[0], at[1]), ...page(at) };
     });
+    out.pier = Array.from({ length: r.map.pierLen + 1 }, (_, k) => {
+      const [di, dj] = r.map.pierDir;
+      return page(r.iso(r.map.dock.i + di * (k + 0.2), r.map.dock.j + dj * (k + 0.2)));
+    });
     return out;
   });
 }
@@ -276,6 +280,10 @@ try {
       assert(hit?.kind === 'drift' && hit.title === bottle.title,
         `tap on ${bottle.title} selected ${JSON.stringify(hit)} from ${JSON.stringify(p.bottles)}`);
     }
+    for (const plank of p.pier) {
+      const hit = await hitAt(page, plank);
+      assert(hit?.kind === 'dock', `visible narrow pier was intercepted by ${JSON.stringify(hit)}`);
+    }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.waitForTimeout(350);
     p = await points(page);
@@ -294,6 +302,34 @@ try {
     const left = await page.evaluate(() => window.yuzhi.renderer.scene.drifting.map((item) => item.title));
     assert(left.length === 2 && !left.includes('神秘会面'),
       `picked bottle did not remove exactly its own group: ${JSON.stringify(left)}`);
+  });
+
+  await runScenario('键盘浏览漂流瓶：Enter 可捞起并打开归类，卡片提供可聚焦动作', async () => {
+    const before = await page.evaluate(() => window.yuzhi.renderer.scene.drifting.length);
+    await page.locator('#map').focus();
+    let found = false;
+    for (let i = 0; i < 240; i++) {
+      await page.keyboard.press('ArrowRight');
+      found = await page.locator('#mapinfo .mi-action').isVisible().catch(() => false);
+      if (found) break;
+    }
+    assert(found, 'keyboard browsing never exposed the bottle action');
+    const action = page.locator('#mapinfo .mi-action');
+    assert(await action.isEnabled(), 'writer bottle action was disabled');
+    const tabIndex = await action.evaluate((button) => button.tabIndex);
+    assert(tabIndex >= 0, `bottle action was not focusable: tabIndex=${tabIndex}`);
+
+    // Focus remains on the canvas, so Enter exercises the canvas activation path.
+    await page.locator('#map').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(
+      () => !document.getElementById('mdl').hidden && document.getElementById('mdlBox').innerText.includes('属于哪里'),
+      undefined,
+      { timeout },
+    );
+    await page.keyboard.press('Escape');
+    const after = await page.evaluate(() => window.yuzhi.renderer.scene.drifting.length);
+    assert(after === before - 1, `keyboard pickup did not remove exactly one bottle: ${before} -> ${after}`);
   });
 
   await runScenario('杂务待结算 / 稍后：点小屋打开杂务追踪栏', async () => {
