@@ -202,7 +202,6 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
         .sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? '')));
       for (const row of missing) row.seq = ++seq;
 
-      data.entries = entries;
       data.operations = operations;
       delete data.__legacyLifeOrder;
     },
@@ -396,18 +395,11 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
       const entries = Array.isArray(data.entries) ? data.entries : [];
       const diaries = Array.isArray(data.diaries) ? data.diaries : [];
       const events = Array.isArray(data.events) ? data.events : [];
-
-      // Reserve an odd sequence immediately before every existing fact. This
-      // lets a synthetic schedule baseline sit before its already-persisted
-      // settlement without changing the relative order of any v5 facts.
       let seq = 0;
       for (const value of [...entries, ...operations]) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-        const row = value as Record<string, unknown>;
-        const n = row.seq;
-        if (!Number.isInteger(n) || (n as number) < 1) continue;
-        row.seq = (n as number) * 2;
-        if ((row.seq as number) > seq) seq = row.seq as number;
+        const n = (value as Record<string, unknown>).seq;
+        if (Number.isInteger(n) && (n as number) > seq) seq = n as number;
       }
 
       const hasSubject = (subjectType: string, subjectId: string) => operations.some((value) => {
@@ -457,18 +449,9 @@ const DATA_MIGRATIONS: readonly MigrationStep<RawData>[] = [
           end: hm(end),
           ...(typeof row.projectId === 'string' ? { projectId: row.projectId } : {}),
         };
-        const firstSettlementSeq = entries
-          .filter((entry) => {
-            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-            const settled = entry as Record<string, unknown>;
-            return settled.itemType === 'event' && settled.itemId === row.id && Number.isInteger(settled.seq);
-          })
-          .map((entry) => (entry as Record<string, unknown>).seq as number)
-          .sort((a, b) => a - b)[0];
-        const baselineSeq = firstSettlementSeq !== undefined ? firstSettlementSeq - 1 : ++seq;
         operations.push({
           id: `op|v6-schedule-baseline|${row.id}`,
-          seq: baselineSeq,
+          seq: ++seq,
           date,
           kind: 'schedule-created',
           ...(typeof row.projectId === 'string' && row.projectId !== CHORES ? { projectId: row.projectId } : {}),
