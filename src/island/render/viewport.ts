@@ -69,11 +69,27 @@ export abstract class IslandViewport {
     const r = this.wrap.getBoundingClientRect();
     if (!r.width) return;
     const v = this.view;
+    const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+    const pixelWidth = Math.round(r.width * dpr);
+    const pixelHeight = Math.round(r.height * dpr);
+    const sameGeometry =
+      Math.abs(v.w - r.width) < 0.01
+      && Math.abs(v.h - r.height) < 0.01
+      && v.dpr === dpr
+      && this.canvas.width === pixelWidth
+      && this.canvas.height === pixelHeight;
+
+    // Mobile browsers can emit window resize events when the software keyboard
+    // opens even though the map itself has not changed size. Reassigning the
+    // canvas backing store in that case clears it and makes the island visibly
+    // jump. Only resize when the observed element geometry (or DPR) changed.
+    if (sameGeometry) return;
+
     v.w = r.width;
     v.h = r.height;
-    v.dpr = Math.min(2.5, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(r.width * v.dpr);
-    this.canvas.height = Math.round(r.height * v.dpr);
+    v.dpr = dpr;
+    this.canvas.width = pixelWidth;
+    this.canvas.height = pixelHeight;
     this.layout();
   }
 
