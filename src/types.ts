@@ -178,6 +178,8 @@ export interface LifeEntry {
   date: ISODate;
   /** Read-model-only order shared by settlement and operation facts on the same day. */
   factSeq?: number;
+  /** Synthetic migration origin: semantically older than later user facts regardless of calendar date. */
+  baseline?: boolean;
   projectId?: string;
   taskId?: string;
   /** Primary item whose own 一生之书 this row belongs to. */
