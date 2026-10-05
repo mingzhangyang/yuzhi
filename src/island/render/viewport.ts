@@ -14,6 +14,11 @@ export interface RenderTheme {
 export abstract class IslandViewport {
   map: IslandMap = buildIsland(0);
   protected ctx: CanvasRenderingContext2D;
+  /**
+   * 上一帧绘制队列里不透明物体的屏幕轮廓与深度（i + j）。命中判定用它判断小人是否被挡住，
+   * 与绘制共用同一份几何，生长动画中的房子、井、树、山都自动一致。
+   */
+  protected occluders: { d: number; poly: [number, number][] }[] = [];
   protected view: RenderView = { w: 0, h: 0, dpr: 1, zoom: 1, panX: 0, panY: 0, tw: 30, ox: 0, oy: 0 };
   protected scene: Scene | null = null;
   protected theme: RenderTheme = { label: '#fff', ink: '#263022', line: '#dfe2d2', accent: '#4f7136', accentInk: '#fff', sea: '#a9d3dc', seaDeep: '#8cc0cc' };

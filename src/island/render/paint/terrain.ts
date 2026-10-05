@@ -4,6 +4,23 @@ import { SNOW, WARM } from '../style';
 import { clamp, hash, mix, shade } from '../utils';
 import { IslandPaintBase } from './base';
 
+/** 双线性插值的格点噪声，返回 0–1；scale 越大起伏越缓。 */
+export function smoothNoise(i: number, j: number, scale: number, salt = 7): number {
+  const u = i / scale;
+  const w = j / scale;
+  const i0 = Math.floor(u);
+  const j0 = Math.floor(w);
+  const fu = u - i0;
+  const fw = w - j0;
+  const su = fu * fu * (3 - 2 * fu);
+  const sw = fw * fw * (3 - 2 * fw);
+  const a = tileHash(i0, j0, salt);
+  const b = tileHash(i0 + 1, j0, salt);
+  const c = tileHash(i0, j0 + 1, salt);
+  const d = tileHash(i0 + 1, j0 + 1, salt);
+  return a + (b - a) * su + (c - a) * sw + (a - b - c + d) * su * sw;
+}
+
 /** Ground cache, sea, vegetation, mountains, and water-bound scenery. */
 export abstract class IslandTerrainPainter extends IslandPaintBase {
   protected palette() {
@@ -39,7 +56,8 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       default:
         col = '#e6d6a8';
     }
-    col = shade(col, (t.v - 0.5) * 0.1);
+    // 低频的明暗起伏代替逐格随机：相邻地块颜色连成一片，不再像棋盘。
+    col = shade(col, (smoothNoise(t.i, t.j, 4.5) - 0.5) * (t.type === 'water' ? 0.05 : 0.12));
     if (a.cover > 0 && t.type !== 'water') col = mix(col, SNOW, clamp(a.cover * (0.86 + 0.18 * tileHash(t.i, t.j, 41)), 0, 0.92));
     if (a.weather === 'rain') col = shade(col, -0.06);
     return col;
@@ -90,8 +108,8 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       }
       // 地块顶面：北角略亮、南角略暗
       const grd = gc.createLinearGradient(x, y - hh, x, y + hh);
-      grd.addColorStop(0, shade(col, 0.05));
-      grd.addColorStop(1, shade(col, -0.04));
+      grd.addColorStop(0, shade(col, 0.015));
+      grd.addColorStop(1, shade(col, -0.015));
       this.poly(col, x, y - hh - 0.4, x + hw + 0.5, y, x, y + hh + 0.4, x - hw - 0.5, y);
       gc.fillStyle = grd;
       gc.fill();
@@ -135,14 +153,16 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const snowy = a.cover > 0.5;
     if (kind === 'grass' || kind === 'forest') {
       // 草丛：积雪厚的时候只在少数地方露出来
-      if (!snowy || h(30) > a.cover) {
-        c.strokeStyle = shade(col, a.season === 1 ? -0.22 : -0.16);
+      // 草丛成簇出现：低频噪声决定一片地的茂密程度，有的地块光秃，有的长一丛
+      const lush = smoothNoise(t.i, t.j, 3, 9) + (kind === 'forest' ? 0.25 : 0);
+      const n = Math.floor(lush * (a.season === 1 ? 4 : 3) + h(31) * 0.9 - 0.6);
+      if (n > 0 && (!snowy || h(30) > a.cover)) {
+        c.strokeStyle = shade(col, a.season === 1 ? -0.18 : -0.12);
         c.lineWidth = lw;
         c.beginPath();
-        const n = a.season === 1 ? 3 : 2;
         for (let k = 0; k < n; k++) {
           const [px, py] = pt(k);
-          const ht = tw * (a.season === 1 ? 0.09 : 0.06);
+          const ht = tw * (a.season === 1 ? 0.09 : 0.06) * (0.65 + h(32 + k) * 0.6);
           for (const d of [-1, 0, 1]) {
             c.moveTo(px, py);
             c.lineTo(px + d * tw * 0.035, py - ht * (d ? 0.75 : 1));
@@ -342,6 +362,33 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
   }
 
   /* ---------------- 物件 ---------------- */
+
+  /** 树冠的屏幕轮廓；落叶后只剩枝条，不算遮挡 */
+  protected treeOutline(x: number, y: number, s: number, kind: 'pine' | 'round'): [number, number][] | null {
+    const a = this.amb;
+    if (kind === 'pine') {
+      return [
+        [x - s * 0.36, y - s * 0.18],
+        [x, y - s * 1.28],
+        [x + s * 0.36, y - s * 0.18],
+      ];
+    }
+    if (a.season === 3 || (a.season === 2 && a.progress > 0.85)) return null;
+    const cy = y - s * 0.66;
+    const r = s * 0.36;
+    return Array.from({ length: 8 }, (_, k): [number, number] => [x + Math.cos((k / 8) * Math.PI * 2) * r, cy + Math.sin((k / 8) * Math.PI * 2) * r]);
+  }
+
+  /** 山的屏幕轮廓：与点击判定用的三角形外框一致 */
+  protected mountainOutline(x: number, y: number, t: Tile, tw: number): [number, number][] {
+    const s = tw * (0.75 + t.v * 0.55);
+    return [
+      [x - tw * 0.48, y + tw * 0.05],
+      [x + tw * 0.08 * (t.v - 0.5), y - s],
+      [x + tw * 0.48, y + tw * 0.05],
+      [x, y + tw * 0.12],
+    ];
+  }
 
   protected drawTree(x: number, y: number, s: number, kind: 'pine' | 'round', seed: number) {
     const c = this.ctx;

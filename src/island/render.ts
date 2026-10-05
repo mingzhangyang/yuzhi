@@ -9,8 +9,18 @@ import { tileHash } from './map';
 import type { LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
 import { isDeterioratingStageCue } from './render/simulation';
-import { SNOW, WARM } from './render/style';
+import { HOUSE_SCALE, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
+
+/** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
+function rectOutline(x: number, y: number, w: number, h: number, below = 0): [number, number][] {
+  return [
+    [x - w, y + below],
+    [x + w, y + below],
+    [x + w, y - h],
+    [x - w, y - h],
+  ];
+}
 
 export type { AgendaView, ChoresView, Hit, LandmarkView, Light, Scene, SceneryInspection, Selection, VillageView, WalkerView } from './render/model';
 export { mix, shade } from './render/utils';
@@ -141,37 +151,60 @@ export class IslandRenderer extends IslandEffectsPainter {
       this.drawBoat(x, y, tw, k);
     }
 
-    // 地块上的东西
+    // 地块上的东西：建筑、树木与小人进同一个队列，按落地点的深度（i + j）排序后统一绘制，
+    // 这样人走到房子或树后面时会被正确挡住。sort 是稳定的，同深度下保持地块原有顺序。
+    const queue: { d: number; draw: () => void }[] = [];
+    const occluders: typeof this.occluders = [];
+    const put = (d: number, draw: () => void, ...polys: [number, number][][]) => {
+      queue.push({ d, draw });
+      for (const poly of polys) occluders.push({ d, poly });
+    };
     const occupied = new Map<number, VillageView>();
     for (const vv of s.villages) occupied.set(vv.slot, vv);
     const lmAt = new Map<number, LandmarkView>();
     for (const l of s.landmarks) lmAt.set(l.index, l);
     for (const t of m.all) {
       const [x, y] = this.iso(t.i, t.j);
-      if (t.type === 'mountain') this.drawMountain(x, y, t, tw);
+      const d = t.i + t.j;
+      if (t.type === 'mountain') put(d, () => this.drawMountain(x, y, t, tw), this.mountainOutline(x, y, t, tw));
       if (t === m.lighthouse) {
-        this.drawLighthouse(x, y, tw);
-        for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
-          this.drawBanner(banner.x, banner.y, tw, banner.title, '#d8c9a7');
-        }
+        put(d, () => {
+          this.drawLighthouse(x, y, tw);
+          for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
+            this.drawBanner(banner.x, banner.y, tw, banner.title, '#d8c9a7');
+          }
+        });
       }
-      if (t === m.granary) this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy);
+      if (t === m.granary) put(d, () => this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy), rectOutline(x, y, tw * 0.17, tw * 0.72, tw * 0.07));
       if (t === m.chores) {
-        this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false, !!s.chores.live);
-        this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
-        // 即将开始：扫帚靠在门口；进行中：扫帚动起来
-        if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
+        put(d, () => {
+          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false, !!s.chores.live);
+          this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
+          // 即将开始：扫帚靠在门口；进行中：扫帚动起来
+          if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
+        }, this.houseOutline(x + hw * 0.2, y - hh * 0.2, tw * 0.3));
       }
-      if (t === m.dock) this.drawHarborProps(tw);
+      if (t === m.dock) put(d, () => this.drawHarborProps(tw));
       if (t.type === 'plaza' && t.village >= 0) {
         const vv = occupied.get(t.village);
         if (vv) {
-          this.drawWell(x, y, tw, vv, t);
-          if (vv.agenda) {
+          const agenda = vv.agenda;
+          put(d, () => {
+            this.drawWell(x, y, tw, vv, t);
+            if (agenda?.ended) this.drawUnfiredBricks(x, y, tw, agenda.ended);
+          }, ...this.wellOutline(x, y, tw));
+          if (agenda) {
+            // 告示牌和条幅立在井的左后方（villageAgendaAnchor：中心 −0.72, −0.72），按它们自己的落地点排深度；
+            // 轮廓与 agendaHitAt 的范围一致，挡在小人前面时点击落到日程上。
             const [ax, ay] = this.villageAgendaAnchor(vv);
-            if (this.hasNoticeBoard(vv.agenda)) this.drawNoticeBoard(ax, ay, tw, vv.agenda);
-            if (vv.agenda.ended) this.drawUnfiredBricks(x, y, tw, vv.agenda.ended);
-            for (const b of this.villageBannerLayout(vv)) this.drawBanner(b.x, b.y, tw, b.title, vv.roof);
+            const board = this.hasNoticeBoard(agenda);
+            const banners = this.villageBannerLayout(vv);
+            const outlines: [number, number][][] = banners.map((b) => rectOutline(b.x, b.y, b.w * 0.48, Math.max(tw * 0.2, 6), Math.max(tw * 0.15, 5)));
+            if (board) outlines.push(rectOutline(ax, ay, tw * 0.16, tw * 0.15, tw * 0.15));
+            put(d - 1.44, () => {
+              if (board) this.drawNoticeBoard(ax, ay, tw, agenda);
+              for (const b of banners) this.drawBanner(b.x, b.y, tw, b.title, vv.roof);
+            }, ...outlines);
           }
         }
       }
@@ -187,17 +220,26 @@ export class IslandRenderer extends IslandEffectsPainter {
           const wall = boarded ? '#cfc4ab' : vv.stage >= 2 ? '#e6dcc6' : '#efe5cf';
           // 越冷清的村落，夜里亮灯的人家越少
           const litFrac = [0.9, 0.5, 0.25, 0.12][vv.stage];
-          this.drawHouse(x, y, tw * 0.36 * k, roof, wall, boarded, vv.stage < 2, hash(vv.projectId + t.slotIdx) < litFrac);
-          if (vv.stage >= 2 && t.slotIdx % 2 === 0) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
+          put(d, () => {
+            this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, hash(vv.projectId + t.slotIdx) < litFrac);
+            if (vv.stage >= 2 && t.slotIdx % 2 === 0) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
+          }, this.houseOutline(x, y, tw * HOUSE_SCALE * k));
         }
       }
       const lm = t.landmark >= 0 ? lmAt.get(t.landmark) : undefined;
       if (lm) {
         const g = this.grow.get('lm:' + lm.projectId);
-        this.drawLandmark(x, y, tw, lm, g ? g.anim : 1, s.selected?.kind === 'project' && s.selected.id === lm.projectId);
+        const anim = g ? g.anim : 1;
+        put(d, () => this.drawLandmark(x, y, tw, lm, anim, s.selected?.kind === 'project' && s.selected.id === lm.projectId), this.landmarkOutline(x, y, tw, lm, anim));
         continue;
       }
-      for (const tr of t.trees) this.drawTree(x + (tr.dx - tr.dy) * hw, y + (tr.dx + tr.dy) * hh, tw * 0.42 * tr.s, tr.kind, tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100)));
+      for (const tr of t.trees) {
+        const tx = x + (tr.dx - tr.dy) * hw;
+        const ty = y + (tr.dx + tr.dy) * hh;
+        const ts = tw * 0.42 * tr.s;
+        const crown = this.treeOutline(tx, ty, ts, tr.kind);
+        put(d + tr.dx + tr.dy, () => this.drawTree(tx, ty, ts, tr.kind, tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100))), ...(crown ? [crown] : []));
+      }
     }
 
     for (let k = 0; k < s.drifting.length; k++) {
@@ -211,22 +253,27 @@ export class IslandRenderer extends IslandEffectsPainter {
       c.restore();
     }
 
-    // 小人
-    const s0 = Math.max(5, tw * 0.2);
-    const list = [...this.walkers.values()].sort((a, b) => a.x + a.y - (b.x + b.y));
+    // 小人：和房子同一套比例。手机上保留一个能看清的下限，但不再比屋檐还高。
+    const s0 = personSize(tw);
     let selW: [Walker, number, number] | null = null;
-    for (const p of list) {
+    for (const p of this.walkers.values()) {
       const [x, y] = this.iso(p.x, p.y);
-      if (s.selected?.kind === 'task' && s.selected.id === p.id) {
-        selW = [p, x, y];
-        c.strokeStyle = this.theme.accent;
-        c.lineWidth = 2;
-        c.beginPath();
-        c.ellipse(x, y, s0 * 0.75, s0 * 0.32, 0, 0, Math.PI * 2);
-        c.stroke();
-      }
-      this.drawPerson(x, y, s0, p, s.light === 'night' ? 0.88 : 1);
+      const selected = s.selected?.kind === 'task' && s.selected.id === p.id;
+      if (selected) selW = [p, x, y];
+      put(p.x + p.y, () => {
+        if (selected) {
+          c.strokeStyle = this.theme.accent;
+          c.lineWidth = 2;
+          c.beginPath();
+          c.ellipse(x, y, s0 * 0.75, s0 * 0.32, 0, 0, Math.PI * 2);
+          c.stroke();
+        }
+        this.drawPerson(x, y, s0, p, s.light === 'night' ? 0.88 : 1);
+      });
     }
+    queue.sort((a, b) => a.d - b.d);
+    for (const item of queue) item.draw();
+    this.occluders = occluders;
     if (a.fest.has('duanwu') && this.day.night < 0.6) this.drawDragonBoat(false);
 
     this.drawFocus();

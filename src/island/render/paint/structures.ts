@@ -254,6 +254,53 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
 
   /** 地标：村落合成的永久建筑。石台 + 主屋，规模大的多一座塔；返回窗户位置 */
 
+  /** 房子的屏幕轮廓（地面三角 + 墙 + 出檐四坡顶），与 drawHouse 的比例一致 */
+  protected houseOutline(x: number, y: number, s: number): [number, number][] {
+    const hw = s / 2;
+    return [
+      [x - hw, y],
+      [x, y + s / 4],
+      [x + hw, y],
+      [x + hw * 1.14, y - s * 0.5],
+      [x, y - s * 0.92],
+      [x - hw * 1.14, y - s * 0.5],
+    ];
+  }
+
+  /** 井：井身和井顶是实心的，两根立柱之间是空的；圣诞节井边那棵松树也算（drawWell 里画在 x + 0.24tw） */
+  protected wellOutline(x: number, y: number, tw: number): [number, number][][] {
+    const r = tw * 0.1;
+    const outlines: [number, number][][] = [
+      [
+        [x - r, y + r * 0.5],
+        [x + r, y + r * 0.5],
+        [x + r, y - r],
+        [x - r, y - r],
+      ],
+      [
+        [x - r * 1.3, y - r * 1.9],
+        [x, y - r * 2.7],
+        [x + r * 1.3, y - r * 1.9],
+      ],
+    ];
+    const tree = this.amb.fest.has('christmas') ? this.treeOutline(x + tw * 0.24, y - tw * 0.02, tw * 0.4, 'pine') : null;
+    if (tree) outlines.push(tree);
+    return outlines;
+  }
+
+  /** 地标：石台加主楼（规模大的还有后面的塔），随建成动画纵向伸展 */
+  protected landmarkOutline(x: number, y: number, tw: number, l: LandmarkView, anim: number): [number, number][] {
+    const k = 0.25 + 0.75 * anim;
+    const top = y - tw * (l.size >= 6 ? 1.0 : 0.62) * k;
+    return [
+      [x - tw * 0.39, y + tw * 0.1],
+      [x, y + tw * 0.28],
+      [x + tw * 0.39, y + tw * 0.1],
+      [x + tw * 0.39, top],
+      [x - tw * 0.39, top],
+    ];
+  }
+
   protected drawLandmark(x: number, y: number, tw: number, l: LandmarkView, anim: number, selected: boolean): [number, number] {
     const c = this.ctx;
     const k = 0.25 + 0.75 * anim;

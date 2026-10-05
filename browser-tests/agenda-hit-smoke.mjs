@@ -103,7 +103,7 @@ async function points(page) {
     }
     const walkers = [...r.walkers.values()].filter((w) => w.slot === village('团队').slot).map((w) => {
       const [x, y] = r.iso(w.x, w.y);
-      return { id: w.id, ...page([x, y - Math.max(5, tw * 0.2) * 0.7]) };
+      return { id: w.id, ...page([x, y - Math.max(4, tw * 0.15) * 0.7]) };
     });
     const [hx, hy] = r.iso(r.map.chores.i, r.map.chores.j);
     const broom = r.choresAgendaAnchor();
@@ -188,20 +188,21 @@ try {
 
   await runScenario('进行中：聚在井边的小人都能点开任务', async () => {
     assert(p.walkers.length >= 2, `expected gathered walkers, got ${p.walkers.length}`);
-    let ok = 0;
-    for (const w of p.walkers) {
-      const hit = await hitAt(page, w);
-      if (hit?.kind === 'task') ok++;
-    }
-    // 小人可能互相挡住，但至少大多数要能点到任务，且不能有一个被判成日程
-    const agendaHits = [];
-    for (const w of p.walkers) {
-      const hit = await hitAt(page, w);
-      if (hit?.kind === 'agenda') agendaHits.push(w.id);
-    }
-    assert(agendaHits.length === 0, `walkers resolved to agenda: ${agendaHits.join(', ')}`);
-    assert(ok >= Math.ceil(p.walkers.length / 2), `only ${ok}/${p.walkers.length} walkers hit as tasks`);
-    const r = await click(page, p.walkers[0]);
+    // 站在井后面、被井挡住的小人本就点不到，点在那里落到井（村落或日程）上是对的；
+    // 其余露在外面的小人都必须点到任务，且不能有一个被判成日程。
+    const probes = await page.evaluate((ws) => {
+      const r = window.yuzhi.renderer;
+      return ws.map((w) => {
+        const walker = r.walkers.get(w.id);
+        return { id: w.id, hidden: walker ? r.occludedAt(walker, w.local) : false, hit: r.hitAt(w.local) };
+      });
+    }, p.walkers);
+    const visible = probes.filter((x) => !x.hidden);
+    assert(visible.length >= 1, `every gathered walker is hidden: ${JSON.stringify(probes)}`);
+    const wrong = visible.filter((x) => x.hit?.kind !== 'task');
+    assert(wrong.length === 0, `visible walkers did not hit as tasks: ${JSON.stringify(wrong)}`);
+    const target = p.walkers.find((w) => w.id === visible[0].id);
+    const r = await click(page, target);
     assert(r.view.kind === 'task', `real click on walker opened ${JSON.stringify(r.view)}`);
   });
 
@@ -227,6 +228,38 @@ try {
     assert(probe?.dock, `departing walker probe did not overlap the pier: ${JSON.stringify(probe)}`);
     assert(probe.hit?.kind === 'task' && probe.hit.id === probe.taskId,
       `departing walker was intercepted by dock: ${JSON.stringify(probe)}`);
+  });
+
+  await runScenario('告示牌挡住的小人：点牌子落到日程；站在牌子前面的小人仍优先', async () => {
+    const probe = await page.evaluate((target) => {
+      const r = window.yuzhi.renderer;
+      const v = r.scene.villages.find((x) => x.projectId === target);
+      const walker = [...r.walkers.values()].find((w) => w.slot === v.slot);
+      if (!walker) return null;
+      const c = r.map.villages[v.slot].center;
+      const [bx, by] = r.villageAgendaAnchor(v);
+      const original = { x: walker.x, y: walker.y, tx: walker.tx, ty: walker.ty };
+      const s0 = Math.max(4, r.view.tw * 0.15);
+      // 脚落在牌子落地点的正后方 / 正前方一点（屏幕上略高 / 略低），身体正好压在牌面上
+      const place = (dy) => {
+        const at = r.tileCoords({ x: bx, y: by + dy });
+        walker.x = walker.tx = at.fi;
+        walker.y = walker.ty = at.fj;
+        r.draw();
+        const [wx, wy] = r.iso(walker.x, walker.y);
+        return { hit: r.hitAt({ x: wx, y: wy - s0 * 0.7 }), depth: walker.x + walker.y };
+      };
+      const step = r.view.tw * 0.03;
+      const behind = place(-step);
+      const front = place(step);
+      const boardDepth = c.i + c.j - 1.44;
+      if (!(behind.depth < boardDepth && front.depth > boardDepth)) return { bad: [behind.depth, front.depth, boardDepth] };
+      Object.assign(walker, original);
+      return { behind: behind.hit, front: front.hit, taskId: walker.id };
+    }, p['评审'].id);
+    assert(probe, 'no walker in the soon village to probe the notice board');
+    assert(probe.behind?.kind === 'agenda', `walker hidden behind the board still took the tap: ${JSON.stringify(probe)}`);
+    assert(probe.front?.kind === 'task' && probe.front.id === probe.taskId, `walker in front of the board lost the tap: ${JSON.stringify(probe)}`);
   });
 
   await runScenario('只有待结算日程：村名标签可点击，键盘也能浏览到说明', async () => {

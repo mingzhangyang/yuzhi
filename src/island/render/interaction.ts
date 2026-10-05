@@ -4,6 +4,7 @@ import { moonPhase } from '../ambience';
 import { describe, type InfoContext, type InfoTarget } from '../info';
 import { tileHash, type Tile } from '../map';
 import type { AgendaView, Ambience, ChoresView, Hit, SceneryCandidate, SceneryFocus, SceneryInspection, VillageView, Walker } from './model';
+import { personSize } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
 
@@ -322,18 +323,27 @@ export abstract class IslandInteraction extends IslandViewport {
 
   /** 前景可动实体永远优先于其经过的码头、瓶子和日程道具。 */
   protected walkerHitAt(pt: { x: number; y: number }): Hit {
-    const s0 = Math.max(5, this.view.tw * 0.2);
+    const s0 = personSize(this.view.tw);
     let best: Walker | null = null;
     let bd = Math.max(16, s0 * 1.4);
     for (const p of this.walkers.values()) {
       const [x, y] = this.iso(p.x, p.y);
       const d = Math.hypot(pt.x - x, pt.y - (y - s0 * 0.7));
-      if (d < bd) {
+      if (d < bd && !this.occludedAt(p, pt)) {
         bd = d;
         best = p;
       }
     }
     return best ? { kind: 'task', id: best.id } : null;
+  }
+
+  /**
+   * 小人走到房子、井、树、山或地标后面时会被挡住；点在挡住它的东西上，应当落到那里，而不是看不见的小人。
+   * 遮挡轮廓来自上一帧的绘制队列，深度规则与绘制一致：同深度时小人画在前面（站在门口），不算被挡。
+   */
+  protected occludedAt(p: Walker, pt: { x: number; y: number }): boolean {
+    const d = p.x + p.y;
+    return this.occluders.some((o) => o.d > d && insidePolygon(pt, o.poly));
   }
 
   hitAt(pt: { x: number; y: number }): Hit {
@@ -602,4 +612,14 @@ export abstract class IslandInteraction extends IslandViewport {
     }));
   }
 
+}
+
+function insidePolygon(pt: { x: number; y: number }, poly: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > pt.y !== yj > pt.y && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
