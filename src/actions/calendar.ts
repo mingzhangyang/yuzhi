@@ -164,7 +164,7 @@ function scheduleSnapshot(event: CalendarEvent) {
 function buildLocalSchedule(
   store: Store,
   input: LocalScheduleInput,
-  identity?: Pick<CalendarEvent, 'id' | 'uid'>,
+  identity?: Pick<CalendarEvent, 'id' | 'uid' | 'projectId'>,
 ): CalendarEvent {
   const title = input.title.trim();
   if (!title) throw new ActionError('写一句日程标题吧');
@@ -180,7 +180,7 @@ function buildLocalSchedule(
   const requested = input.projectId;
   const projectId = requested === CHORES
     ? CHORES
-    : requested && store.project(requested)?.status === 'active'
+    : requested && (store.project(requested)?.status === 'active' || requested === identity?.projectId)
       ? requested
       : CHORES;
   const eventUid = identity?.uid ?? uid('schedule');
@@ -223,7 +223,7 @@ function editScheduleImpl(store: Store, eventId: string, input: LocalScheduleInp
   if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
     throw new ActionError('这个日程已经留下结算记录，不能直接修改');
   }
-  const next = buildLocalSchedule(store, input, { id: event.id, uid: event.uid });
+  const next = buildLocalSchedule(store, input, { id: event.id, uid: event.uid, projectId: event.projectId });
   const before = scheduleSnapshot(event);
   const after = scheduleSnapshot(next);
   if (JSON.stringify(before) === JSON.stringify(after)) return event;
