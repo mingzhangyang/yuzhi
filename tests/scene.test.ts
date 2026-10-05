@@ -107,6 +107,17 @@ describe('scene agenda projection', () => {
         projectId: 'some-project',
         classified: true,
       },
+      {
+        id: 'stale-chore-owner',
+        sourceId: 's',
+        uid: 'stale-chore-owner',
+        title: '重新变成未归类',
+        start: at(13),
+        end: at(14),
+        allDay: false,
+        projectId: CHORES,
+        classified: false,
+      },
     );
     store.data.entries.push(
       {
@@ -135,6 +146,15 @@ describe('scene agenda projection', () => {
         itemId: 'missing',
         outcome: 'done',
         title: '已经不在日历里的旧记录',
+      },
+      {
+        id: '2026-10-04|event|stale-chore-owner',
+        seq: 4,
+        date: '2026-10-04',
+        itemType: 'event',
+        itemId: 'stale-chore-owner',
+        outcome: 'done',
+        title: '重新变成未归类',
       },
     );
 
