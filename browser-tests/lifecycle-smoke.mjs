@@ -126,11 +126,16 @@ try {
       assert(release.state === 'reader', `released writer ended in ${release.state}, expected reader`);
       assert(release.blocked.includes('只读'), `new action after revocation was not blocked: ${release.blocked}`);
 
-      await reader.waitForFunction(
-        () => window.yuzhi.store.data.chronicle.filter((row) => row.id.startsWith('browser-drain|')).length === 1200,
-        undefined,
-        { timeout },
-      );
+      // Notifications are intentionally still suspended: the reader must stay
+      // stale until takeover, then recover both the drained writes and the
+      // missed soon event from the authoritative durable snapshot.
+      const beforeTakeover = await reader.evaluate(() => ({
+        drained: window.yuzhi.store.data.chronicle.filter((row) => row.id.startsWith('browser-drain|')).length,
+        hasSoon: window.yuzhi.renderer.scene.villages.some((village) =>
+          village.agenda?.soon?.some((event) => event.eventId === 'browser-takeover-soon')),
+      }));
+      assert(beforeTakeover.drained === 0 && !beforeTakeover.hasSoon,
+        `reader did not remain stale after notifications were suspended: ${JSON.stringify(beforeTakeover)}`);
 
       await reader.locator('#tabTakeover').click();
       await waitReadOnly(reader, false);
