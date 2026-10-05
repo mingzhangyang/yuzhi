@@ -38,11 +38,17 @@ export function cultivationState(data: Data, today: ISODate): CultivationState {
   const fieldScore = taskDone * 2 + taskPartial;
 
   const orchardStart = addDays(today, -13);
+  const timedEventIds = new Set(data.events.filter((event) => !event.allDay).map((event) => event.id));
   let eventDone = 0;
   let eventPartial = 0;
   let eventSkipped = 0;
   for (const entry of data.entries) {
-    if (entry.itemType !== 'event' || entry.date < orchardStart || entry.date > today) continue;
+    if (
+      entry.itemType !== 'event' ||
+      entry.date < orchardStart ||
+      entry.date > today ||
+      !timedEventIds.has(entry.itemId)
+    ) continue;
     if (entry.outcome === 'done') eventDone++;
     else if (entry.outcome === 'partial') eventPartial++;
     else if (entry.outcome === 'skipped') eventSkipped++;
