@@ -15,6 +15,7 @@ import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
 import { summarize } from '../logic/summary';
 import { compareLifeEntries, lifeEntries } from '../logic/operations';
+import { diaryLatestSnapshot, diaryVersions, lifeBookEntries, lifeBookSubjectIds, scheduleLatestSnapshot, scheduleVersions } from '../logic/life-book';
 import { stageLifeEntries } from '../logic/decay';
 import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
@@ -29,7 +30,9 @@ export type View =
   | { kind: 'granary' }
   | { kind: 'chores' }
   | { kind: 'diaries' }
+  | { kind: 'diary'; id: string }
   | { kind: 'schedules' }
+  | { kind: 'schedule'; id: string }
   | { kind: 'archive' };
 
 export interface TrackerHooks {
@@ -120,8 +123,14 @@ export class Tracker {
       case 'diaries':
         [html, title, sub] = this.diaries();
         break;
+      case 'diary':
+        [html, title, sub] = this.diary(v.id);
+        break;
       case 'schedules':
         [html, title, sub] = this.schedules();
+        break;
+      case 'schedule':
+        [html, title, sub] = this.schedule(v.id);
         break;
       case 'archive':
         [html, title, sub] = this.archive();
