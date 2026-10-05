@@ -39,3 +39,14 @@ export const ICS_FUTURE_DAYS = 120;
 
 /** 岛上能同时容纳的活跃村落数 */
 export const MAX_VILLAGES = 8;
+
+/** 日程进入「即将开始」时的提前量。 */
+export const AGENDA_SOON_MINUTES = 15;
+/** 全岛两次日程钟声之间的最短间隔。 */
+export const AGENDA_BELL_COOLDOWN_SEC = 90;
+/** 同一位置最多直接挂出的全天事件条幅数。 */
+export const BANNERS_MAX = 2;
+/** 地图上同时漂着的未归类事件组数。 */
+export const DRIFT_BOTTLES_MAX = 3;
+/** 近 7 天杂务结算数对应的柴堆档位。 */
+export const WOODPILE_STEPS = [1, 4, 9] as const;

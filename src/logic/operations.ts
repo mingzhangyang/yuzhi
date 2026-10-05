@@ -1,4 +1,5 @@
 import type { Data, LifeEntry, LifeKind, OperationEvent, OperationLifeSnapshot, SkipReason } from '../types';
+import { CHORES } from '../types';
 
 const LIFE_KINDS = new Set<LifeKind>([
   'start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete',
@@ -21,7 +22,7 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
         id: `l|${entry.id}`,
         date: entry.date,
         factSeq: entry.seq,
-        projectId: entry.projectId,
+        projectId: entry.projectId === CHORES ? undefined : entry.projectId,
         taskId,
         kind: 'done' as const,
         text: entry.itemType === 'task' ? `完成了${title}` : `${title}做了`,
@@ -32,7 +33,7 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
         id: `l|${entry.id}`,
         date: entry.date,
         factSeq: entry.seq,
-        projectId: entry.projectId,
+        projectId: entry.projectId === CHORES ? undefined : entry.projectId,
         taskId,
         kind: 'partial' as const,
         text: `${title}做了一部分`,
@@ -42,7 +43,7 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
       id: `l|${entry.id}`,
       date: entry.date,
       factSeq: entry.seq,
-      projectId: entry.projectId,
+      projectId: entry.projectId === CHORES ? undefined : entry.projectId,
       taskId,
       kind: 'skip' as const,
       reason: entry.reason,

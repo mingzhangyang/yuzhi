@@ -49,3 +49,51 @@ group('景物说明', () => {
     expect(moonName(0.9)).toBe('残月');
   });
 });
+
+group('日程说明', () => {
+  it('即将开始的说明写出开始时间', () => {
+    const start = new Date(2026, 9, 4, 14, 10).toISOString();
+    const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'soon', title: '周会', start, later: 0, ended: 0, banners: [] }, ctx());
+    expect(info.lines[0]).toBe('「周会」即将开始，14:10 开始。');
+  });
+
+  it('进行中与即将开始可以同时说明', () => {
+    const info = describe({
+      kind: 'agenda',
+      target: 'p',
+      targetName: '团队',
+      phase: 'live',
+      title: '周会',
+      until: new Date(2026, 9, 4, 15).toISOString(),
+      live: [{ title: '周会', end: new Date(2026, 9, 4, 15).toISOString() }],
+      soon: [{ title: '评审', start: new Date(2026, 9, 4, 14, 40).toISOString() }],
+      later: 0,
+      ended: 0,
+      banners: [],
+    }, ctx());
+    const text = info.lines.join('');
+    expect(text).toContain('「周会」进行中');
+    expect(text).toContain('「评审」即将开始，14:40 开始');
+  });
+
+  it('稍后和待结算同时存在时两句都写', () => {
+    const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'ended', later: 2, ended: 1, banners: [] }, ctx());
+    const text = info.lines.join('');
+    expect(text).toContain('稍后还有 2 场');
+    expect(text).toContain('有 1 场已经结束');
+  });
+
+  it('杂务日程只描述柴堆后果，不承诺村落砖块', () => {
+    const live = describe({ kind: 'agenda', target: 'chores', targetName: '杂务', phase: 'live', title: '买菜', later: 0, ended: 0, banners: [] }, ctx());
+    const mixed = describe({ kind: 'agenda', target: 'chores', targetName: '杂务', phase: 'soon', title: '取快递', later: 0, ended: 1, banners: [] }, ctx());
+    expect(live.lines.join('')).toContain('计入柴堆');
+    expect(mixed.lines.join('')).toContain('计入柴堆');
+    expect(live.lines.join('') + mixed.lines.join('')).not.toContain('砖');
+  });
+
+  it('只有全天条幅时不说稍后还有场次', () => {
+    const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'allday', later: 0, ended: 0, banners: ['出差'] }, ctx());
+    expect(info.lines.join('')).not.toContain('稍后');
+    expect(info.lines.join('')).toContain('今天全天：出差');
+  });
+});

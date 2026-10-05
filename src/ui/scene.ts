@@ -1,11 +1,13 @@
 import type { Store } from '../store';
-import type { Light, Scene, Selection, VillageView } from '../island/render';
+import type { AgendaView, ChoresView, Light, Scene, Selection, VillageView } from '../island/render';
 import { CHORES } from '../types';
-import { BRICKS_PER_HOUSE, MAX_WALKERS } from '../logic/config';
+import { BRICKS_PER_HOUSE, DRIFT_BOTTLES_MAX, MAX_WALKERS } from '../logic/config';
 import { granary, progressWeight } from '../logic/metrics';
 import { pendingDays } from '../logic/days';
+import { agendaAt, woodpileStep, type Agenda, type AgendaSlot } from '../logic/agenda';
 import { islandRings } from '../actions';
-import { addDays, dateOfStamp, localDate, seasonOf } from '../lib/date';
+import { addDays, localDate, seasonOf } from '../lib/date';
+import { readSeenDrifts } from './drift';
 
 /** 村落的屋顶颜色，按槽位固定 */
 export const ROOFS = ['#b5553d', '#4c6a84', '#3f7a86', '#8656a6', '#c08a2a', '#5d8a4a', '#a8622a', '#6b5ca5'];
@@ -26,7 +28,74 @@ export function houseCount(store: Store, projectId: string): number {
   return Math.min(10, 1 + Math.floor(bricks / BRICKS_PER_HOUSE));
 }
 
-export function buildScene(store: Store, selected: Selection | null, dusk: boolean, now: Date = store.clock()): Scene {
+function phaseOf(slot: AgendaSlot): AgendaView['phase'] | null {
+  if (slot.live.length) return 'live';
+  if (slot.soon.length) return 'soon';
+  if (slot.ended) return 'ended';
+  if (slot.later) return 'later';
+  return slot.banners.length ? 'allday' : null;
+}
+
+function agendaViewOf(slot: AgendaSlot | undefined): AgendaView | undefined {
+  if (!slot) return undefined;
+  const phase = phaseOf(slot);
+  if (!phase) return undefined;
+  const live = slot.live[0];
+  const soon = slot.soon[0];
+  return {
+    phase,
+    title: live?.title ?? soon?.title,
+    until: live?.end,
+    start: live ? undefined : soon?.start,
+    later: slot.later,
+    ended: slot.ended,
+    banners: slot.banners,
+    live: slot.live,
+    soon: slot.soon,
+  };
+}
+
+function choresOf(store: Store, agenda: Agenda, today: string): ChoresView {
+  const slot = agenda.slots.get(CHORES);
+  // 柴堆只算真正做了的杂务；没做的不留柴
+  const count = store.data.entries.filter((entry) =>
+    entry.projectId === CHORES && (entry.outcome === 'done' || entry.outcome === 'partial')
+      && entry.date > addDays(today, -7) && entry.date <= today,
+  ).length;
+  const live = slot?.live[0];
+  const soon = slot?.soon[0];
+  return {
+    count,
+    woodpile: woodpileStep(count),
+    live: live ? { title: live.title, until: live.end } : undefined,
+    soon: soon ? { title: soon.title, start: soon.start } : undefined,
+    later: slot?.later ?? 0,
+    ended: slot?.ended ?? 0,
+  };
+}
+
+function granaryBusy(store: Store, now: Date): boolean {
+  const at = now.getTime();
+  const [sh, sm] = store.data.settings.workStart.split(':').map(Number);
+  const [eh, em] = store.data.settings.workEnd.split(':').map(Number);
+  const minute = now.getHours() * 60 + now.getMinutes();
+  const start = (sh || 0) * 60 + (sm || 0);
+  const end = (eh || 0) * 60 + (em || 0);
+  return minute >= start && minute < end && store.data.events.some((event) => {
+    if (event.allDay) return false;
+    const a = new Date(event.start).getTime();
+    const b = new Date(event.end).getTime();
+    return Number.isFinite(a) && Number.isFinite(b) && a <= at && at < b;
+  });
+}
+
+export function buildScene(
+  store: Store,
+  selected: Selection | null,
+  dusk: boolean,
+  now: Date = store.clock(),
+  agenda: Agenda = agendaAt(store.data, now),
+): Scene {
   const today = localDate(now);
   const villages = store.villages(today);
   const views: VillageView[] = [];
@@ -45,18 +114,27 @@ export function buildScene(store: Store, selected: Selection | null, dusk: boole
       walkers: open.slice(0, shown).map((t) => ({ id: t.id, title: t.title })),
       extra: open.length - shown,
       openCount: open.length,
+      agenda: agendaViewOf(agenda.slots.get(p.id)),
+      firedToday: agenda.fired.get(p.id) ?? 0,
     });
   }
   const g = granary(store.data, today);
   const pending = pendingDays(store.data, today).length;
+  const chores = choresOf(store, agenda, today);
+  const seen = readSeenDrifts();
   return {
     season: seasonOf(today),
     light: lightNow(now, dusk),
     date: today,
     hour: now.getHours() + now.getMinutes() / 60,
+    now: now.getTime(),
     villages: views,
     dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
-    choresCount: store.data.events.filter((e) => e.projectId === CHORES && !e.allDay && dateOfStamp(e.start) > addDays(today, -7) && dateOfStamp(e.start) <= today).length,
+    choresCount: chores.count,
+    chores,
+    drifting: agenda.drifting.filter((title) => !seen.has(title)).slice(0, DRIFT_BOTTLES_MAX).map((title) => ({ title })),
+    lighthouseBanners: agenda.lighthouseBanners,
+    granaryBusy: granaryBusy(store, now),
     granaryRatio: g.workHours ? g.available / g.workHours : 0,
     granaryLabel: `粮仓 ${g.available.toFixed(1)} 小时`,
     fog: Math.min(1, pending * 0.4),

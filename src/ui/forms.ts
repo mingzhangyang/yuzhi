@@ -189,7 +189,7 @@ export function openCalendar(store: Store, onImported: () => void) {
 }
 
 /** 事件归类：一次问一类，记下规则，以后同类自动归位 */
-export function openClassify(store: Store, skipped = new Set<string>()) {
+export function openClassify(store: Store, skipped = new Set<string>(), preferredTitle?: string) {
   const today = store.today();
   const groups = unclassifiedGroups(store.data.events).filter((g) => !skipped.has(g.title));
   if (!groups.length) {
@@ -197,7 +197,8 @@ export function openClassify(store: Store, skipped = new Set<string>()) {
     toast('日历事件都归好类了');
     return;
   }
-  const g = groups[0];
+  const preferredIndex = preferredTitle !== undefined ? groups.findIndex((group) => group.title === preferredTitle) : -1;
+  const g = groups[preferredIndex >= 0 ? preferredIndex : 0];
   const next = g.events.find((e) => dateOfStamp(e.start) >= today) ?? g.events[g.events.length - 1];
   const ps = store.activeProjects();
   const kw = suggestKeyword(g.title);

@@ -7,12 +7,15 @@
  * 地块（连同小路和地面纹理）画进一张离屏缓存，只有视图或季节变化时才重画；
  * 树、房子、小人、海浪和天气每帧绘制。
  */
+import { BANNERS_MAX, DRIFT_BOTTLES_MAX } from '../logic/config';
 import type { Stage } from '../logic/config';
+import { CHORES } from '../types';
 import type { ISODate } from '../types';
 import { buildIsland, mulberry32, tileHash, type IslandMap, type Tile, type VillageSite } from './map';
 import { describe, type InfoContext, type InfoTarget, type MapInfo } from './info';
 import { dayLight, festivalsOf, moonPhase, seasonProgress, snowCover, weatherOf, type DayLight, type Festival, type Weather } from './ambience';
 import { IslandPropArt } from './props';
+import { diffScene, pickBell, type BellCandidate, type Cue } from './cues';
 
 export interface WalkerView {
   id: string;
@@ -30,6 +33,33 @@ export interface VillageView {
   /** 没画出来的任务数 */
   extra: number;
   openCount: number;
+  agenda?: AgendaView;
+  /** 今天结算为做了 / 做了一部分的日程数；只用于烧窑转场 */
+  firedToday?: number;
+}
+
+export interface AgendaView {
+  /** allday：只有全天条幅，没有任何定时场次 */
+  phase: 'allday' | 'later' | 'soon' | 'live' | 'ended';
+  title?: string;
+  until?: string;
+  /** 即将开始那一场的开始时间 */
+  start?: string;
+  later: number;
+  ended: number;
+  banners: string[];
+  live?: { eventId: string; title: string; end: string }[];
+  soon?: { eventId: string; title: string; start: string }[];
+}
+
+export interface ChoresView {
+  /** 近 7 天结算为做了 / 做了一部分的杂务数 */
+  count: number;
+  woodpile: 0 | 1 | 2 | 3;
+  live?: { title: string; until: string };
+  soon?: { title: string; start: string };
+  later: number;
+  ended: number;
 }
 
 export interface LandmarkView {
@@ -51,9 +81,16 @@ export interface Scene {
   date: ISODate;
   /** 本地时刻（小时，可带小数），决定光线和月亮 */
   hour: number;
+  /** 构建场景时的精确时间戳（毫秒）；钟声冷却按它计算，hour 会丢掉秒 */
+  now: number;
   villages: VillageView[];
   dockShips: number;
+  /** 兼容旧调用方；新 UI 从 chores.count 读取。 */
   choresCount: number;
+  chores: ChoresView;
+  drifting: { title: string }[];
+  lighthouseBanners: string[];
+  granaryBusy: boolean;
   /** 0–1 */
   granaryRatio: number;
   granaryLabel: string;
@@ -66,7 +103,7 @@ export interface Scene {
 }
 
 export type Selection = { kind: 'project'; id: string } | { kind: 'task'; id: string } | { kind: 'dock' } | { kind: 'granary' } | { kind: 'chores' } | { kind: 'archive' };
-export type Hit = Selection | null;
+export type Hit = Selection | { kind: 'agenda'; target: string } | { kind: 'drift'; title: string } | null;
 
 type SceneryFocus = { i: number; j: number; tree?: [number, number, number] };
 
@@ -74,6 +111,8 @@ export interface SceneryInspection {
   info: MapInfo;
   x: number;
   y: number;
+  /** 可从说明卡执行的对象；目前只有漂流瓶需要动作。 */
+  target?: Extract<InfoTarget, { kind: 'drift' }>;
 }
 
 interface SceneryCandidate extends SceneryInspection {
@@ -127,6 +166,25 @@ interface Spark {
   /** 炸开瞬间的闪光 */
   flash?: boolean;
   burstAt: number;
+}
+
+interface BellRipple {
+  at: Tile;
+  t: number;
+}
+
+interface StageCue {
+  projectId: string;
+  to: Stage;
+  t: number;
+}
+
+interface PickedBottle {
+  x: number;
+  y: number;
+  title: string;
+  index: number;
+  t: number;
 }
 
 /** 当天的天时，setScene 时算好 */
@@ -184,6 +242,13 @@ export class IslandRenderer {
   private drag: { x: number; y: number; px: number; py: number; moved: boolean } | null = null;
   private grow = new Map<string, { houses: number; anim: number }>();
   private pulses: { at: Tile; t: number }[] = [];
+  private bellRipples: BellRipple[] = [];
+  private pickedBottles: PickedBottle[] = [];
+  private stageCues: StageCue[] = [];
+  private belled = new Set<string>();
+  private lastBellAt: number | null = null;
+  private granaryTransition: { from: number; to: number; t: number } | null = null;
+  private fogTransition: { from: number; to: number; t: number } | null = null;
   private lights: Glow[] = [];
   private propArt = new IslandPropArt();
   private rnd = mulberry32(7);
@@ -199,6 +264,8 @@ export class IslandRenderer {
   /** 被点中的景物：画一圈高亮 */
   private focus: SceneryFocus | null = null;
   private sceneryIndex = -1;
+  private suppressCuesOnce = false;
+  private cueSuppressionDepth = 0;
   onTap: (hit: Hit, pt: { x: number; y: number }) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement, private wrap: HTMLElement) {
@@ -266,8 +333,44 @@ export class IslandRenderer {
 
   /* ---------------- 场景同步 ---------------- */
 
+  private clearQueuedCues() {
+    // 后台期间可能已经排进队列的提示（rAF 暂停时不会播完）也一并丢掉，
+    // 回到前台只显示终态。
+    this.bellRipples = [];
+    this.stageCues = [];
+    this.pulses = [];
+    this.pickedBottles = [];
+    this.granaryTransition = null;
+    this.fogTransition = null;
+    for (const g of this.grow.values()) g.anim = 1;
+  }
+
+  /** 只压掉下一次场景差分；用于已有的单次基线切换。 */
+  suppressNextCues() {
+    this.suppressCuesOnce = true;
+    this.clearQueuedCues();
+  }
+
+  /**
+   * 持续压制提示直到调用方安装完 durable baseline；允许恢复与接管嵌套。
+   * 返回的一次性 release 绑定这一层 scope，避免异步早退时误留 suppression。
+   */
+  beginCueSuppression(): () => void {
+    this.cueSuppressionDepth++;
+    this.clearQueuedCues();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (this.cueSuppressionDepth > 0) this.cueSuppressionDepth--;
+    };
+  }
+
   setScene(s: Scene) {
-    const prev = this.scene;
+    const suppress = this.suppressCuesOnce || this.cueSuppressionDepth > 0;
+    const prev = suppress ? null : this.scene;
+    this.suppressCuesOnce = false;
+    const cues = diffScene(prev, s);
     this.scene = s;
     if (s.date !== this.amb.date || s.season !== this.amb.season) {
       const weather = weatherOf(s.date, s.season);
@@ -299,7 +402,7 @@ export class IslandRenderer {
       const site = this.map.villages[v.slot];
       const g = this.grow.get(v.projectId);
       if (!g) this.grow.set(v.projectId, { houses: v.houses, anim: 1 });
-      else if (v.houses > g.houses) this.grow.set(v.projectId, { houses: v.houses, anim: 0 });
+      else if (v.houses > g.houses) this.grow.set(v.projectId, { houses: v.houses, anim: prev ? 0 : 1 });
       else g.houses = v.houses;
       v.walkers.forEach((w, idx) => {
         keep.add(w.id);
@@ -330,18 +433,79 @@ export class IslandRenderer {
         p.title = w.title;
         p.color = v.roof;
         p.leaving = v.stage === 3 && idx % 2 === 0;
+        if (v.agenda?.phase === 'live') p.wait = 0;
       });
     }
     for (const id of [...this.walkers.keys()]) if (!keep.has(id)) this.walkers.delete(id);
+    this.applyCues(cues, s);
   }
 
-  /** 一块砖飞进村落后，让村落亮一下 */
-  pulse(projectId: string) {
+  private applyCues(cues: Cue[], scene: Scene) {
+    const bellCandidates: BellCandidate[] = [];
+    const pulsed = new Set<string>();
+    for (const cue of cues) {
+      if (cue.kind === 'house-built') {
+        if (!pulsed.has(cue.projectId)) {
+          pulsed.add(cue.projectId);
+          this.triggerPulse(cue.projectId);
+        }
+      } else if (cue.kind === 'kiln') {
+        if (!pulsed.has(cue.projectId)) {
+          pulsed.add(cue.projectId);
+          this.triggerPulse(cue.projectId);
+        }
+      } else if (cue.kind === 'stage-changed') {
+        // 减弱动态效果时阶段直接到终态，不播灰尘落下 / 吹散
+        if (!this.calm) this.stageCues.push({ projectId: cue.projectId, to: cue.to, t: 0 });
+      } else if (cue.kind === 'granary-changed') {
+        this.granaryTransition = { from: cue.from, to: cue.to, t: this.calm ? 1 : 0 };
+      } else if (cue.kind === 'fog-changed') {
+        this.fogTransition = { from: cue.from, to: cue.to, t: this.calm ? 1 : 0 };
+      } else if (cue.kind === 'bell') {
+        // Entering the soon window is a one-shot fact for this renderer. If
+        // the global cooldown suppresses the sound, it is still considered
+        // handled and will not ring again after the cooldown.
+        if (this.belled.has(cue.eventId)) continue;
+        this.belled.add(cue.eventId);
+        const village = scene.villages.find((v) => v.projectId === cue.projectId);
+        const item = village?.agenda?.soon?.find((x) => x.eventId === cue.eventId);
+        if (village && item) {
+          bellCandidates.push({ projectId: cue.projectId, eventId: cue.eventId, start: new Date(item.start).getTime(), slot: village.slot });
+        }
+      }
+    }
+    const selected = scene.selected?.kind === 'project' ? scene.selected.id : null;
+    const chosen = pickBell(bellCandidates, this.lastBellAt, selected, scene.now);
+    if (chosen) {
+      // 冷却和去重照常记账；减弱动态效果时只是不画涟漪
+      this.lastBellAt = scene.now;
+      const village = scene.villages.find((v) => v.projectId === chosen.projectId);
+      const at = village && this.map.villages[village.slot]?.center;
+      if (at && !this.calm) this.bellRipples.push({ at, t: 0 });
+    }
+  }
+
+  private triggerPulse(projectId: string) {
+    if (this.calm) return;
     const v = this.scene?.villages.find((x) => x.projectId === projectId);
     if (v) this.pulses.push({ at: this.map.villages[v.slot].center, t: 0 });
     const l = this.scene?.landmarks.find((x) => x.projectId === projectId);
     const site = l && this.map.landmarks[l.index];
     if (site) this.pulses.push({ at: site, t: 0 });
+  }
+
+  /** 漂流瓶被捞起时的短暂出水动画；状态本身仍由 UI 的 localStorage 标记决定。 */
+  pickDrift(title: string) {
+    if (this.calm || !this.scene) return;
+    const index = this.scene.drifting.findIndex((item) => item.title === title);
+    if (index < 0) return;
+    const [x, y] = this.driftBottleAnchor(index);
+    this.pickedBottles.push({ x, y, title, index, t: 0 });
+  }
+
+  /** 一块砖飞进村落后，让村落亮一下 */
+  pulse(projectId: string) {
+    this.triggerPulse(projectId);
   }
 
   /** 村落在页面上的位置（用于砖块飞行动画） */
@@ -416,15 +580,283 @@ export class IslandRenderer {
     return { fi: (u + w) / 2, fj: (w - u) / 2 };
   }
 
+  private villageLabelText(v: VillageView): string {
+    const stageTxt = v.stage ? ` · ${['', '安静', '蒙灰', '搬离'][v.stage]}` : '';
+    const ag = v.agenda;
+    const live = ag?.live?.[0];
+    const soon = ag?.soon?.[0];
+    const agendaParts = [
+      live ? `${live.title} 至 ${this.timeText(live.end)}` : '',
+      soon ? `${soon.title} 将开始` : '',
+      ag?.later ? `稍后 ${ag.later} 场` : '',
+      ag?.ended ? `待结算 ${ag.ended}` : '',
+    ].filter(Boolean);
+    return `${v.name} ${v.openCount}人${agendaParts.map((part) => ` · ${part}`).join('')}${stageTxt}`;
+  }
+
+  private villageLabelAnchor(v: VillageView): [number, number] {
+    const ctr = this.map.villages[v.slot].center;
+    const [x, y] = this.iso(ctr.i, ctr.j);
+    return [x, y - this.view.tw * 1.05];
+  }
+
+  private choresLabelText(ch: ChoresView): string {
+    const parts = [`杂务 ${ch.count}`];
+    if (ch.live) parts.push(`${ch.live.title} 至 ${this.timeText(ch.live.until)}`);
+    if (ch.soon) parts.push(`${ch.soon.title} 将开始`);
+    if (ch.later) parts.push(`稍后 ${ch.later}`);
+    if (ch.ended) parts.push(`待结算 ${ch.ended}`);
+    return parts.join(' · ');
+  }
+
+  private labelHitAt(pt: { x: number; y: number }, x: number, y: number, text: string, dot: boolean): boolean {
+    const tw = this.view.tw;
+    const c = this.ctx;
+    c.save();
+    c.font = `600 ${tw < 30 ? 10.5 : 12}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    const bw = c.measureText(text).width + (dot ? 22 : 14);
+    c.restore();
+    const bh = tw < 30 ? 18 : 21;
+    return Math.abs(pt.x - x) <= bw / 2 && Math.abs(pt.y - y) <= bh / 2;
+  }
+
+  private pointToSegmentDistance(
+    pt: { x: number; y: number },
+    a: [number, number],
+    b: [number, number],
+  ): number {
+    const vx = b[0] - a[0];
+    const vy = b[1] - a[1];
+    const len2 = vx * vx + vy * vy;
+    if (!len2) return Math.hypot(pt.x - a[0], pt.y - a[1]);
+    const t = clamp(((pt.x - a[0]) * vx + (pt.y - a[1]) * vy) / len2, 0, 1);
+    return Math.hypot(pt.x - (a[0] + vx * t), pt.y - (a[1] + vy * t));
+  }
+
+  private pointInPolygon(pt: { x: number; y: number }, poly: [number, number][]): boolean {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i];
+      const [xj, yj] = poly[j];
+      if ((yi > pt.y) !== (yj > pt.y) && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  /** 命中区域跟随真实扫帚的刷头和木柄，不用会盖住小屋的最小圆半径。 */
+  private broomHitAt(pt: { x: number; y: number }, moving: boolean): boolean {
+    const [x, y] = this.choresAgendaAnchor();
+    const tw = this.view.tw;
+    const swing = moving && !this.calm ? Math.sin(this.t * 5) * tw * 0.05 : 0;
+    const brush: [number, number][] = [
+      [x - tw * 0.2 + swing, y - tw * 0.08],
+      [x + tw * 0.02 + swing, y - tw * 0.08],
+      [x + tw * 0.08 + swing, y + tw * 0.02],
+      [x - tw * 0.24 + swing, y + tw * 0.02],
+    ];
+    if (this.pointInPolygon(pt, brush)) return true;
+    const handleA: [number, number] = [x - tw * 0.08, y - tw * 0.13];
+    const handleB: [number, number] = [x + tw * 0.1 + swing, y - tw * 0.38];
+    return this.pointToSegmentDistance(pt, handleA, handleB) <= Math.max(1.25, tw * 0.05);
+  }
+
+  private villageAgendaAnchor(v: VillageView): [number, number] {
+    const center = this.map.villages[v.slot].center;
+    return this.iso(center.i - 0.72, center.j - 0.72);
+  }
+
+  /** 告示牌数的是今天还没开始的场次（即将开始 + 稍后）；已结束的由砖坯表示，只有全天条幅时不立牌 */
+  private hasNoticeBoard(agenda: AgendaView): boolean {
+    return (agenda.soon?.length ?? 0) > 0 || agenda.later > 0;
+  }
+
+  /** 杂务的此刻层只在即将开始 / 进行中画扫帚，锚点就是扫帚的位置 */
+  private choresAgendaAnchor(): [number, number] {
+    const [x, y] = this.iso(this.map.chores.i, this.map.chores.j);
+    const tw = this.view.tw;
+    return [x + tw * 0.36, y + tw * 0.03];
+  }
+
+  /**
+   * 灯塔条幅挂在廊台外侧：塔身在山顶上方总是露出来，挂在旁边既不被前面的山挡住，
+   * 也不盖住塔身（塔身要留给「档案馆」的点击）。
+   */
+  private lighthouseBannerAnchor(): [number, number] {
+    const [x, y] = this.iso(this.map.lighthouse.i, this.map.lighthouse.j);
+    const tw = this.view.tw;
+    return [x + tw * 0.7, y - tw * 1.3];
+  }
+
+  private isOpenWater(i: number, j: number): boolean {
+    const m = this.map;
+    for (const [di, dj] of [[0, 0], [0.45, 0], [-0.45, 0], [0, 0.45], [0, -0.45]]) if (m.at(Math.round(i + di), Math.round(j + dj))) return false;
+    return true;
+  }
+
+  /**
+   * 漂流瓶的位置：沿栈桥两侧找确实是海面、又离「码头」标签足够远的地方，
+   * 避免瓶子画在陆地上或被标签盖住。地图不变时结果不变。
+   */
+  private driftBottleSpots(): [number, number][] {
+    const m = this.map;
+    const [di, dj] = m.pierDir;
+    const [pi, pj] = [-dj, di];
+    const tw = this.view.tw;
+    const [lx, ly0] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
+    const ly = ly0 + tw * 0.2;
+    const spots: [number, number][] = [];
+    for (const side of [1, -1]) {
+      for (const t of [0.8, 1.6, 2.4, 3.2]) {
+        for (const off of [1.1, 1.7]) {
+          const i = m.dock.i + di * t + side * pi * off;
+          const j = m.dock.j + dj * t + side * pj * off;
+          if (!this.isOpenWater(i, j)) continue;
+          const [x, y] = this.iso(i, j);
+          if (Math.hypot(x - lx, y - ly) < tw * 1.1) continue;
+          if (spots.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < tw * 0.45)) continue;
+          spots.push([x, y]);
+          break;
+        }
+      }
+    }
+    // 极端地形下找不到合适位置时，退回原来的固定排布
+    for (let k = spots.length; k < DRIFT_BOTTLES_MAX; k++) spots.push(this.iso(m.dock.i + 0.95 + k * 0.55, m.dock.j + m.pierLen + 0.75 + k * 0.28));
+    return spots;
+  }
+
+  private driftBottleAnchor(index: number): [number, number] {
+    return this.driftBottleSpots()[index] ?? this.driftBottleSpots()[0];
+  }
+
+  /** 实际画出来的岸边码头和每一段栈桥；扩大的海上命中区不能抢走这里的点击。 */
+  private dockHitAt(pt: { x: number; y: number }): boolean {
+    const m = this.map;
+    const { fi, fj } = this.tileCoords(pt);
+    // 岸边码头地块本身。
+    if (Math.abs(fi - m.dock.i) + Math.abs(fj - m.dock.j) <= 0.95) return true;
+
+    const [di, dj] = m.pierDir;
+    for (let k = 0; k <= m.pierLen; k++) {
+      const pi = m.dock.i + di * (k + 0.2);
+      const pj = m.dock.j + dj * (k + 0.2);
+      const w = 0.28;
+      const deck: [number, number][] = [
+        this.iso(pi - w, pj - 0.5),
+        this.iso(pi + w, pj - 0.5),
+        this.iso(pi + w, pj + 0.5),
+        this.iso(pi - w, pj + 0.5),
+      ];
+      if (this.pointInPolygon(pt, deck)) return true;
+    }
+    return false;
+  }
+
+  /** 漂流瓶在海上；窄屏重叠时取离点击点最近的瓶子，但不覆盖真实码头/栈桥。 */
+  private driftHitAt(pt: { x: number; y: number }): Hit {
+    const s = this.scene;
+    if (!s) return null;
+    const bottleRadius = Math.max(14, this.view.tw * 0.42);
+    let nearest: { distance: number; title: string } | null = null;
+    for (let k = 0; k < s.drifting.length; k++) {
+      const [x, y] = this.driftBottleAnchor(k);
+      const distance = Math.hypot(pt.x - x, pt.y - y);
+      if (distance >= bottleRadius) continue;
+      if (!nearest || distance < nearest.distance) nearest = { distance, title: s.drifting[k].title };
+    }
+    return nearest ? { kind: 'drift', title: nearest.title } : null;
+  }
+
+  /**
+   * 告示牌、条幅、扫帚：只认画出来的那一小块，不能盖住村落中心和杂务小屋本身，
+   * 否则点村落、点小人、点小屋都会变成看日程说明。
+   */
+  private agendaHitAt(pt: { x: number; y: number }): Hit {
+    const s = this.scene;
+    if (!s) return null;
+    const tw = this.view.tw;
+    const r = Math.max(8, tw * 0.22);
+    for (const v of s.villages) {
+      if (!v.agenda) continue;
+      const [x, y] = this.villageAgendaAnchor(v);
+      const hasBoard = this.hasNoticeBoard(v.agenda);
+      if (hasBoard && Math.hypot(pt.x - x, pt.y - y) < r) return { kind: 'agenda', target: v.projectId };
+      const banners = this.villageBannerLayout(v);
+      for (const b of banners) {
+        if (this.bannerHitAt(pt, b)) return { kind: 'agenda', target: v.projectId };
+      }
+      // 进行中 / 仅待结算没有额外道具；用已经画出的村名标签承载说明，
+      // 避开井和小人，保持项目点击区域不变。
+      if (!hasBoard && !banners.length) {
+        const [lx, ly] = this.villageLabelAnchor(v);
+        if (this.labelHitAt(pt, lx, ly, this.villageLabelText(v), true)) return { kind: 'agenda', target: v.projectId };
+      }
+    }
+    if ((s.chores.live || s.chores.soon) && this.broomHitAt(pt, !!s.chores.live)) {
+      return { kind: 'agenda', target: CHORES };
+    }
+    if (s.lighthouseBanners.length) {
+      const [lx] = this.iso(this.map.lighthouse.i, this.map.lighthouse.j);
+      // 条幅区域，但塔身两侧 0.25 格留给档案馆。
+      for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
+        if (this.bannerHitAt(pt, banner) && Math.abs(pt.x - lx) >= tw * 0.25) {
+          return { kind: 'agenda', target: '__lighthouse__' };
+        }
+      }
+    }
+    return null;
+  }
+
+  private timeText(stamp: string | undefined): string {
+    if (!stamp) return '稍后';
+    const d = new Date(stamp);
+    if (!Number.isFinite(d.getTime())) return '稍后';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  private infoTargetForHit(hit: Hit): InfoTarget | null {
+    const s = this.scene;
+    if (!s || !hit) return null;
+    if (hit.kind === 'drift') return { kind: 'drift', title: hit.title };
+    if (hit.kind !== 'agenda') return null;
+    if (hit.target === '__lighthouse__') {
+      return { kind: 'agenda', target: hit.target, targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners };
+    }
+    if (hit.target === CHORES) {
+      const c = s.chores;
+      return {
+        kind: 'agenda',
+        target: CHORES,
+        targetName: '杂务',
+        phase: c.live ? 'live' : c.soon ? 'soon' : c.ended ? 'ended' : 'later',
+        title: c.live?.title ?? c.soon?.title,
+        until: c.live?.until,
+        start: c.soon?.start,
+        live: c.live ? [{ title: c.live.title, end: c.live.until }] : [],
+        soon: c.soon ? [{ title: c.soon.title, start: c.soon.start }] : [],
+        later: c.later,
+        ended: c.ended,
+        banners: [],
+      };
+    }
+    const v = s.villages.find((item) => item.projectId === hit.target);
+    if (!v?.agenda) return null;
+    return { kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda };
+  }
+
+  private inspectAgenda(hit: Hit, x: number, y: number, ctx: InfoContext): SceneryInspection | null {
+    const target = this.infoTargetForHit(hit);
+    if (!target) return null;
+    return this.selectScenery(target, null, x, y, ctx);
+  }
+
   /** 屏幕上的这一点是不是海面（用于海上的反光、星星倒影） */
   private onSea(x: number, y: number) {
     const { fi, fj } = this.tileCoords({ x, y });
     return !this.map.at(Math.round(fi), Math.round(fj)) && !this.map.at(Math.round(fi - 0.6), Math.round(fj - 0.6));
   }
 
-  hitAt(pt: { x: number; y: number }): Hit {
-    const s = this.scene;
-    if (!s) return null;
+  /** 前景可动实体永远优先于其经过的码头、瓶子和日程道具。 */
+  private walkerHitAt(pt: { x: number; y: number }): Hit {
     const s0 = Math.max(5, this.view.tw * 0.2);
     let best: Walker | null = null;
     let bd = Math.max(16, s0 * 1.4);
@@ -436,7 +868,21 @@ export class IslandRenderer {
         best = p;
       }
     }
-    if (best) return { kind: 'task', id: best.id };
+    return best ? { kind: 'task', id: best.id } : null;
+  }
+
+  hitAt(pt: { x: number; y: number }): Hit {
+    const s = this.scene;
+    if (!s) return null;
+
+    // 固定命中层级：前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 宽泛区域。
+    const walker = this.walkerHitAt(pt);
+    if (walker) return walker;
+    if (this.dockHitAt(pt)) return { kind: 'dock' };
+    const drift = this.driftHitAt(pt);
+    if (drift) return drift;
+    const agendaHit = this.agendaHitAt(pt);
+    if (agendaHit) return agendaHit;
     const { fi, fj } = this.tileCoords(pt);
     const m = this.map;
     const near = (t: Tile, r: number) => Math.hypot(t.i - fi, t.j - fj) < r;
@@ -489,7 +935,12 @@ export class IslandRenderer {
 
   private selectScenery(target: InfoTarget, focus: SceneryFocus | null, x: number, y: number, ctx: InfoContext): SceneryInspection {
     this.focus = focus;
-    return { info: describe(target, ctx), x, y };
+    return {
+      info: describe(target, ctx),
+      x,
+      y,
+      target: target.kind === 'drift' ? target : undefined,
+    };
   }
 
   /** 点到的景物（树、山、田、溪、空地、海）及其说明；anchor 是信息卡指向的位置 */
@@ -497,6 +948,11 @@ export class IslandRenderer {
     const s = this.scene;
     const ctx = this.infoContext();
     if (!s || !ctx) return null;
+    // Inspection and click selection intentionally have different semantics:
+    // clicks obey foreground z-order, while inspection can still describe a
+    // visible agenda prop or bottle even when a moving walker crosses it.
+    const inspectable = this.driftHitAt(pt) ?? this.agendaHitAt(pt);
+    if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
     const hw = tw / 2;
@@ -560,7 +1016,13 @@ export class IslandRenderer {
       const key = [info.title, info.sub ?? '', ...info.lines].join('\u0000');
       if (seen.has(key)) return;
       seen.add(key);
-      candidates.push({ info, focus, x, y });
+      candidates.push({
+        info,
+        focus,
+        x,
+        y,
+        target: target.kind === 'drift' ? target : undefined,
+      });
     };
 
     for (const t of m.all) {
@@ -590,6 +1052,26 @@ export class IslandRenderer {
       add({ kind: 'ground', type: t.type, ring: t.ring, site }, { i: t.i, j: t.j }, x, top);
     }
 
+    for (const v of s.villages) {
+      if (!v.agenda) continue;
+      const hasProp = this.hasNoticeBoard(v.agenda) || v.agenda.banners.length > 0;
+      const [x, y] = hasProp ? this.villageAgendaAnchor(v) : this.villageLabelAnchor(v);
+      add({ kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda }, null, x, y);
+    }
+    if (s.chores.live || s.chores.soon) {
+      const [x, y] = this.choresAgendaAnchor();
+      const target = this.infoTargetForHit({ kind: 'agenda', target: CHORES });
+      if (target) add(target, null, x, y);
+    }
+    if (s.lighthouseBanners.length) {
+      const [x, y] = this.lighthouseBannerAnchor();
+      add({ kind: 'agenda', target: '__lighthouse__', targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
+    }
+    for (let k = 0; k < s.drifting.length; k++) {
+      const [x, y] = this.driftBottleAnchor(k);
+      add({ kind: 'drift', title: s.drifting[k].title }, null, x, y);
+    }
+
     // 海面没有单独的地块对象，但说明本身也是同一套 describe() 语义。
     add({ kind: 'sea' }, null, Math.max(16, w * 0.08), Math.max(16, h * 0.14));
 
@@ -598,7 +1080,7 @@ export class IslandRenderer {
     else this.sceneryIndex = (this.sceneryIndex + step + candidates.length) % candidates.length;
     const current = candidates[this.sceneryIndex];
     this.focus = current.focus;
-    return { info: current.info, x: current.x, y: current.y };
+    return { info: current.info, x: current.x, y: current.y, target: current.target };
   }
 
   clearFocus() {
@@ -613,6 +1095,20 @@ export class IslandRenderer {
     for (const g of this.grow.values()) if (g.anim < 1) g.anim = Math.min(1, g.anim + dt * (this.paused ? 0.6 : 1.6));
     for (const pl of this.pulses) pl.t += dt;
     this.pulses = this.pulses.filter((p) => p.t < 1.4);
+    for (const ripple of this.bellRipples) ripple.t += dt;
+    this.bellRipples = this.bellRipples.filter((ripple) => ripple.t < 1.2);
+    for (const bottle of this.pickedBottles) bottle.t += dt;
+    this.pickedBottles = this.pickedBottles.filter((bottle) => bottle.t < 0.4);
+    for (const cue of this.stageCues) cue.t += dt;
+    this.stageCues = this.stageCues.filter((cue) => cue.t < 1.2);
+    if (this.granaryTransition) {
+      this.granaryTransition.t = Math.min(1, this.granaryTransition.t + dt / (this.calm ? 0.001 : 0.8));
+      if (this.granaryTransition.t >= 1) this.granaryTransition = null;
+    }
+    if (this.fogTransition) {
+      this.fogTransition.t = Math.min(1, this.fogTransition.t + dt / (this.calm ? 0.001 : 1.5));
+      if (this.fogTransition.t >= 1) this.fogTransition = null;
+    }
     this.stepDrifts(dt);
     this.stepSparks(dt);
     if (this.paused) return;
@@ -650,7 +1146,10 @@ export class IslandRenderer {
     const v = s.villages.find((x) => x.slot === p.slot);
     const houses = Math.max(1, v?.houses ?? 1);
     let t: { i: number; j: number };
-    if (p.leaving && r < 0.5) t = { i: this.map.dock.i, j: this.map.dock.j + 0.6 };
+    if (v?.agenda?.phase === 'live') {
+      const angle = hash(p.id + ':gathering') * Math.PI * 2;
+      t = { i: site.center.i + Math.cos(angle) * 0.72, j: site.center.j + Math.sin(angle) * 0.72 };
+    } else if (p.leaving && r < 0.5) t = { i: this.map.dock.i, j: this.map.dock.j + 0.6 };
     else if (r < 0.45) t = site.center;
     else t = site.slots[Math.floor(this.rnd() * houses)] ?? site.center;
     p.tx = t.i + (this.rnd() - 0.5) * 0.6;
@@ -1576,7 +2075,21 @@ export class IslandRenderer {
     return [win[0], y + (win[1] - y) * k];
   }
 
-  private drawGranary(x: number, y: number, tw: number, ratio: number) {
+  private shownGranaryRatio(scene: Scene): number {
+    const a = this.granaryTransition;
+    if (!a) return scene.granaryRatio;
+    const k = a.t * a.t * (3 - 2 * a.t);
+    return a.from + (a.to - a.from) * k;
+  }
+
+  private shownFog(scene: Scene): number {
+    const a = this.fogTransition;
+    if (!a) return scene.fog;
+    const k = a.t * a.t * (3 - 2 * a.t);
+    return a.from + (a.to - a.from) * k;
+  }
+
+  private drawGranary(x: number, y: number, tw: number, ratio: number, busy = false) {
     const c = this.ctx;
     const s = tw * 0.46;
     const r = s * 0.34;
@@ -1619,6 +2132,20 @@ export class IslandRenderer {
     if (this.amb.cover > 0.15) {
       this.poly(SNOW, x - r * 0.7, y - h - s * 0.22, x, y - h - s * 0.56, x, y - h - s * 0.12);
       this.poly(SNOW_SHADE, x, y - h - s * 0.56, x + r * 0.7, y - h - s * 0.22, x, y - h - s * 0.12);
+    }
+    if (busy) {
+      // 门半开表示「此刻正在用时间」，不改变粮仓存量高度。
+      c.fillStyle = '#6e4d32';
+      c.fillRect(x - r * 0.48, y - s * 0.34, r * 0.96, s * 0.34);
+      c.fillStyle = '#3f3025';
+      c.beginPath();
+      c.moveTo(x - r * 0.48, y - s * 0.34);
+      c.lineTo(x - r * 0.08, y - s * 0.25);
+      c.lineTo(x - r * 0.08, y + 0.01);
+      c.lineTo(x - r * 0.48, y);
+      c.closePath();
+      c.fill();
+      if (this.lit) this.lights.push([x - r * 0.16, y - s * 0.16, tw * 0.24, WARM]);
     }
   }
 
@@ -1691,6 +2218,201 @@ export class IslandRenderer {
         if (this.lit) this.lights.push([px + tw * 0.04, ly, tw * 0.22, LANTERN]);
       }
     } else if (f.has('christmas')) this.drawTree(px, py, tw * 0.4, 'pine', 0.1);
+    if (vv.agenda?.phase === 'live') this.drawGathering(x, y, tw);
+  }
+
+  private drawGathering(x: number, y: number, tw: number) {
+    const c = this.ctx;
+    const r = tw * 0.18;
+    c.strokeStyle = `rgba(${this.lit ? WARM : '210,174,98'},${this.lit ? 0.72 : 0.35})`;
+    c.lineWidth = Math.max(0.8, tw * 0.018);
+    c.beginPath();
+    c.ellipse(x, y - tw * 0.05, r, r * 0.45, 0, 0, Math.PI * 2);
+    c.stroke();
+    this.dot(x, y - tw * 0.08, tw * 0.035, this.lit ? '#ffe08a' : '#d9b45f');
+    if (this.lit) this.lights.push([x, y - tw * 0.1, tw * 0.6, WARM]);
+  }
+
+  private drawNoticeBoard(x: number, y: number, tw: number, agenda: AgendaView) {
+    const c = this.ctx;
+    const phaseColor = agenda.soon?.length ? '#c98a3b' : '#8a6e4d';
+    const w = tw * 0.32;
+    const h = tw * 0.3;
+    c.strokeStyle = '#6b4a30';
+    c.lineWidth = Math.max(0.7, tw * 0.02);
+    c.beginPath();
+    c.moveTo(x - w * 0.34, y + h * 0.55);
+    c.lineTo(x - w * 0.34, y - h * 0.6);
+    c.moveTo(x + w * 0.34, y + h * 0.55);
+    c.lineTo(x + w * 0.34, y - h * 0.6);
+    c.stroke();
+    c.fillStyle = phaseColor;
+    this.rrect(x - w / 2, y - h / 2, w, h, tw * 0.035);
+    c.fill();
+    c.fillStyle = '#f4e2b7';
+    c.fillRect(x - w * 0.3, y - h * 0.16, w * 0.6, Math.max(1, tw * 0.018));
+    c.fillRect(x - w * 0.3, y + h * 0.12, w * 0.42, Math.max(1, tw * 0.018));
+    const count = (agenda.soon?.length ?? 0) + agenda.later;
+    c.fillStyle = '#fff6dc';
+    c.font = `700 ${Math.max(8, tw * 0.16)}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    if (count > 0) c.fillText(String(count), x + w * 0.28, y - h * 0.04);
+  }
+
+  private drawUnfiredBricks(x: number, y: number, tw: number, count: number) {
+    const c = this.ctx;
+    const n = Math.min(3, count);
+    for (let k = 0; k < n; k++) {
+      const bx = x + (k - (n - 1) / 2) * tw * 0.12;
+      const by = y + tw * 0.22 - (k % 2) * tw * 0.035;
+      c.fillStyle = '#d8c5a6';
+      c.strokeStyle = '#a88768';
+      c.lineWidth = Math.max(0.5, tw * 0.012);
+      c.fillRect(bx - tw * 0.075, by - tw * 0.04, tw * 0.15, tw * 0.08);
+      c.strokeRect(bx - tw * 0.075, by - tw * 0.04, tw * 0.15, tw * 0.08);
+    }
+  }
+
+  /**
+   * 灯塔条幅竖着叠放的间距：布面连竹竿约占 0.34 格高；格子很小时文字有 7.5px 的下限，
+   * 所以间距也不小于 11px，保证上下两条的字不会叠在一起。
+   */
+  private bannerStep(): number {
+    return Math.max(this.view.tw * 0.36, 11);
+  }
+
+  private bannerWidth(title: string): number {
+    const tw = this.view.tw;
+    return Math.min(tw * 1.35, Math.max(tw * 0.72, title.length * tw * 0.095));
+  }
+
+  /**
+   * 村落条幅横着排在告示牌上方：竖着叠会撞上村名标签。按每条布的实际宽度留间距，
+   * 整排以告示牌为中心。
+   */
+  private villageBannerLayout(v: VillageView): { x: number; y: number; w: number; title: string }[] {
+    if (!v.agenda?.banners.length) return [];
+    const [ax, ay] = this.villageAgendaAnchor(v);
+    const tw = this.view.tw;
+    const gap = Math.max(tw * 0.08, 3);
+    const titles = v.agenda.banners.slice(0, BANNERS_MAX);
+    const widths = titles.map((title) => this.bannerWidth(title));
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (titles.length - 1);
+    let x = ax - total / 2;
+    return titles.map((title, k) => {
+      const item = { x: x + widths[k] / 2, y: ay - tw * 0.28, w: widths[k], title };
+      x += widths[k] + gap;
+      return item;
+    });
+  }
+
+  private bannerHitAt(
+    pt: { x: number; y: number },
+    banner: { x: number; y: number; w: number },
+  ): boolean {
+    const tw = this.view.tw;
+    return Math.abs(pt.x - banner.x) < banner.w * 0.48
+      && pt.y > banner.y - Math.max(tw * 0.2, 6)
+      && pt.y < banner.y + Math.max(tw * 0.15, 5);
+  }
+
+  private lighthouseBannerLayout(titles: string[]): { x: number; y: number; w: number; title: string }[] {
+    const [x, y] = this.lighthouseBannerAnchor();
+    return titles.slice(0, BANNERS_MAX).map((title, k) => ({
+      x,
+      y: y - k * this.bannerStep(),
+      w: this.bannerWidth(title),
+      title,
+    }));
+  }
+
+  private drawBanner(x: number, y: number, tw: number, title: string, color: string) {
+    const c = this.ctx;
+    const w = this.bannerWidth(title);
+    const h = tw * 0.27;
+    c.strokeStyle = '#72533b';
+    c.lineWidth = Math.max(0.6, tw * 0.018);
+    c.beginPath();
+    c.moveTo(x - w * 0.48, y - h * 0.72);
+    c.lineTo(x - w * 0.48, y + h * 0.54);
+    c.moveTo(x + w * 0.48, y - h * 0.72);
+    c.lineTo(x + w * 0.48, y + h * 0.54);
+    c.stroke();
+    c.fillStyle = color;
+    c.beginPath();
+    c.moveTo(x - w * 0.48, y - h * 0.56);
+    c.lineTo(x + w * 0.48, y - h * 0.56);
+    c.lineTo(x + w * 0.4, y + h * 0.44);
+    c.lineTo(x, y + h * 0.24);
+    c.lineTo(x - w * 0.4, y + h * 0.44);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#fff4d8';
+    c.font = `600 ${Math.max(7.5, tw * 0.105)}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(title.length > 8 ? title.slice(0, 7) + '…' : title, x, y - h * 0.03);
+  }
+
+  private drawWoodpile(x: number, y: number, tw: number, step: 0 | 1 | 2 | 3) {
+    if (!step) return;
+    const c = this.ctx;
+    const n = [0, 2, 4, 7][step];
+    for (let k = 0; k < n; k++) {
+      const row = Math.floor(k / 2);
+      const side = k % 2 ? 1 : -1;
+      const bx = x + side * tw * (0.08 + row * 0.02);
+      const by = y - tw * (0.04 + row * 0.065);
+      c.save();
+      c.translate(bx, by);
+      c.rotate(side * 0.1);
+      c.fillStyle = row % 2 ? '#875a35' : '#a87546';
+      c.fillRect(-tw * 0.12, -tw * 0.035, tw * 0.24, tw * 0.07);
+      c.restore();
+    }
+  }
+
+  private drawBroom(x: number, y: number, tw: number, moving: boolean) {
+    const c = this.ctx;
+    const swing = moving && !this.calm ? Math.sin(this.t * 5) * tw * 0.05 : 0;
+    c.strokeStyle = '#725033';
+    c.lineWidth = Math.max(0.8, tw * 0.025);
+    c.beginPath();
+    c.moveTo(x - tw * 0.08, y - tw * 0.13);
+    c.lineTo(x + tw * 0.1 + swing, y - tw * 0.38);
+    c.stroke();
+    c.fillStyle = '#c49b55';
+    c.beginPath();
+    c.moveTo(x - tw * 0.2 + swing, y - tw * 0.08);
+    c.lineTo(x + tw * 0.02 + swing, y - tw * 0.08);
+    c.lineTo(x + tw * 0.08 + swing, y + tw * 0.02);
+    c.lineTo(x - tw * 0.24 + swing, y + tw * 0.02);
+    c.closePath();
+    c.fill();
+  }
+
+  private drawDriftBottle(x: number, y: number, tw: number, title: string, index: number) {
+    const c = this.ctx;
+    const sway = this.calm ? 0 : Math.sin(this.t * 0.8 + index) * tw * 0.035;
+    c.save();
+    c.translate(x + sway, y);
+    c.rotate(Math.sin(index * 2.1) * 0.15);
+    c.fillStyle = '#d4a45e';
+    c.strokeStyle = '#8a633a';
+    c.lineWidth = Math.max(0.7, tw * 0.018);
+    c.beginPath();
+    c.ellipse(0, 0, tw * 0.11, tw * 0.055, 0, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+    c.fillStyle = '#f4dfaa';
+    c.fillRect(-tw * 0.025, -tw * 0.075, tw * 0.05, tw * 0.04);
+    c.fillStyle = '#fff2c5';
+    c.font = `700 ${Math.max(7, tw * 0.12)}px sans-serif`;
+    c.textAlign = 'center';
+    c.fillText(String(index + 1), 0, tw * 0.02);
+    c.restore();
+    void title;
   }
 
   private drawPerson(x: number, y: number, s: number, p: Walker, dim: number) {
@@ -2312,13 +3034,31 @@ export class IslandRenderer {
     for (const t of m.all) {
       const [x, y] = this.iso(t.i, t.j);
       if (t.type === 'mountain') this.drawMountain(x, y, t, tw);
-      if (t === m.lighthouse) this.drawLighthouse(x, y, tw);
-      if (t === m.granary) this.drawGranary(x, y, tw, s.granaryRatio);
-      if (t === m.chores) this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false);
+      if (t === m.lighthouse) {
+        this.drawLighthouse(x, y, tw);
+        for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
+          this.drawBanner(banner.x, banner.y, tw, banner.title, '#d8c9a7');
+        }
+      }
+      if (t === m.granary) this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy);
+      if (t === m.chores) {
+        this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false, !!s.chores.live);
+        this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
+        // 即将开始：扫帚靠在门口；进行中：扫帚动起来
+        if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
+      }
       if (t === m.dock) this.drawHarborProps(tw);
       if (t.type === 'plaza' && t.village >= 0) {
         const vv = occupied.get(t.village);
-        if (vv) this.drawWell(x, y, tw, vv, t);
+        if (vv) {
+          this.drawWell(x, y, tw, vv, t);
+          if (vv.agenda) {
+            const [ax, ay] = this.villageAgendaAnchor(vv);
+            if (this.hasNoticeBoard(vv.agenda)) this.drawNoticeBoard(ax, ay, tw, vv.agenda);
+            if (vv.agenda.ended) this.drawUnfiredBricks(x, y, tw, vv.agenda.ended);
+            for (const b of this.villageBannerLayout(vv)) this.drawBanner(b.x, b.y, tw, b.title, vv.roof);
+          }
+        }
       }
       if (t.village >= 0 && t.slotIdx >= 0) {
         const vv = occupied.get(t.village);
@@ -2343,6 +3083,17 @@ export class IslandRenderer {
         continue;
       }
       for (const tr of t.trees) this.drawTree(x + (tr.dx - tr.dy) * hw, y + (tr.dx + tr.dy) * hh, tw * 0.42 * tr.s, tr.kind, tileHash(t.i, t.j, 70 + Math.round(tr.dx * 100)));
+    }
+
+    for (let k = 0; k < s.drifting.length; k++) {
+      const [x, y] = this.driftBottleAnchor(k);
+      this.drawDriftBottle(x, y, tw, s.drifting[k].title, k);
+    }
+    for (const bottle of this.pickedBottles) {
+      c.save();
+      c.globalAlpha = 1 - bottle.t / 0.4;
+      this.drawDriftBottle(bottle.x, bottle.y - tw * 0.9 * (bottle.t / 0.4), tw, bottle.title, bottle.index);
+      c.restore();
     }
 
     // 小人
@@ -2377,6 +3128,30 @@ export class IslandRenderer {
     this.drawSparks();
     this.drawDrifts();
 
+    // 统一提示管线的非破坏性转场：阶段变差落灰，阶段变好散灰。
+    for (const cue of this.stageCues) {
+      const village = s.villages.find((v) => v.projectId === cue.projectId);
+      if (!village) continue;
+      const center = m.villages[village.slot].center;
+      const [x, y] = this.iso(center.i, center.j);
+      const k = Math.min(1, cue.t / 1.2);
+      c.strokeStyle = cue.to >= 2 ? `rgba(130,130,115,${(1 - k) * 0.5})` : `rgba(225,235,205,${(1 - k) * 0.65})`;
+      c.lineWidth = Math.max(1, tw * 0.035);
+      c.beginPath();
+      c.ellipse(x, y - tw * 0.12, tw * (0.5 + k * 0.6), tw * (0.24 + k * 0.3), 0, 0, Math.PI * 2);
+      c.stroke();
+    }
+
+    for (const ripple of this.bellRipples) {
+      const [x, y] = this.iso(ripple.at.i, ripple.at.j);
+      const k = Math.min(1, ripple.t / 1.2);
+      c.strokeStyle = `rgba(238,205,112,${(1 - k) * 0.82})`;
+      c.lineWidth = Math.max(1, tw * 0.028);
+      c.beginPath();
+      c.ellipse(x, y - tw * 0.52, tw * (0.18 + k * 1.15), tw * (0.07 + k * 0.45), 0, 0, Math.PI * 2);
+      c.stroke();
+    }
+
     // 落砖时的光圈
     for (const pl of this.pulses) {
       const [x, y] = this.iso(pl.at.i, pl.at.j);
@@ -2389,7 +3164,8 @@ export class IslandRenderer {
     }
 
     // 海雾：未结算的日子
-    if (s.fog > 0.01) {
+    const fog = this.shownFog(s);
+    if (fog > 0.01) {
       const [cx, cy] = this.iso(m.N / 2, m.N / 2);
       for (let k = 0; k < 9; k++) {
         const ang = hash('fog' + k) * Math.PI * 2 + this.t * 0.03 * (k % 2 ? 1 : -1);
@@ -2397,32 +3173,31 @@ export class IslandRenderer {
         const x = cx + Math.cos(ang) * tw * 3.2 * hash('fd' + k) * 1.4 + Math.sin(this.t * 0.1 + k) * tw * 0.4;
         const y = cy + Math.sin(ang) * tw * 1.6 * hash('fe' + k) * 1.4;
         const g = c.createRadialGradient(x, y, 0, x, y, rr * 2);
-        const al = 0.55 * s.fog;
+        const al = 0.55 * fog;
         g.addColorStop(0, `rgba(236,240,240,${al})`);
         g.addColorStop(1, 'rgba(236,240,240,0)');
         c.fillStyle = g;
         c.fillRect(x - rr * 2, y - rr * 2, rr * 4, rr * 4);
       }
-      c.fillStyle = `rgba(230,234,235,${0.18 * s.fog})`;
+      c.fillStyle = `rgba(230,234,235,${0.18 * fog})`;
       c.fillRect(0, 0, v.w, v.h);
     }
 
     // 标签
     const sel = s.selected;
     for (const vv of s.villages) {
-      const ctr = m.villages[vv.slot].center;
-      const [x, y0] = this.iso(ctr.i, ctr.j);
-      const stageTxt = vv.stage ? ` · ${['', '安静', '蒙灰', '搬离'][vv.stage]}` : '';
-      this.label(x, y0 - tw * 1.05, `${vv.name} ${vv.openCount}人${stageTxt}`, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
+      const [x, y] = this.villageLabelAnchor(vv);
+      this.label(x, y, this.villageLabelText(vv), vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
       this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock');
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
       this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary');
-      if (s.choresCount) {
+      const ch = s.chores;
+      if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        this.label(cx2, cy2 + tw * 0.3, `杂务 ${s.choresCount}`, '#8a8578', sel?.kind === 'chores', true);
+        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true);
       }
     }
     for (const l of s.landmarks) {

@@ -1,4 +1,5 @@
 import type { Project, SettlementEntry } from '../types';
+import { CHORES } from '../types';
 import { STAGE_NAMES, type Stage } from './config';
 
 export interface StageChange {
@@ -38,7 +39,7 @@ export function dayLine(entries: SettlementEntry[], projects: Map<string, Projec
     if (!done) s = `${partial} 件事做了一部分`;
     // 时间最多花在哪个村落
     const count = new Map<string, number>();
-    for (const e of entries) if (e.outcome !== 'skipped' && e.projectId) count.set(e.projectId, (count.get(e.projectId) ?? 0) + 1);
+    for (const e of entries) if (e.outcome !== 'skipped' && e.projectId && e.projectId !== CHORES) count.set(e.projectId, (count.get(e.projectId) ?? 0) + 1);
     const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
     const tp = top && projects.get(top[0]);
     if (tp && count.size > 1) s += `，最忙的是${q(tp)}`;

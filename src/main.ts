@@ -13,11 +13,13 @@ import { openCalendar, openClassify, openNew, openSettings, openWelcome, seedDem
 import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
+import { agendaAt } from './logic/agenda';
 import { SEASONS, fmtDay, localDate, relDay, seasonOf, weekday } from './lib/date';
 import { FESTIVAL_NAMES, festivalsOf, weatherOf } from './island/ambience';
 import { unclassifiedGroups } from './logic/classify';
 import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
+import { markDriftSeen } from './ui/drift';
 
 async function boot() {
   initModal();
@@ -47,6 +49,8 @@ async function boot() {
     return;
   }
   const store = session.store;
+  let renderer!: IslandRenderer;
+  let releasePreparingCueBaseline: (() => void) | undefined;
 
   const syncReadOnlyUi = (readOnly: boolean) => {
     for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
@@ -101,6 +105,14 @@ async function boot() {
   // Store/UI writability is a projection of coordinator state. No caller keeps
   // a second writable flag or replays an old acquisition result.
   const syncWriterState = (state: WriterState) => {
+    // A successful takeover enters preparing before its durable reload. Start
+    // the silent baseline there, so missed broadcasts cannot replay old cues.
+    // Initial startup has no renderer yet; visibility restoration owns its
+    // separate (nestable) suppression scope.
+    if (state === 'preparing' && renderer && !releasePreparingCueBaseline) {
+      releasePreparingCueBaseline = renderer.beginCueSuppression();
+    }
+
     const readOnly = state !== 'writer';
     store.setReadOnly(readOnly);
     syncReadOnlyUi(readOnly);
@@ -115,6 +127,27 @@ async function boot() {
       else delete tabNotice.dataset.blocked;
     }
     if (takeOver) takeOver.disabled = !session.supportsWriterLock || state !== 'reader';
+
+    if (!releasePreparingCueBaseline || !renderer) return;
+    if (state === 'writer') {
+      // AppSession runs writer activation after state listeners. A microtask
+      // therefore installs one final scene after daily/refresh duties while
+      // suppression is still active, then releases exactly this scope.
+      const release = releasePreparingCueBaseline;
+      queueMicrotask(() => {
+        try {
+          if (releasePreparingCueBaseline === release && session.state === 'writer') update();
+        } finally {
+          release();
+          if (releasePreparingCueBaseline === release) releasePreparingCueBaseline = undefined;
+        }
+      });
+    } else if (state !== 'preparing') {
+      // Failed/cancelled takeover: release the exact scope that preparation acquired.
+      const release = releasePreparingCueBaseline;
+      releasePreparingCueBaseline = undefined;
+      release();
+    }
   };
   session.subscribeState(syncWriterState);
 
@@ -172,9 +205,9 @@ async function boot() {
 
   buildStats();
   $('legend').innerHTML =
-    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span>`;
+    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的任务</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的任务</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span><span>告示牌、灯和条幅 = 日程此刻层</span><span>漂流瓶 = 待归类日程</span>`;
 
-  const renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
+  renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
   let dusk = false;
   const tracker = new Tracker(store, {
     openNewProject: () => openNew(store, 'project', (id) => tracker.open({ kind: 'project', id })),
@@ -190,7 +223,6 @@ async function boot() {
     pause: (on) => (renderer.paused = on),
     done: (p, where) => {
       tracker.open(where === 'landmark' ? { kind: 'project', id: p.id } : { kind: 'archive' });
-      setTimeout(() => renderer.pulse(p.id), 400);
     },
   });
 
@@ -220,6 +252,7 @@ async function boot() {
     });
     setTimeout(() => {
       b.remove();
+      // 砖落地时村落亮一下；任务和日程都一样。之后的盖房、烧窑提示由场景差分另行产生。
       renderer.pulse(pid);
     }, 780);
   }
@@ -244,19 +277,36 @@ async function boot() {
   const infoBox = $('mapinfo');
   const infoAnnounce = $('mapAnnounce');
   const mapCanvas = $('map') as HTMLCanvasElement;
+  let currentInspection: SceneryInspection | null = null;
   const hideInfo = () => {
+    currentInspection = null;
     if (infoBox.hidden) return;
     infoBox.hidden = true;
     setText(infoAnnounce, '');
     renderer.clearFocus();
   };
+  function pickAndClassifyDrift(title: string): boolean {
+    // Pointer, keyboard and card button share the same writer guard.
+    if (store.isReadOnly) return false;
+    hideInfo();
+    renderer.pickDrift(title);
+    markDriftSeen(title);
+    update();
+    openClassify(store, new Set(), title);
+    return true;
+  }
   const showInspection = (r: SceneryInspection | null) => {
     if (!r) return hideInfo();
+    currentInspection = r;
     const { info } = r;
+    const driftAction = r.target?.kind === 'drift'
+      ? `<div class="mi-actions"><button type="button" class="mi-action"${store.isReadOnly ? ' disabled' : ''}>${store.isReadOnly ? '只读标签页无法归类' : '捞起并归类'}</button></div>`
+      : '';
     setHTML(
       infoBox,
       `<div class="mi-head"><b>${esc(info.title)}</b>${info.sub ? `<small>${esc(info.sub)}</small>` : ''}<button type="button" class="mi-x" aria-label="关闭">×</button></div>` +
-        info.lines.map((l) => `<p>${esc(l)}</p>`).join(''),
+        info.lines.map((l) => `<p>${esc(l)}</p>`).join('') +
+        driftAction,
     );
     infoBox.hidden = false;
     // 播报通道永久留在可访问性树里；可视卡片可以自由 hidden/unhidden。
@@ -273,11 +323,22 @@ async function boot() {
     infoBox.style.top = `${below ? Math.min(r.y + 14, wrap.clientHeight - bh - 8) : r.y - bh - 12}px`;
     infoBox.style.setProperty('--arrow', `${Math.min(Math.max(14, r.x - left), bw - 14)}px`);
     infoBox.querySelector<HTMLButtonElement>('.mi-x')!.onclick = hideInfo;
+    const action = infoBox.querySelector<HTMLButtonElement>('.mi-action');
+    if (action && r.target?.kind === 'drift') {
+      const title = r.target.title;
+      action.onclick = () => { pickAndClassifyDrift(title); };
+    }
   };
   const showInfo = (pt: { x: number; y: number }) => showInspection(renderer.inspect(pt));
 
   mapCanvas.addEventListener('pointerdown', hideInfo);
   mapCanvas.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && currentInspection?.target?.kind === 'drift') {
+      e.preventDefault();
+      $('tip').style.opacity = '0';
+      pickAndClassifyDrift(currentInspection.target.title);
+      return;
+    }
     let step: 1 | -1 | null = null;
     if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowDown') step = 1;
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') step = -1;
@@ -294,6 +355,12 @@ async function boot() {
   renderer.onTap = (hit, pt) => {
     $('tip').style.opacity = '0';
     if (!hit) return showInfo(pt);
+    if (hit.kind === 'drift') {
+      // 只读标签页不能归类；统一动作返回 false 时只显示说明。
+      if (!pickAndClassifyDrift(hit.title)) showInfo(pt);
+      return;
+    }
+    if (hit.kind === 'agenda') return showInfo(pt);
     if (hit.kind === 'project' || hit.kind === 'task') tracker.open({ kind: hit.kind, id: hit.id });
     else tracker.open({ kind: hit.kind });
   };
@@ -312,6 +379,21 @@ async function boot() {
 
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
+  let agendaTimer = 0;
+  function scheduleAgendaRefresh(agenda: ReturnType<typeof agendaAt>, now: Date) {
+    window.clearTimeout(agendaTimer);
+    const until = agenda.nextChange ? agenda.nextChange.getTime() - now.getTime() : 60_000;
+    const delay = Math.max(1_000, Math.min(60_000, Number.isFinite(until) ? until : 60_000));
+    agendaTimer = window.setTimeout(() => {
+      const todayNow = store.today();
+      if (todayNow !== lastToday && !store.isReadOnly) {
+        daily();
+        lastToday = todayNow;
+      }
+      update();
+    }, delay);
+  }
+
   function update() {
     if (syncThemeDataset(store.data.settings.theme, document.documentElement.dataset)) {
       // Store notifications include persistence rollback and peer reloads.
@@ -325,13 +407,17 @@ async function boot() {
     // 地图场景和顶部日期/天气共用同一个时间快照，避免午夜边界出现互相矛盾的状态。
     const now = store.clock();
     const today = localDate(now);
+    const agenda = agendaAt(store.data, now);
     updateStats(store);
     tracker.render();
-    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now));
+    renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now, agenda));
 
     const pend = pendingDays(store.data, today);
     const light = lightNow(now, dusk);
-    setText($('date'), `${fmtDay(today)} ${weekday(today)} · ${SEASONS[seasonOf(today)]}`);
+    const allDayText = agenda.allDay.length
+      ? ` · ${agenda.allDay.slice(0, 2).join('、')}${agenda.allDay.length > 2 ? `，另外 ${agenda.allDay.length - 2} 件` : ''}`
+      : '';
+    setText($('date'), `${fmtDay(today)} ${weekday(today)} · ${SEASONS[seasonOf(today)]}${allDayText}`);
     const sb = $('settleBtn');
     setHTML(sb, `${light === 'day' ? '结算' : '晚间结算'}${pend.length ? `<span class="dot">${pend.length}</span>` : ''}`);
     const wb = $('weather');
@@ -349,6 +435,7 @@ async function boot() {
     const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
     setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(c.text)}</span></li>`).join('') : '<li class="empty">每天结算后，这里会自动多一行。</li>');
     setText($('chronCount'), `共 ${store.data.chronicle.length} 条`);
+    scheduleAgendaRefresh(agenda, now);
   }
 
   /** 进入「搬离」阶段的村落：询问重新启动 / 缩小规模 / 正式关闭 */
@@ -387,24 +474,34 @@ async function boot() {
   update();
   renderer.start();
 
-  setInterval(() => {
-    const t = store.today();
-    if (t !== lastToday && !store.isReadOnly) {
-      daily();
-      lastToday = t;
-    }
-    update();
-  }, 60_000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      if (store.today() !== lastToday && !store.isReadOnly) {
-        daily();
-        lastToday = store.today();
-      }
-      update();
-    }
-  });
+  // Bind the session first: on a visible transition it publishes any durable
+  // reload/resume work before the renderer waits on the lifecycle barrier.
   session.bindBrowserLifecycle();
+  let visibilityRefresh = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') {
+      visibilityRefresh++;
+      return;
+    }
+    const generation = ++visibilityRefresh;
+    const releaseCueSuppression = renderer.beginCueSuppression();
+    const applyFreshBaseline = () => {
+      try {
+        if (document.visibilityState !== 'visible' || generation !== visibilityRefresh) return;
+        if (store.today() !== lastToday && !store.isReadOnly) {
+          daily();
+          lastToday = store.today();
+        }
+        // This update runs while suppression is still sticky, so the refreshed
+        // durable snapshot becomes the cue baseline instead of replaying missed
+        // soon / growth transitions from the hidden interval.
+        update();
+      } finally {
+        releaseCueSuppression();
+      }
+    };
+    void session.whenIdle().then(applyFreshBaseline, applyFreshBaseline);
+  });
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 
   /* ---------------- 顶部按钮 ---------------- */
@@ -481,9 +578,9 @@ async function boot() {
     });
   } else setTimeout(maybePrompt, 1200);
 
-  // 方便调试与真实浏览器生命周期验收。session 暴露的是现有应用边界，
-  // 不另建测试专用权限状态。
-  (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A, session };
+  // 方便调试与真实浏览器验收（生命周期、地图点击）。session 暴露的是现有应用边界，
+  // 不另建测试专用权限状态；renderer / tracker 只供脚本读取坐标和当前视图。
+  (window as unknown as { yuzhi: unknown }).yuzhi = { store, actions: A, session, renderer, tracker };
 }
 
 boot();
