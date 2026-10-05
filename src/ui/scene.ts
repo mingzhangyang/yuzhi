@@ -58,9 +58,11 @@ function agendaViewOf(slot: AgendaSlot | undefined): AgendaView | undefined {
 function choresOf(store: Store, agenda: Agenda, today: string): ChoresView {
   const slot = agenda.slots.get(CHORES);
   // 柴堆只算真正做了的杂务；没做的不留柴
+  const cutoff = addDays(today, -7);
   const count = store.data.entries.filter((entry) =>
-    settlementProjectId(store.data, entry) === CHORES && (entry.outcome === 'done' || entry.outcome === 'partial')
-      && entry.date > addDays(today, -7) && entry.date <= today,
+    (entry.outcome === 'done' || entry.outcome === 'partial')
+      && entry.date > cutoff && entry.date <= today
+      && settlementProjectId(store.data, entry) === CHORES,
   ).length;
   const live = slot?.live[0];
   const soon = slot?.soon[0];
