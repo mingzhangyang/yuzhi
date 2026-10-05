@@ -6,6 +6,10 @@ import { FIREWORK, HAIR, SKIN, SNOW } from './style';
 import { hash } from './utils';
 import { IslandInteraction } from './interaction';
 
+export function isDeterioratingStageCue(cue: Pick<StageCue, 'from' | 'to'>): boolean {
+  return cue.to > cue.from;
+}
+
 /** Scene 安装、cue、人物和天气粒子状态；绘制层只读取这些状态。 */
 export abstract class IslandSimulation extends IslandInteraction {
   paused = false;
@@ -152,7 +156,7 @@ export abstract class IslandSimulation extends IslandInteraction {
         }
       } else if (cue.kind === 'stage-changed') {
         // 减弱动态效果时阶段直接到终态，不播灰尘落下 / 吹散
-        if (!this.calm) this.stageCues.push({ projectId: cue.projectId, to: cue.to, t: 0 });
+        if (!this.calm) this.stageCues.push({ projectId: cue.projectId, from: cue.from, to: cue.to, t: 0 });
       } else if (cue.kind === 'granary-changed') {
         this.granaryTransition = { from: cue.from, to: cue.to, t: this.calm ? 1 : 0 };
       } else if (cue.kind === 'fog-changed') {
