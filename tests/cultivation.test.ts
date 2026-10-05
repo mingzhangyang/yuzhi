@@ -39,6 +39,24 @@ describe('real-life cultivation read model', () => {
     expect(cultivationState(store.data, '2026-10-05').orchard.score).toBeGreaterThan(1);
   });
 
+  it('rejects a local schedule that inverts after DST-gap normalization', () => {
+    const previous = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+    try {
+      const { store } = makeStore('2026-03-08');
+      expect(() => createSchedule(store, {
+        title: 'DST gap',
+        date: '2026-03-08',
+        start: '02:30',
+        end: '03:00',
+        projectId: CHORES,
+      })).toThrow('日程结束时间要晚于开始时间');
+    } finally {
+      if (previous == null) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
+  });
+
   it('counts diary days rather than diary volume, and preserves diaries in backup', () => {
     const { store, setToday } = makeStore('2026-10-04');
     createDiary(store, { text: '第一篇' });
