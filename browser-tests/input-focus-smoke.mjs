@@ -49,6 +49,29 @@ try {
   assert(baseControls.every((control) => control.size >= 16),
     `mobile controls below 16px before focus: ${JSON.stringify(baseControls.filter((control) => control.size < 16))}`);
 
+  // Guard the selector boundary too: native-only controls must not be pulled
+  // into the 16px text-entry rule by component-specific selectors.
+  const excludedNativeControls = await page.evaluate(() => {
+    const host = document.createElement('div');
+    host.className = 'add field';
+    const types = ['checkbox', 'radio', 'range', 'file'];
+    for (const type of types) {
+      const input = document.createElement('input');
+      input.type = type;
+      input.dataset.testType = type;
+      host.append(input);
+    }
+    document.body.append(host);
+    const sizes = [...host.querySelectorAll('input')].map((el) => ({
+      type: el.dataset.testType,
+      size: parseFloat(getComputedStyle(el).fontSize),
+    }));
+    host.remove();
+    return sizes;
+  });
+  assert(excludedNativeControls.every((control) => control.size < 16),
+    `native controls were pulled into the 16px text-entry rule: ${JSON.stringify(excludedNativeControls)}`);
+
   const before = await page.evaluate(() => {
     const canvas = document.getElementById('map');
     const r = window.yuzhi.renderer;
@@ -93,8 +116,39 @@ try {
     `diary autofocus is not stable: ${JSON.stringify(diaryFocus)}`);
 
   // Approximate the software keyboard by shrinking only the viewport height.
-  // The map is width/aspect-ratio driven, so its own geometry should not change
-  // and the backing store must not be reassigned.
+  // Instrument the actual canvas IDL setters first: assigning the same numeric
+  // width/height still clears its backing store, so value equality alone cannot
+  // detect the regression this smoke is meant to prevent.
+  await page.evaluate(() => {
+    const canvas = document.getElementById('map');
+    const proto = HTMLCanvasElement.prototype;
+    const width = Object.getOwnPropertyDescriptor(proto, 'width');
+    const height = Object.getOwnPropertyDescriptor(proto, 'height');
+    if (!width?.get || !width.set || !height?.get || !height.set) {
+      throw new Error('canvas width/height accessors unavailable');
+    }
+    const writes = { width: 0, height: 0 };
+    Object.defineProperties(canvas, {
+      width: {
+        configurable: true,
+        get() { return width.get.call(this); },
+        set(value) {
+          writes.width += 1;
+          width.set.call(this, value);
+        },
+      },
+      height: {
+        configurable: true,
+        get() { return height.get.call(this); },
+        set(value) {
+          writes.height += 1;
+          height.set.call(this, value);
+        },
+      },
+    });
+    window.__yuzhiCanvasResizeWrites = writes;
+  });
+
   await page.setViewportSize({ width: 390, height: 520 });
   await page.waitForTimeout(250);
   const duringKeyboard = await page.evaluate(() => {
@@ -108,9 +162,12 @@ try {
       viewHeight: r.view.h,
       rect: { width: rect.width, height: rect.height },
       activeName: document.activeElement?.getAttribute?.('name') ?? null,
+      resizeWrites: { ...window.__yuzhiCanvasResizeWrites },
     };
   });
 
+  assert(duringKeyboard.resizeWrites.width === 0 && duringKeyboard.resizeWrites.height === 0,
+    `canvas backing-store setters ran on keyboard-like resize: ${JSON.stringify(duringKeyboard.resizeWrites)}`);
   assert(Math.abs(duringKeyboard.rect.width - before.rect.width) < 0.01
     && Math.abs(duringKeyboard.rect.height - before.rect.height) < 0.01,
     `map CSS geometry changed on height-only viewport resize: ${JSON.stringify({ before: before.rect, after: duringKeyboard.rect })}`);
