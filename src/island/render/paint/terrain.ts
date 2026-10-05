@@ -552,6 +552,33 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
 
   /* ---------------- 物件 ---------------- */
 
+  /** 树冠的屏幕轮廓；落叶后只剩枝条，不算遮挡 */
+  protected treeOutline(x: number, y: number, s: number, kind: 'pine' | 'round'): [number, number][] | null {
+    const a = this.amb;
+    if (kind === 'pine') {
+      return [
+        [x - s * 0.36, y - s * 0.18],
+        [x, y - s * 1.3],
+        [x + s * 0.36, y - s * 0.18],
+      ];
+    }
+    if (a.season === 3 || (a.season === 2 && a.progress > 0.85)) return null;
+    const cy = y - s * 0.66;
+    const r = s * 0.36;
+    return Array.from({ length: 8 }, (_, k): [number, number] => [x + Math.cos((k / 8) * Math.PI * 2) * r, cy + Math.sin((k / 8) * Math.PI * 2) * r]);
+  }
+
+  /** 山的屏幕轮廓：与点击判定用的三角形外框一致 */
+  protected mountainOutline(x: number, y: number, t: Tile, tw: number): [number, number][] {
+    const s = tw * (0.75 + t.v * 0.55);
+    return [
+      [x - tw * 0.48, y + tw * 0.05],
+      [x + tw * 0.08 * (t.v - 0.5), y - s],
+      [x + tw * 0.48, y + tw * 0.05],
+      [x, y + tw * 0.12],
+    ];
+  }
+
   protected drawTree(x: number, y: number, s: number, kind: 'pine' | 'round', seed: number) {
     const c = this.ctx;
     const a = this.amb;
