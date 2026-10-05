@@ -141,6 +141,13 @@ describe('scene agenda projection', () => {
     const scene = buildScene(store, null, false, new Date(2026, 9, 4, 20));
     expect(scene.chores.count).toBe(1);
     expect(scene.chores.woodpile).toBe(1);
+
+    // Re-settling the same outcome must persist the recovered owner instead
+    // of treating the legacy ownerless fact as an unchanged no-op.
+    settleDay(store, '2026-10-04', new Map([
+      [itemKey('event', 'legacy-chore'), { outcome: 'done' }],
+    ]));
+    expect(store.data.entries.find((entry) => entry.itemId === 'legacy-chore')?.projectId).toBe(CHORES);
   });
 
   it('keeps a chore in the soon window visible', () => {
