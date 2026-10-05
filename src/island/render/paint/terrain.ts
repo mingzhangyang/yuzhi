@@ -1,6 +1,6 @@
 import type { Scene } from '../model';
 import { tileHash, type Tile } from '../../map';
-import { SNOW, WARM } from '../style';
+import { BEACH, SNOW, WARM } from '../style';
 import { clamp, hash, mix, shade } from '../utils';
 import { IslandPaintBase } from './base';
 
@@ -58,7 +58,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     }
     // 低频的明暗起伏代替逐格随机：相邻地块颜色连成一片，不再像棋盘。
     col = shade(col, (smoothNoise(t.i, t.j, 4.5) - 0.5) * (t.type === 'water' ? 0.05 : 0.12));
-    if (a.cover > 0 && t.type !== 'water') col = mix(col, SNOW, clamp(a.cover * (0.86 + 0.18 * tileHash(t.i, t.j, 41)), 0, 0.92));
+    if (a.cover > 0 && t.type !== 'water') col = mix(col, SNOW, clamp(a.cover * (0.86 + 0.18 * smoothNoise(t.i, t.j, 3.5, 41)), 0, 0.92));
     if (a.weather === 'rain') col = shade(col, -0.06);
     return col;
   }
@@ -84,27 +84,25 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const hh = tw / 4;
     const D = tw * 0.32;
     const lw = Math.max(0.6, tw * 0.025);
+    // 岛背后的礁石先画，会被崖壁挡住一部分
+    this.drawShoreRocks(true);
     for (const t of m.all) {
       const [x, y] = this.iso(t.i, t.j);
       const col = this.tileTop(t, occupied);
       const wat = t.type === 'water';
-      // 崖壁：泥土、一道深色的岩层、顶上一圈草皮（冬天是雪）
-      const lip = a.cover > 0.3 ? SNOW : shade(col, -0.08);
+      const beach = this.isBeach(t);
+      // 崖壁：灰色岩石，几道横向岩层和竖向裂缝，顶上一圈草皮（沙滩处是沙，冬天是雪）
+      const lip = a.cover > 0.3 ? SNOW : beach ? BEACH : shade(col, -0.08);
+      const rock = shade('#a39b8b', (smoothNoise(t.i, t.j, 3, 21) - 0.5) * 0.16);
       const front = !m.at(t.i, t.j + 1);
       const right = !m.at(t.i + 1, t.j);
       if (front) {
-        this.poly(wat ? '#5f93a8' : '#b38957', x - hw, y, x, y + hh, x, y + hh + D, x - hw, y + D);
-        if (!wat) {
-          this.poly('#a07a4c', x - hw, y + D * 0.55, x, y + hh + D * 0.55, x, y + hh + D * 0.7, x - hw, y + D * 0.7);
-          this.poly(lip, x - hw, y, x, y + hh, x, y + hh + D * 0.18, x - hw, y + D * 0.18);
-        }
+        this.poly(wat ? '#5f93a8' : rock, x - hw, y, x, y + hh, x, y + hh + D, x - hw, y + D);
+        if (!wat) this.cliffDetail(t, x - hw, y, x, y + hh, D, rock, lip, 0);
       }
       if (right) {
-        this.poly(wat ? '#4f8197' : '#957043', x, y + hh, x + hw, y, x + hw, y + D, x, y + hh + D);
-        if (!wat) {
-          this.poly('#82603a', x, y + hh + D * 0.55, x + hw, y + D * 0.55, x + hw, y + D * 0.7, x, y + hh + D * 0.7);
-          this.poly(shade(lip, -0.12), x, y + hh, x + hw, y, x + hw, y + D * 0.18, x, y + hh + D * 0.18);
-        }
+        this.poly(wat ? '#4f8197' : shade(rock, -0.16), x, y + hh, x + hw, y, x + hw, y + D, x, y + hh + D);
+        if (!wat) this.cliffDetail(t, x, y + hh, x + hw, y, D, shade(rock, -0.16), shade(lip, -0.12), 1);
       }
       // 地块顶面：北角略亮、南角略暗
       const grd = gc.createLinearGradient(x, y - hh, x, y + hh);
@@ -114,7 +112,10 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       gc.fillStyle = grd;
       gc.fill();
       this.tileDetail(t, t.type === 'plaza' && t.village >= 0 && !occupied.has(t.village) ? 'grass' : t.type, x, y, col, lw);
+      if (beach || (t.type === 'grass' && this.sandNeighbour(t))) this.drawBeach(t, x, y, beach);
     }
+    // 岛前面的礁石压在崖脚的水线上
+    this.drawShoreRocks(false);
     // 村里的小路：广场通向每座房子
     gc.lineCap = 'round';
     gc.lineJoin = 'round';
@@ -133,6 +134,195 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       gc.stroke();
     }
     this.ctx = main;
+  }
+
+  /** 沙滩：外圈的草地里，低频噪声挑出几段连续的岸线铺沙，避开村落、地标和码头 */
+  protected isBeach(t: Tile): boolean {
+    if (!t.edge || t.type !== 'grass' || t.village >= 0 || t.landmark >= 0) return false;
+    const m = this.map;
+    if (t === m.dock || t === m.granary || t === m.chores || t === m.lighthouse) return false;
+    // 紧挨码头沙地的岸边也铺沙，让沙滩连成一段
+    return this.sandNeighbour(t) || smoothNoise(t.i, t.j, 4, 13) > 0.58;
+  }
+
+  protected sandNeighbour(t: Tile): boolean {
+    const m = this.map;
+    return [m.at(t.i + 1, t.j), m.at(t.i - 1, t.j), m.at(t.i, t.j + 1), m.at(t.i, t.j - 1)].some((n) => n?.type === 'sand');
+  }
+
+  /**
+   * 沿露出海面的边铺一条宽窄不一的沙带，内侧边缘是波浪形的。
+   * 挨着整块沙地的边也铺一窄条，让沙地和草地的交界不再是一道直角台阶。
+   */
+  protected drawBeach(t: Tile, x: number, y: number, shore: boolean) {
+    const m = this.map;
+    const { tw } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    const c = this.ctx;
+    const a = this.amb;
+    const sand = a.cover > 0.3 ? mix(BEACH, SNOW, clamp(a.cover, 0, 0.85)) : BEACH;
+    // 四条边：两端点 + 指向地块内部的单位位移（屏幕坐标）
+    const L: [number, number] = [x - hw, y];
+    const B: [number, number] = [x, y + hh];
+    const R: [number, number] = [x + hw, y];
+    const T: [number, number] = [x, y - hh];
+    const edges: [Tile | null, [number, number], [number, number], [number, number], number][] = [
+      [m.at(t.i, t.j + 1), L, B, [hw, -hh], 0],
+      [m.at(t.i + 1, t.j), B, R, [-hw, -hh], 1],
+      [m.at(t.i - 1, t.j), L, T, [hw, hh], 2],
+      [m.at(t.i, t.j - 1), T, R, [-hw, hh], 3],
+    ];
+    for (const [n, p0, p1, [ix, iy], k] of edges) {
+      const sea = !n;
+      if (sea ? !shore : n.type !== 'sand') continue;
+      const base = sea ? 0.22 : 0.1;
+      const w0 = base + tileHash(t.i, t.j, 80 + k) * 0.22;
+      const w1 = base + tileHash(t.i + (k % 2 ? 1 : 0), t.j + (k % 2 ? 0 : 1), 80 + k) * 0.22;
+      const mid = (w0 + w1) / 2 + 0.08;
+      c.fillStyle = sand;
+      c.beginPath();
+      c.moveTo(p0[0], p0[1]);
+      c.lineTo(p1[0], p1[1]);
+      c.lineTo(p1[0] + ix * w1, p1[1] + iy * w1);
+      c.quadraticCurveTo((p0[0] + p1[0]) / 2 + ix * mid, (p0[1] + p1[1]) / 2 + iy * mid, p0[0] + ix * w0, p0[1] + iy * w0);
+      c.closePath();
+      c.fill();
+      if (!sea) continue;
+      // 湿沙：靠水的一窄条略深
+      c.strokeStyle = shade(sand, -0.1);
+      c.lineWidth = Math.max(0.6, tw * 0.03);
+      c.beginPath();
+      c.moveTo(p0[0] + ix * 0.04, p0[1] + iy * 0.04);
+      c.lineTo(p1[0] + ix * 0.04, p1[1] + iy * 0.04);
+      c.stroke();
+      if (a.cover < 0.3 && tileHash(t.i, t.j, 90 + k) < 0.4) {
+        const u = 0.3 + tileHash(t.i, t.j, 94 + k) * 0.4;
+        this.dot(p0[0] + (p1[0] - p0[0]) * u + ix * 0.15, p0[1] + (p1[1] - p0[1]) * u + iy * 0.15, tw * 0.022, '#f6efe2');
+      }
+    }
+  }
+
+  /** 崖壁细节：两道岩层、几道竖向裂缝、顶上的草皮 / 沙 / 雪 */
+  protected cliffDetail(t: Tile, x0: number, y0: number, x1: number, y1: number, D: number, rock: string, lip: string, side: number) {
+    const c = this.ctx;
+    const { tw } = this.view;
+    const at = (u: number, d: number): [number, number] => [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u + d];
+    // 岩层：深浅两道，位置随地块略有起伏
+    const b0 = 0.42 + tileHash(t.i, t.j, 100 + side) * 0.12;
+    const b1 = b0 + 0.14;
+    const [s0x, s0y] = at(0, D * b0);
+    const [s1x, s1y] = at(1, D * (b0 + (tileHash(t.i, t.j, 102 + side) - 0.5) * 0.12));
+    this.poly(shade(rock, -0.1), s0x, s0y, s1x, s1y, s1x, s1y + D * (b1 - b0), s0x, s0y + D * (b1 - b0));
+    // 竖向裂缝：把崖壁分成不等宽的岩块
+    c.strokeStyle = shade(rock, -0.24);
+    c.lineWidth = Math.max(0.5, tw * 0.012);
+    c.beginPath();
+    const n = 1 + Math.floor(tileHash(t.i, t.j, 104 + side) * 2);
+    for (let k = 0; k < n; k++) {
+      const u = 0.2 + tileHash(t.i, t.j, 106 + side * 4 + k) * 0.6;
+      const [cx, cy] = at(u, D * 0.22);
+      c.moveTo(cx, cy);
+      c.lineTo(cx + tw * 0.015, cy + D * 0.35);
+      c.lineTo(cx - tw * 0.005, cy + D * 0.7);
+    }
+    c.stroke();
+    // 顶边：草皮略微垂下崖口，厚度不一
+    const d0 = D * (0.12 + tileHash(t.i, t.j, 110 + side) * 0.1);
+    const d1 = D * (0.12 + tileHash(t.i, t.j, 111 + side) * 0.1);
+    const [mx, my] = at(0.5, D * 0.26);
+    c.fillStyle = lip;
+    c.beginPath();
+    c.moveTo(x0, y0);
+    c.lineTo(x1, y1);
+    c.lineTo(x1, y1 + d1);
+    c.quadraticCurveTo(mx, my, x0, y0 + d0);
+    c.closePath();
+    c.fill();
+  }
+
+  /**
+   * 水里的礁石：只在部分露出的海岸边放一两块，大小不一。
+   * back = true 画岛背后（上方两条边）的，会被随后画的崖壁挡住。
+   */
+  protected drawShoreRocks(back: boolean) {
+    const m = this.map;
+    const { tw } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    const D = tw * 0.32;
+    const a = this.amb;
+    for (const t of m.all) {
+      if (!t.edge || t.type === 'water' || t === m.dock) continue;
+      const [x, y] = this.iso(t.i, t.j);
+      const sides: [boolean, number, number, number][] = back
+        ? [
+            [!m.at(t.i - 1, t.j), -1, 0, 2],
+            [!m.at(t.i, t.j - 1), 0, -1, 3],
+          ]
+        : [
+            [!m.at(t.i, t.j + 1), 0, 1, 0],
+            [!m.at(t.i + 1, t.j), 1, 0, 1],
+          ];
+      for (const [open, di, dj, k] of sides) {
+        if (!open || tileHash(t.i, t.j, 120 + k) > 0.3) continue;
+        const u = tileHash(t.i, t.j, 124 + k) - 0.5;
+        const out = 0.72 + tileHash(t.i, t.j, 128 + k) * 0.35;
+        // 沿边偏移 u，向外 out；落在水线（崖脚）高度
+        const ri = di ? di * out : u * 0.8;
+        const rj = dj ? dj * out : u * 0.8;
+        const rx = x + (ri - rj) * hw;
+        const ry = y + (ri + rj) * hh + D;
+        const r = tw * (0.12 + tileHash(t.i, t.j, 132 + k) * 0.13);
+        this.drawRock(rx, ry, r, tileHash(t.i, t.j, 136 + k), a.cover);
+        if (tileHash(t.i, t.j, 140 + k) < 0.5) this.drawRock(rx + r * 1.2, ry + r * 0.25, r * 0.55, tileHash(t.i, t.j, 144 + k), a.cover);
+      }
+    }
+  }
+
+  /** 一簇圆润的礁石：两三块高矮不一的石头，左上受光、右侧背光 */
+  protected drawRock(x: number, y: number, r: number, seed: number, cover: number) {
+    const c = this.ctx;
+    // 水线上一圈白沫
+    c.fillStyle = 'rgba(255,255,255,.45)';
+    c.beginPath();
+    c.ellipse(x + r * 0.2, y, r * 1.45, r * 0.42, 0, 0, Math.PI * 2);
+    c.fill();
+    const stones: [number, number, number][] = [
+      [-0.45, -0.05, 0.6 + seed * 0.25],
+      [0.35, 0.05, 0.8 + (1 - seed) * 0.35],
+      [0.95, 0.12, 0.45],
+    ];
+    if (seed < 0.4) stones.pop();
+    stones.sort((a, b) => a[1] - b[1]);
+    for (const [ox, oy, k] of stones) {
+      const sx = x + ox * r;
+      const sy = y + oy * r;
+      const w = r * 0.62 * k;
+      const h = r * 0.95 * k;
+      // 底宽顶窄的圆角块：受光面
+      c.fillStyle = cover > 0.3 ? '#9b968c' : '#8f887b';
+      c.beginPath();
+      c.moveTo(sx - w, sy);
+      c.quadraticCurveTo(sx - w * 1.05, sy - h * 0.7, sx - w * 0.35, sy - h);
+      c.quadraticCurveTo(sx + w * 0.3, sy - h * 1.08, sx + w * 0.7, sy - h * 0.62);
+      c.quadraticCurveTo(sx + w * 1.05, sy - h * 0.25, sx + w, sy);
+      c.closePath();
+      c.fill();
+      // 背光面
+      c.fillStyle = '#6f695f';
+      c.beginPath();
+      c.moveTo(sx + w * 0.05, sy);
+      c.quadraticCurveTo(sx + w * 0.2, sy - h * 0.6, sx + w * 0.7, sy - h * 0.62);
+      c.quadraticCurveTo(sx + w * 1.05, sy - h * 0.25, sx + w, sy);
+      c.closePath();
+      c.fill();
+      // 顶上的高光或积雪
+      c.fillStyle = cover > 0.3 ? SNOW : '#a9a294';
+      c.beginPath();
+      c.ellipse(sx - w * 0.3, sy - h * 0.82, w * 0.38, h * 0.14, -0.2, 0, Math.PI * 2);
+      c.fill();
+    }
   }
 
   /** 地块上的小细节：草丛、野花、落叶、田垄、石板、沙粒 */
@@ -311,36 +501,35 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     }
     c.fill();
     c.globalAlpha = 1;
-    // 拍岸的浪花：沿着露出的海岸线，一涨一落
-    for (const pass of [0, 1]) {
-      const ph = this.t * 0.9 + pass * Math.PI;
-      const out = (0.5 + 0.5 * Math.sin(ph)) * tw * 0.09 + tw * 0.03;
-      c.strokeStyle = `rgba(255,255,255,${0.35 + 0.35 * (0.5 - 0.5 * Math.sin(ph))})`;
-      c.lineWidth = Math.max(1, tw * 0.035);
-      c.lineCap = 'round';
-      c.beginPath();
-      for (const t of m.all) {
-        if (!t.edge) continue;
-        const [x, y] = this.iso(t.i, t.j);
-        const yb = y + D;
-        if (!m.at(t.i, t.j + 1)) {
-          c.moveTo(x - hw - out * 0.9, yb + out * 0.4);
-          c.lineTo(x - out * 0.2, yb + hh + out);
+    // 拍岸的浪花：沿着露出的海岸线，一涨一落。每条边只取其中一段，分三组错开节奏，
+    // 浪线断断续续，不再是一圈整齐的白边。
+    c.lineCap = 'round';
+    c.lineWidth = Math.max(1, tw * 0.035);
+    for (let group = 0; group < 3; group++) {
+      for (const pass of [0, 1]) {
+        const ph = this.t * 0.9 + pass * Math.PI + group * 2.1;
+        const out = (0.5 + 0.5 * Math.sin(ph)) * tw * 0.09 + tw * 0.03;
+        c.strokeStyle = `rgba(255,255,255,${0.3 + 0.38 * (0.5 - 0.5 * Math.sin(ph))})`;
+        c.beginPath();
+        for (const t of m.all) {
+          if (!t.edge) continue;
+          const [x, y] = this.iso(t.i, t.j);
+          const yb = y + D;
+          const seg = (k: number, x0: number, y0: number, x1: number, y1: number) => {
+            if (Math.floor(tileHash(t.i, t.j, 150 + k) * 3) !== group) return;
+            const len = 0.35 + tileHash(t.i, t.j, 154 + k) * 0.55;
+            if (tileHash(t.i, t.j, 158 + k) < 0.15) return;
+            const u0 = tileHash(t.i, t.j, 162 + k) * (1 - len);
+            c.moveTo(x0 + (x1 - x0) * u0, y0 + (y1 - y0) * u0);
+            c.lineTo(x0 + (x1 - x0) * (u0 + len), y0 + (y1 - y0) * (u0 + len));
+          };
+          if (!m.at(t.i, t.j + 1)) seg(0, x - hw - out * 0.9, yb + out * 0.4, x - out * 0.2, yb + hh + out);
+          if (!m.at(t.i + 1, t.j)) seg(1, x + out * 0.2, yb + hh + out, x + hw + out * 0.9, yb + out * 0.4);
+          if (!m.at(t.i - 1, t.j)) seg(2, x - hw - out, y - out * 0.4, x - out * 0.2, y - hh - out * 0.9);
+          if (!m.at(t.i, t.j - 1)) seg(3, x + out * 0.2, y - hh - out * 0.9, x + hw + out, y - out * 0.4);
         }
-        if (!m.at(t.i + 1, t.j)) {
-          c.moveTo(x + out * 0.2, yb + hh + out);
-          c.lineTo(x + hw + out * 0.9, yb + out * 0.4);
-        }
-        if (!m.at(t.i - 1, t.j)) {
-          c.moveTo(x - hw - out, y - out * 0.4);
-          c.lineTo(x - out * 0.2, y - hh - out * 0.9);
-        }
-        if (!m.at(t.i, t.j - 1)) {
-          c.moveTo(x + out * 0.2, y - hh - out * 0.9);
-          c.lineTo(x + hw + out, y - out * 0.4);
-        }
+        c.stroke();
       }
-      c.stroke();
     }
     // 晴天白日的波光
     if (a.weather === 'clear' && this.day.night < 0.3) {
@@ -380,11 +569,29 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     if (kind === 'pine') {
       // 三层松枝：左侧受光、右侧背光，冬天每层顶上压着雪
       const col = se === 3 ? '#4f6f4f' : se === 0 ? '#55874a' : '#45743f';
-      const tiers: [number, number, number][] = [
-        [0.18, 0.62, 0.36],
-        [0.46, 0.92, 0.28],
-        [0.72, 1.28, 0.2],
-      ];
+      // 层数、宽窄和高矮随树而变：有的瘦高，有的矮胖
+      const r1 = (seed * 7.13) % 1;
+      const r2 = (seed * 3.71) % 1;
+      const fat = 0.85 + r1 * 0.35;
+      const tall = 0.9 + r2 * 0.25;
+      const tiers: [number, number, number][] =
+        r2 < 0.3
+          ? [
+              [0.2, 0.72 * tall, 0.38 * fat],
+              [0.55, 1.18 * tall, 0.25 * fat],
+            ]
+          : r2 > 0.8
+            ? [
+                [0.16, 0.52 * tall, 0.36 * fat],
+                [0.38, 0.78 * tall, 0.3 * fat],
+                [0.6, 1.04 * tall, 0.23 * fat],
+                [0.84, 1.36 * tall, 0.15 * fat],
+              ]
+            : [
+                [0.18, 0.62 * tall, 0.36 * fat],
+                [0.46, 0.92 * tall, 0.28 * fat],
+                [0.72, 1.28 * tall, 0.2 * fat],
+              ];
       for (let k = 0; k < tiers.length; k++) {
         const [b, top, w] = tiers[k];
         const ox = sway * (0.5 + k * 0.4);
@@ -458,12 +665,17 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     }
     // 三四团叶子叠出树冠：暗底、中间、受光的高光
     const thin = se === 2 ? 1 - a.progress * 0.25 : 1;
-    const lobes: [number, number, number][] = [
-      [-0.16, 0.02, 0.24],
-      [0.17, 0.04, 0.23],
-      [0, -0.14, 0.27],
-      [0.02, 0.1, 0.26],
-    ];
+    // 叶团的数量、位置和大小随树而变，树冠轮廓不对称
+    const lobes: [number, number, number][] = [];
+    const n = 3 + Math.floor(((seed * 5.3) % 1) * 3);
+    const lean = (((seed * 9.7) % 1) - 0.5) * 0.12;
+    for (let k = 0; k < n; k++) {
+      const q = (seed * (13.1 + k * 7.7)) % 1;
+      const ang = (k / n) * Math.PI * 2 + q * 1.1;
+      const d = 0.1 + q * 0.08;
+      lobes.push([Math.cos(ang) * d * 1.25 + lean, Math.sin(ang) * d * 0.9 - 0.02, 0.19 + ((seed * (5.9 + k * 3.3)) % 1) * 0.1]);
+    }
+    lobes.push([lean * 0.5, -0.1, 0.24]);
     for (const [dx, dy, r] of lobes) this.dot(tx + dx * s, ty + dy * s, r * s * thin, shade(col, -0.2));
     for (const [dx, dy, r] of lobes) this.dot(tx + dx * s - s * 0.03, ty + dy * s - s * 0.04, r * s * 0.82 * thin, col);
     this.dot(tx - s * 0.1, ty - s * 0.16, s * 0.12 * thin, shade(col, 0.2));
@@ -477,37 +689,73 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
 
   /** 在等距面上画平行四边形：左墙面沿 (+1,+0.5) 方向，右墙面沿 (+1,-0.5) */
 
+  /**
+   * 山：每块山地是一组高矮宽窄不同的岩块，主峰在后，矮岩在前。
+   * 主峰高度沿用原来的 0.75–1.3 倍地块宽，点击判定的外框不变。
+   */
   protected drawMountain(x: number, y: number, t: Tile, tw: number) {
     const a = this.amb;
     const s = tw * (0.75 + t.v * 0.55);
-    const ax = x + tw * 0.08 * (t.v - 0.5);
-    const ay = y - s;
-    const by = y + tw * 0.12;
-    const L = x - tw * 0.48;
-    const R = x + tw * 0.48;
-    const yb = y + tw * 0.05;
-    const green = a.season === 1 ? 0.25 : a.season === 0 ? 0.15 : 0;
-    this.poly(mix('#b3b6a3', '#8fae6a', green), L, yb, ax, ay, ax, by);
-    this.poly(mix('#8a8e7c', '#6f8a52', green), ax, ay, R, yb, ax, by);
-    // 岩石的棱
+    const h = (k: number) => tileHash(t.i, t.j, 170 + k);
+    const snow = clamp([0.3, 0.16, 0.24, 0.42][a.season] + a.cover * 0.35, 0, 0.85);
+    // [横向偏移（地块宽）, 底边下移（地块宽）, 半宽（地块宽）, 高（主峰高）]
+    const blocks: [number, number, number, number][] = [[(h(0) - 0.5) * 0.1, 0, 0.36 + h(1) * 0.1, 0.92]];
+    if (h(5) < 0.45) blocks.push([h(2) < 0.5 ? -0.26 : 0.26, 0.07, 0.18 + h(3) * 0.08, 0.32 + h(4) * 0.2]);
+    for (let k = 0; k < blocks.length; k++) {
+      const [dx, dy, w, hk] = blocks[k];
+      this.drawRockMass(x + dx * tw, y + dy * tw, w * tw, s * hk, h(10 + k), hk > 0.6 ? snow : snow * 0.4);
+    }
+  }
+
+  /** 一块岩体：宽底、斜削的平顶、左侧受光右侧背光，山脚一圈草坡 */
+  protected drawRockMass(bx: number, by: number, w: number, h: number, r: number, snow: number) {
     const c = this.ctx;
-    c.strokeStyle = 'rgba(70,72,60,.35)';
-    c.lineWidth = Math.max(0.6, tw * 0.02);
+    const a = this.amb;
+    const green = a.season === 1 ? 0.3 : a.season === 0 ? 0.2 : a.season === 2 ? 0.08 : 0;
+    const BL: [number, number] = [bx - w, by];
+    const BR: [number, number] = [bx + w, by];
+    const BM: [number, number] = [bx + w * 0.1, by + w * 0.3];
+    const SL: [number, number] = [bx - w * 0.86, by - h * (0.5 + r * 0.15)];
+    const SR: [number, number] = [bx + w * 0.82, by - h * (0.4 + (1 - r) * 0.15)];
+    // 顶部：一条斜削的岩脊，左高右低或反之
+    const TL: [number, number] = [bx - w * (0.45 - r * 0.2), by - h * (0.9 + r * 0.1)];
+    const TR: [number, number] = [bx + w * (0.25 + r * 0.15), by - h * (1 - r * 0.12)];
+    const RM: [number, number] = [bx + w * 0.02, by - h * 0.78];
+    this.shadow(bx + w * 0.2, by + w * 0.14, w * 1.15, w * 0.42, 0.14);
+    const lit = '#aaa496';
+    const dark = '#7c776c';
+    this.poly(lit, BL[0], BL[1], SL[0], SL[1], TL[0], TL[1], RM[0], RM[1], BM[0], BM[1]);
+    this.poly(dark, RM[0], RM[1], TR[0], TR[1], SR[0], SR[1], BR[0], BR[1], BM[0], BM[1]);
+    // 顶面最亮
+    this.poly(snow > 0.2 ? SNOW : shade(lit, 0.16), TL[0], TL[1], TR[0], TR[1], RM[0], RM[1]);
+    // 受光面上一块略亮的岩面
+    this.poly(shade(lit, 0.07), SL[0], SL[1], TL[0], TL[1], RM[0], RM[1], bx - w * 0.4, by - h * 0.35);
+    // 山脚的草坡（冬天被雪盖住）
+    const foot = a.cover > 0.3 ? SNOW : mix('#8d927c', '#7fa25a', green);
+    const fy = h * 0.18;
+    this.poly(foot, BL[0], BL[1], BL[0] + w * 0.12, BL[1] - fy, BM[0], BM[1] - fy * 0.7, BM[0], BM[1]);
+    this.poly(shade(foot, -0.14), BM[0], BM[1], BM[0], BM[1] - fy * 0.7, BR[0] - w * 0.12, BR[1] - fy * 0.6, BR[0], BR[1]);
+    // 横向的岩层缝，几道短线
+    c.strokeStyle = 'rgba(60,58,50,.28)';
+    c.lineWidth = Math.max(0.6, w * 0.035);
     c.beginPath();
-    c.moveTo(ax - s * 0.08, ay + s * 0.35);
-    c.lineTo(ax - s * 0.2, ay + s * 0.62);
-    c.moveTo(ax + s * 0.12, ay + s * 0.45);
-    c.lineTo(ax + s * 0.22, ay + s * 0.7);
+    c.moveTo(bx - w * 0.7, by - h * 0.42);
+    c.lineTo(bx - w * 0.25, by - h * 0.36);
+    c.moveTo(bx + w * 0.25, by - h * 0.55);
+    c.lineTo(bx + w * 0.6, by - h * 0.32);
+    c.moveTo(bx - w * 0.35, by - h * 0.66);
+    c.lineTo(bx - w * 0.05, by - h * 0.6);
     c.stroke();
-    const f = clamp([0.3, 0.16, 0.24, 0.42][a.season] + a.cover * 0.35, 0, 0.85);
-    // 雪线是锯齿形的
-    const lf = (k: number) => [ax + (L - ax) * k, ay + (yb - ay) * k];
-    const rf = (k: number) => [ax + (R - ax) * k, ay + (yb - ay) * k];
-    const [l1, l2] = lf(f);
-    const [r1, r2] = rf(f);
-    const my = ay + (by - ay) * f * 0.9;
-    this.poly(SNOW, ax, ay, l1, l2, ax + (l1 - ax) * 0.5, l2 - s * 0.05, ax, my);
-    this.poly('#dcdcd2', ax, ay, ax, my, ax + (r1 - ax) * 0.5, r2 - s * 0.04, r1, r2);
+    if (snow > 0.2) {
+      // 雪从岩脊顺两面往下挂一截，锯齿收边
+      const k = clamp(snow, 0, 0.8);
+      const down = (q: [number, number], f: number): [number, number] => [q[0], q[1] + (by - q[1]) * f];
+      const l = down(TL, k * 0.4);
+      const m = down(RM, k * 0.3);
+      const rr = down(TR, k * 0.35);
+      this.poly(SNOW, TL[0], TL[1], RM[0], RM[1], m[0], m[1], (l[0] + m[0]) / 2, (l[1] + m[1]) / 2 - h * 0.05, l[0], l[1]);
+      this.poly('#dcdcd2', RM[0], RM[1], TR[0], TR[1], rr[0], rr[1], (rr[0] + m[0]) / 2, (rr[1] + m[1]) / 2 - h * 0.05, m[0], m[1]);
+    }
   }
 
   protected drawDragonBoat(back: boolean) {

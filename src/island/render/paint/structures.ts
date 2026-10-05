@@ -5,6 +5,16 @@ import { clamp, hash, shade } from '../utils';
 import { IslandTerrainPainter } from './terrain';
 
 /** Buildings and tangible island props. */
+/** 0 四坡顶 · 1 双坡顶 · 2 两层 · 3 带披屋 */
+export type HouseVariant = 0 | 1 | 2 | 3;
+
+export type LandmarkKind = 'clock' | 'library' | 'windmill';
+
+/** 按地标位轮换：前三座地标一定各不相同 */
+export function landmarkKind(index: number): LandmarkKind {
+  return (['clock', 'library', 'windmill'] as const)[((index % 3) + 3) % 3];
+}
+
 export abstract class IslandStructurePainter extends IslandTerrainPainter {
   protected facePoly(fill: string, x0: number, y0: number, w: number, h: number, slope: number) {
     this.poly(fill, x0, y0, x0 + w, y0 + w * slope, x0 + w, y0 + w * slope - h, x0, y0 - h);
@@ -15,13 +25,18 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
    * 冬天屋顶积雪，冷天和傍晚烟囱冒烟，节日挂灯笼贴对联。返回窗户位置，供夜里点灯。
    */
 
-  protected drawHouse(x: number, y: number, s: number, roof: string, wall = '#efe5cf', boarded = false, deco = true, lamp = true): [number, number] {
+  protected drawHouse(x: number, y: number, s: number, roof: string, wall = '#efe5cf', boarded = false, deco = true, lamp = true, variant: HouseVariant = 0): [number, number] {
     const c = this.ctx;
     const a = this.amb;
     const hw = s / 2;
     const hh = s / 4;
-    const H = s * 0.5;
+    // 门窗按一层的高度排布；两层的房子墙更高，楼上再开一扇窗
+    const H0 = s * 0.5;
+    const H = variant === 2 ? s * 0.8 : H0;
+    // 房子局部的等距坐标：pi、pj ∈ [-0.5, 0.5] 是主屋的地面，z 向上
+    const P = (pi: number, pj: number, z: number): [number, number] => [x + ((pi - pj) * s) / 2, y + ((pi + pj) * s) / 4 - z];
     this.shadow(x + s * 0.12, y + hh * 0.45, s * 0.66, s * 0.27);
+    if (variant === 3) this.drawLeanTo(P, s, H0, roof, wall);
     // 墙
     this.poly(wall, x - hw, y, x, y + hh, x, y + hh - H, x - hw, y - H);
     this.poly(shade(wall, -0.14), x, y + hh, x + hw, y, x + hw, y - H, x, y + hh - H);
@@ -38,9 +53,9 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     c.stroke();
     // 窗（左墙）
     const ww = hw * 0.34;
-    const wh = H * 0.32;
+    const wh = H0 * 0.32;
     const wx = x - hw * 0.7;
-    const wy = y + hh * 0.3 - H * 0.36;
+    const wy = y + hh * 0.3 - H0 * 0.36;
     const lit = this.lit && !boarded && lamp;
     this.facePoly('#7b5e45', wx - s * 0.02, wy + s * 0.02, ww + s * 0.04, wh + s * 0.04, 0.5);
     this.facePoly(boarded ? '#5a4a3a' : lit ? '#ffd677' : '#8fa5b2', wx, wy, ww, wh, 0.5);
@@ -67,10 +82,34 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     const dx0 = x + hw * 0.3;
     const dy0 = y + hh - hh * 0.3;
     const dw = hw * 0.3;
-    const dh = H * 0.6;
+    const dh = H0 * 0.6;
     this.facePoly('#5e4532', dx0, dy0, dw, dh, -0.5);
     this.facePoly('#7a5a40', dx0 + dw * 0.12, dy0 - dw * 0.06, dw * 0.76, dh * 0.9, -0.5);
     this.dot(dx0 + dw * 0.7, dy0 - dw * 0.35 - dh * 0.45, Math.max(0.5, s * 0.018), '#e2c56a');
+    const upLit = variant === 2 && this.lit && !boarded && lamp;
+    if (variant === 2) {
+      // 楼上：左墙一扇窗、右墙一扇小窗，中间一道腰檐
+      const uy = wy - H0 * 0.52;
+      this.facePoly('#7b5e45', wx + ww * 0.8 - s * 0.02, uy + ww * 0.4 + s * 0.02, ww + s * 0.04, wh + s * 0.04, 0.5);
+      this.facePoly(boarded ? '#5a4a3a' : upLit ? '#ffd677' : '#8fa5b2', wx + ww * 0.8, uy + ww * 0.4, ww, wh, 0.5);
+      this.facePoly(shade(wall, -0.3), x + hw * 0.4, y + hh * 0.6 - H0 * 1.0, ww * 0.8, wh * 0.9, -0.5);
+      const [b0x, b0y] = P(-0.5, 0.5, H0 * 1.02);
+      const [b1x, b1y] = P(0.5, 0.5, H0 * 1.02);
+      const [b2x, b2y] = P(0.5, -0.5, H0 * 1.02);
+      c.strokeStyle = shade(roof, -0.2);
+      c.lineWidth = Math.max(0.8, s * 0.035);
+      c.beginPath();
+      c.moveTo(b0x, b0y);
+      c.lineTo(b1x, b1y);
+      c.lineTo(b2x, b2y);
+      c.stroke();
+    }
+    let cx: number;
+    let cy: number;
+    const cw = s * 0.07;
+    if (variant === 1) {
+      [cx, cy] = this.drawGableRoof(P, s, H, roof, wall);
+    } else {
     // 屋顶：四坡顶，出檐，瓦线，屋脊高光
     const ay = y - H - s * 0.42;
     const L: [number, number] = [x - hw * 1.14, y - H + hh * 0.04];
@@ -101,9 +140,8 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     c.lineTo(x, ay);
     c.stroke();
     // 烟囱
-    const cx = x + hw * 0.42;
-    const cy = ay + (R[1] - ay) * 0.42 + s * 0.05;
-    const cw = s * 0.07;
+    cx = x + hw * 0.42;
+    cy = ay + (R[1] - ay) * 0.42 + s * 0.05;
     this.poly('#a0796a', cx - cw, cy, cx, cy + cw * 0.5, cx, cy + cw * 0.5 - s * 0.2, cx - cw, cy - s * 0.2);
     this.poly('#80594c', cx, cy + cw * 0.5, cx + cw, cy, cx + cw, cy - s * 0.2, cx, cy + cw * 0.5 - s * 0.2);
     // 积雪
@@ -116,6 +154,7 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
       this.poly(SNOW, x, ay - s * 0.015, l1, l2, f1, f2 + s * 0.02);
       this.poly(SNOW_SHADE, x, ay - s * 0.015, f1, f2 + s * 0.02, r1, r2);
       this.poly(SNOW, cx - cw, cy - s * 0.2, cx, cy + cw * 0.5 - s * 0.2, cx + cw, cy - s * 0.2, cx, cy - cw * 0.5 - s * 0.2);
+    }
     }
     // 炊烟：冷天、阴雨天和傍晚
     if (!boarded && deco && (a.season === 3 || a.weather !== 'clear' || this.day.warm > 0.4 || this.lit)) {
@@ -131,7 +170,106 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     // 节日装饰
     if (deco && !boarded) this.houseFestival(x, y, s, hh, H, dx0, dy0, dw, dh);
     if (lit) this.lights.push([wx + ww / 2, wy + ww * 0.25 - wh / 2, s * 0.55, WARM]);
+    if (upLit) this.lights.push([wx + ww * 1.3, wy - H0 * 0.52 + ww * 0.65 - wh / 2, s * 0.45, WARM]);
     return [wx + ww / 2, wy + ww * 0.25 - wh / 2];
+  }
+
+  /** 双坡顶：屋脊平行于左墙，右墙上露出三角形的山墙。返回烟囱落点。 */
+  protected drawGableRoof(P: (pi: number, pj: number, z: number) => [number, number], s: number, H: number, roof: string, wall: string): [number, number] {
+    const c = this.ctx;
+    const a = this.amb;
+    const o = 0.08;
+    const rh = s * 0.36;
+    const d = s * 0.04;
+    const e1 = P(-0.5 - o, 0.5 + o, H - d);
+    const e2 = P(0.5 + o, 0.5 + o, H - d);
+    const k1 = P(-0.5 - o, 0, H + rh);
+    const k2 = P(0.5 + o, 0, H + rh);
+    const b1 = P(-0.5 - o, -0.5 - o, H - d);
+    const b2 = P(0.5 + o, -0.5 - o, H - d);
+    const pts = (...q: [number, number][]) => q.flat();
+    // 后坡（大半被挡住）、右侧山墙、前坡
+    this.poly(shade(roof, -0.3), ...pts(b1, b2, k2, k1));
+    const g0 = P(0.5, 0.5, H);
+    const g1 = P(0.5, -0.5, H);
+    const g2 = P(0.5, 0, H + rh * 0.92);
+    this.poly(shade(wall, -0.2), ...pts(g0, g1, g2));
+    // 山墙上一个小圆窗
+    const [gx, gy] = P(0.5, 0, H + rh * 0.38);
+    this.dot(gx, gy, s * 0.045, shade(wall, -0.45));
+    this.poly(roof, ...pts(e1, e2, k2, k1));
+    // 檐口的厚度与山墙边的封檐板
+    this.poly(shade(roof, -0.35), ...pts(e1, e2, [e2[0], e2[1] + s * 0.035], [e1[0], e1[1] + s * 0.035]));
+    c.strokeStyle = shade(roof, -0.3);
+    c.lineWidth = Math.max(0.8, s * 0.035);
+    c.beginPath();
+    c.moveTo(e2[0], e2[1]);
+    c.lineTo(k2[0], k2[1]);
+    c.lineTo(b2[0], b2[1]);
+    c.stroke();
+    // 瓦线平行于屋脊
+    c.strokeStyle = shade(roof, -0.12);
+    c.lineWidth = Math.max(0.5, s * 0.02);
+    c.beginPath();
+    for (const f of [0.33, 0.66]) {
+      const l = [e1[0] + (k1[0] - e1[0]) * f, e1[1] + (k1[1] - e1[1]) * f];
+      const r = [e2[0] + (k2[0] - e2[0]) * f, e2[1] + (k2[1] - e2[1]) * f];
+      c.moveTo(l[0], l[1]);
+      c.lineTo(r[0], r[1]);
+    }
+    c.stroke();
+    c.strokeStyle = shade(roof, 0.25);
+    c.beginPath();
+    c.moveTo(k1[0], k1[1]);
+    c.lineTo(k2[0], k2[1]);
+    c.stroke();
+    // 烟囱
+    const [cx, cy] = P(-0.22, 0.2, H + rh * 0.62);
+    const cw = s * 0.07;
+    this.poly('#a0796a', cx - cw, cy, cx, cy + cw * 0.5, cx, cy + cw * 0.5 - s * 0.2, cx - cw, cy - s * 0.2);
+    this.poly('#80594c', cx, cy + cw * 0.5, cx + cw, cy, cx + cw, cy - s * 0.2, cx, cy + cw * 0.5 - s * 0.2);
+    if (a.cover > 0.15) {
+      const f = 0.35 + 0.45 * a.cover;
+      const l = [k1[0] + (e1[0] - k1[0]) * f, k1[1] + (e1[1] - k1[1]) * f] as [number, number];
+      const r = [k2[0] + (e2[0] - k2[0]) * f, k2[1] + (e2[1] - k2[1]) * f] as [number, number];
+      this.poly(SNOW, ...pts([k1[0], k1[1] - s * 0.015], [k2[0], k2[1] - s * 0.015], r, l));
+      this.poly(SNOW, cx - cw, cy - s * 0.2, cx, cy + cw * 0.5 - s * 0.2, cx + cw, cy - s * 0.2, cx, cy - cw * 0.5 - s * 0.2);
+    }
+    return [cx, cy];
+  }
+
+  /** 披屋：贴在主屋左后方的一间矮屋，单坡顶朝外斜下。先画，主屋会压住它的一角。 */
+  protected drawLeanTo(P: (pi: number, pj: number, z: number) => [number, number], s: number, H0: number, roof: string, wall: string) {
+    const c = this.ctx;
+    const a = this.amb;
+    const i0 = -1.08;
+    const i1 = -0.5;
+    const j0 = -0.25;
+    const j1 = 0.42;
+    const zl = H0 * 0.6;
+    const zh = H0 * 0.95;
+    const pts = (...q: [number, number][]) => q.flat();
+    // 朝前的一面墙
+    this.poly(shade(wall, -0.04), ...pts(P(i0, j1, 0), P(i1, j1, 0), P(i1, j1, zh), P(i0, j1, zl)));
+    this.poly('#b9ad97', ...pts(P(i0, j1, 0), P(i1, j1, 0), P(i1, j1, H0 * 0.07), P(i0, j1, H0 * 0.07)));
+    // 一扇小门
+    const [dx, dy] = P(-0.78, j1, 0);
+    this.facePoly('#6a4e38', dx, dy, s * 0.1, H0 * 0.48, 0.5);
+    // 单坡顶
+    const o = 0.06;
+    const r = a.cover > 0.3 ? SNOW : shade(roof, 0.05);
+    this.poly(r, ...pts(P(i0 - o, j0 - o, zl - s * 0.02), P(i1, j0 - o, zh), P(i1, j1 + o, zh), P(i0 - o, j1 + o, zl - s * 0.02)));
+    this.poly(shade(roof, -0.3), ...pts(P(i0 - o, j1 + o, zl - s * 0.02), P(i1, j1 + o, zh), [P(i1, j1 + o, zh)[0], P(i1, j1 + o, zh)[1] + s * 0.03], [P(i0 - o, j1 + o, zl - s * 0.02)[0], P(i0 - o, j1 + o, zl - s * 0.02)[1] + s * 0.03]));
+    c.strokeStyle = shade(roof, -0.15);
+    c.lineWidth = Math.max(0.5, s * 0.018);
+    c.beginPath();
+    for (const f of [0.33, 0.66]) {
+      const [ax, ay] = P(i0 - o, j0 + (j1 - j0) * f, zl - s * 0.02);
+      const [bx, by] = P(i1, j0 + (j1 - j0) * f, zh);
+      c.moveTo(ax, ay);
+      c.lineTo(bx, by);
+    }
+    c.stroke();
   }
 
   protected houseFestival(x: number, y: number, s: number, hh: number, H: number, dx0: number, dy0: number, dw: number, dh: number) {
@@ -172,6 +310,289 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
       c.stroke();
       this.dot(dx0 + dw / 2, dy0 - dw * 0.25 - dh * 0.68 + s * 0.04, s * 0.015, '#d63a2c');
     }
+  }
+
+  /** 地标局部的等距坐标：pi、pj 以地块宽为单位，z 为屏幕像素高度 */
+  protected isoAt(x: number, y: number, tw: number) {
+    return (pi: number, pj: number, z: number): [number, number] => [x + ((pi - pj) * tw) / 2, y + ((pi + pj) * tw) / 4 - z];
+  }
+
+  /** 一个等距方块：画朝左前（+j）和朝右前（+i）两面，可选顶面 */
+  protected isoBox(P: (pi: number, pj: number, z: number) => [number, number], i0: number, i1: number, j0: number, j1: number, z0: number, z1: number, left: string, right: string, top?: string) {
+    const f = (...q: [number, number][]) => q.flat();
+    this.poly(left, ...f(P(i0, j1, z0), P(i1, j1, z0), P(i1, j1, z1), P(i0, j1, z1)));
+    this.poly(right, ...f(P(i1, j1, z0), P(i1, j0, z0), P(i1, j0, z1), P(i1, j1, z1)));
+    if (top) this.poly(top, ...f(P(i0, j0, z1), P(i1, j0, z1), P(i1, j1, z1), P(i0, j1, z1)));
+  }
+
+  /** 四坡攒尖顶：底边四角 + 顶点，画朝前的两面，冬天上半截压雪 */
+  protected isoPyramid(P: (pi: number, pj: number, z: number) => [number, number], h: number, z0: number, z1: number, roof: string) {
+    const f = (...q: [number, number][]) => q.flat();
+    const L = P(-h, h, z0);
+    const F = P(h, h, z0);
+    const R = P(h, -h, z0);
+    const A = P(0, 0, z1);
+    this.poly(shade(roof, -0.35), ...f(L, F, [F[0], F[1] + (z1 - z0) * 0.08], R, F));
+    this.poly(roof, ...f(L, F, A));
+    this.poly(shade(roof, -0.22), ...f(F, R, A));
+    if (this.amb.cover > 0.15) {
+      const k = 0.4 + 0.4 * this.amb.cover;
+      const at = (q: [number, number]): [number, number] => [A[0] + (q[0] - A[0]) * k, A[1] + (q[1] - A[1]) * k];
+      this.poly(SNOW, ...f(A, at(L), at(F)));
+      this.poly(SNOW_SHADE, ...f(A, at(F), at(R)));
+    }
+  }
+
+  /** 钟楼：方形石塔，左墙上一面钟（指针随岛上的时间走），顶上钟亭、木围栏、攒尖顶和小旗 */
+  protected drawClockTower(x: number, y: number, tw: number, roof: string, sc: number, seed: number): [number, number] {
+    const c = this.ctx;
+    const P = this.isoAt(x, y, tw);
+    const w = 0.16;
+    const H = tw * 0.82 * sc;
+    const bell = tw * 0.17 * sc;
+    this.shadow(x + tw * 0.08, y + tw * 0.06, tw * 0.3, tw * 0.12);
+    // 塔身与石缝
+    this.isoBox(P, -w, w, -w, w, 0, H, '#efe6d2', '#d3c8b1');
+    c.strokeStyle = 'rgba(120,105,80,.28)';
+    c.lineWidth = Math.max(0.5, tw * 0.01);
+    c.beginPath();
+    for (let k = 1; k < 6; k++) {
+      const z = (H * k) / 6;
+      const [a0, a1] = P(-w, w, z);
+      const [b0, b1] = P(w, w, z);
+      const [d0, d1] = P(w, -w, z);
+      c.moveTo(a0, a1);
+      c.lineTo(b0, b1);
+      c.lineTo(d0, d1);
+    }
+    c.stroke();
+    // 拱门（右墙）与一道窄窗（左墙）
+    const [dx, dy] = P(w, 0.04, 0);
+    this.facePoly('#6a4e38', dx, dy, tw * 0.07, H * 0.2, -0.5);
+    this.dot(dx + tw * 0.035, dy - tw * 0.02 - H * 0.2, tw * 0.035, '#6a4e38');
+    const [sx, sy] = P(-0.04, w, H * 0.38);
+    this.facePoly(this.lit ? '#ffd677' : '#6f7f88', sx, sy, tw * 0.04, H * 0.1, 0.5);
+    // 钟面：画在左墙的斜面上
+    const [cx, cy] = P(0, w, H * 0.74);
+    const r = tw * 0.058 * sc;
+    c.save();
+    c.translate(cx, cy);
+    c.transform(1, 0.5, 0, 1, 0, 0);
+    c.fillStyle = '#5a4a3a';
+    c.beginPath();
+    c.arc(0, 0, r * 1.18, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = this.lit ? '#fff1c8' : '#f8f3e6';
+    c.beginPath();
+    c.arc(0, 0, r, 0, Math.PI * 2);
+    c.fill();
+    const hour = this.scene?.hour ?? 12;
+    c.strokeStyle = '#3d3128';
+    c.lineCap = 'round';
+    c.lineWidth = Math.max(0.8, r * 0.16);
+    const ha = ((hour % 12) / 12) * Math.PI * 2 - Math.PI / 2;
+    const ma = (hour % 1) * Math.PI * 2 - Math.PI / 2;
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.lineTo(Math.cos(ha) * r * 0.5, Math.sin(ha) * r * 0.5);
+    c.moveTo(0, 0);
+    c.lineTo(Math.cos(ma) * r * 0.8, Math.sin(ma) * r * 0.8);
+    c.stroke();
+    c.restore();
+    // 钟亭：四角立柱，中间露出黑洞洞的钟室和一口铜钟
+    const z0 = H;
+    const z1 = H + bell;
+    this.isoBox(P, -w * 0.92, w * 0.92, -w * 0.92, w * 0.92, z0, z1, '#4a3c30', '#3a2f26');
+    const [bx, by] = P(0, w * 0.92, z0 + bell * 0.55);
+    this.dot(bx, by, tw * 0.035 * sc, '#c99a3c');
+    for (const [pi, pj] of [[-w, w], [w, w], [w, -w]] as const) {
+      const [p0, p1] = P(pi, pj, z0);
+      c.fillStyle = '#e8dcc4';
+      c.fillRect(p0 - tw * 0.015, p1 - bell, tw * 0.03, bell);
+    }
+    // 围栏
+    this.isoBox(P, -w * 1.25, w * 1.25, -w * 1.25, w * 1.25, z0 - tw * 0.02, z0 + tw * 0.035, '#8a6242', '#6e4d32', '#9c7350');
+    this.isoPyramid(P, w * 1.45, z1, z1 + tw * 0.34 * sc, roof);
+    const [ax, ay] = P(0, 0, z1 + tw * 0.34 * sc);
+    this.drawFlag(ax, ay + tw * 0.02, tw * 0.5, roof, seed);
+    if (this.lit) this.lights.push([cx, cy, tw * 0.45, WARM]);
+    return [cx, cy];
+  }
+
+  /** 藏书阁：两层楼阁，底层宽、上层收窄，两重出檐，一排格子窗 */
+  protected drawLibrary(x: number, y: number, tw: number, roof: string, sc: number): [number, number] {
+    const c = this.ctx;
+    const P = this.isoAt(x, y, tw);
+    const f = (...q: [number, number][]) => q.flat();
+    const wi = 0.3 * sc;
+    const wj = 0.24 * sc;
+    const h1 = tw * 0.2 * sc;
+    const pillar = '#8a3b2a';
+    this.shadow(x + tw * 0.08, y + tw * 0.08, tw * 0.42, tw * 0.17);
+    // 台阶
+    this.isoBox(P, -0.12, 0.12, wj, wj + 0.1, 0, tw * 0.03, '#d6ccb6', '#bfb49c', '#e4dac4');
+    // 底层
+    this.isoBox(P, -wi, wi, -wj, wj, 0, h1, '#f1e4c8', '#d7c7a6');
+    // 柱子与格子窗
+    c.strokeStyle = pillar;
+    c.lineWidth = Math.max(0.8, tw * 0.025);
+    c.beginPath();
+    for (const u of [-1, -0.33, 0.33, 1]) {
+      const [a0, a1] = P(u * wi, wj, 0);
+      c.moveTo(a0, a1);
+      c.lineTo(a0, a1 - h1);
+    }
+    for (const u of [0.33, -0.33, -1]) {
+      const [a0, a1] = P(wi, u * wj, 0);
+      c.moveTo(a0, a1);
+      c.lineTo(a0, a1 - h1);
+    }
+    c.stroke();
+    const lightsAt: [number, number][] = [];
+    for (const u of [-0.66, 0, 0.66]) {
+      const [wx, wy] = P(u * wi - 0.06, wj, h1 * 0.3);
+      this.facePoly(this.lit ? '#ffd677' : '#8fa5b2', wx, wy, tw * 0.1 * sc, h1 * 0.45, 0.5);
+      lightsAt.push([wx + tw * 0.05, wy - h1 * 0.2]);
+    }
+    const [ddx, ddy] = P(wi, 0.06, 0);
+    this.facePoly('#6a4e38', ddx, ddy, tw * 0.09, h1 * 0.7, -0.5);
+    // 第一重檐：一圈斜坡裙檐，四角微微上翘
+    const o = 0.12;
+    const zE = h1 - tw * 0.01;
+    const zI = h1 + tw * 0.1 * sc;
+    const ii = wi * 0.7;
+    const ij = wj * 0.7;
+    const eL = P(-wi - o, wj + o, zE);
+    const eF = P(wi + o, wj + o, zE);
+    const eR = P(wi + o, -wj - o, zE);
+    const nL = P(-ii, ij, zI);
+    const nF = P(ii, ij, zI);
+    const nR = P(ii, -ij, zI);
+    this.poly(roof, ...f(eL, eF, nF, nL));
+    this.poly(shade(roof, -0.22), ...f(eF, eR, nR, nF));
+    this.poly(shade(roof, -0.38), ...f(eL, eF, [eF[0], eF[1] + tw * 0.025], [eL[0], eL[1] + tw * 0.025]));
+    c.strokeStyle = shade(roof, -0.3);
+    c.lineWidth = Math.max(0.8, tw * 0.03);
+    c.lineCap = 'round';
+    c.beginPath();
+    for (const e of [eL, eF, eR]) {
+      c.moveTo(e[0], e[1]);
+      c.lineTo(e[0] + (e === eL ? -1 : e === eR ? 1 : 0) * tw * 0.03, e[1] - tw * 0.04);
+    }
+    c.stroke();
+    // 上层
+    const h2 = tw * 0.15 * sc;
+    this.isoBox(P, -ii, ii, -ij, ij, zI, zI + h2, '#f1e4c8', '#d7c7a6');
+    c.strokeStyle = pillar;
+    c.lineWidth = Math.max(0.7, tw * 0.02);
+    c.beginPath();
+    for (const u of [-1, 0, 1]) {
+      const [a0, a1] = P(u * ii, ij, zI);
+      c.moveTo(a0, a1);
+      c.lineTo(a0, a1 - h2);
+    }
+    c.stroke();
+    for (const u of [-0.5, 0.5]) {
+      const [wx, wy] = P(u * ii - 0.05, ij, zI + h2 * 0.25);
+      this.facePoly(this.lit ? '#ffd677' : '#8fa5b2', wx, wy, tw * 0.08 * sc, h2 * 0.5, 0.5);
+      lightsAt.push([wx + tw * 0.04, wy - h2 * 0.25]);
+    }
+    // 第二重檐：攒尖顶，顶上一颗宝珠
+    const z2 = zI + h2;
+    this.isoPyramid(P, ii + 0.1, z2 - tw * 0.01, z2 + tw * 0.26 * sc, roof);
+    const [tx, ty] = P(0, 0, z2 + tw * 0.26 * sc);
+    c.fillStyle = '#c99a3c';
+    c.fillRect(tx - tw * 0.008, ty - tw * 0.06, tw * 0.016, tw * 0.06);
+    this.dot(tx, ty - tw * 0.07, tw * 0.025, '#e2b84a');
+    if (this.lit) for (const [lx, ly] of lightsAt) this.lights.push([lx, ly, tw * 0.3, WARM]);
+    return lightsAt[0];
+  }
+
+  /** 风车：收分的圆石塔、尖顶，四片帆慢慢转 */
+  protected drawWindmill(x: number, y: number, tw: number, roof: string, sc: number, seed: number): [number, number] {
+    const c = this.ctx;
+    const a = this.amb;
+    const rb = tw * 0.22 * sc;
+    const rt = tw * 0.15 * sc;
+    const h = tw * 0.62 * sc;
+    const by = y + tw * 0.04;
+    this.shadow(x + tw * 0.1, by + tw * 0.02, rb * 1.4, rb * 0.5);
+    // 塔身：左亮右暗的渐变
+    const g = c.createLinearGradient(x - rb, 0, x + rb, 0);
+    g.addColorStop(0, '#f3ead6');
+    g.addColorStop(0.55, '#e0d3b6');
+    g.addColorStop(1, '#bfb092');
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(x - rb, by);
+    c.lineTo(x - rt, by - h);
+    c.lineTo(x + rt, by - h);
+    c.lineTo(x + rb, by);
+    c.ellipse(x, by, rb, rb * 0.4, 0, 0, Math.PI);
+    c.fill();
+    // 石缝
+    c.strokeStyle = 'rgba(120,105,80,.25)';
+    c.lineWidth = Math.max(0.5, tw * 0.01);
+    c.beginPath();
+    for (let k = 1; k < 5; k++) {
+      const f = k / 5;
+      const r = rb + (rt - rb) * f;
+      c.ellipse(x, by - h * f, r, r * 0.4, 0, 0.1, Math.PI - 0.1);
+    }
+    c.stroke();
+    // 门和小窗
+    c.fillStyle = '#6a4e38';
+    c.fillRect(x - tw * 0.05, by - h * 0.26 + rb * 0.35, tw * 0.07, h * 0.26);
+    this.dot(x - tw * 0.015, by - h * 0.26 + rb * 0.35, tw * 0.035, '#6a4e38');
+    const winY = by - h * 0.6;
+    c.fillStyle = this.lit ? '#ffd677' : '#8fa5b2';
+    c.fillRect(x - tw * 0.1, winY, tw * 0.05, tw * 0.07);
+    // 尖顶
+    const top = by - h;
+    c.fillStyle = shade(roof, -0.3);
+    c.beginPath();
+    c.ellipse(x, top, rt * 1.25, rt * 0.5, 0, 0, Math.PI * 2);
+    c.fill();
+    this.poly(roof, x - rt * 1.25, top, x, top - tw * 0.3 * sc, x, top + rt * 0.5);
+    this.poly(shade(roof, -0.22), x, top - tw * 0.3 * sc, x + rt * 1.25, top, x, top + rt * 0.5);
+    if (a.cover > 0.15) this.poly(SNOW, x - rt * 0.6, top - tw * 0.16 * sc, x, top - tw * 0.3 * sc, x + rt * 0.5, top - tw * 0.17 * sc);
+    // 帆：轴心在塔顶左前方，四片帆架加帆布格子
+    const hx = x - rt * 0.55;
+    const hy = top + tw * 0.02;
+    const len = tw * 0.52 * sc;
+    const ang = this.t * 0.5 + seed;
+    c.lineCap = 'round';
+    for (let k = 0; k < 4; k++) {
+      const th = ang + (k * Math.PI) / 2;
+      // 帆面朝左前方：横向压扁一点
+      const ux = Math.cos(th) * 0.82;
+      const uy = Math.sin(th);
+      const vx = -uy * 0.82;
+      const vy = ux / 0.82;
+      const p = (u: number, v: number): [number, number] => [hx + (ux * u + vx * v) * len, hy + (uy * u + vy * v * 0.82) * len];
+      c.strokeStyle = '#6b4a30';
+      c.lineWidth = Math.max(0.8, tw * 0.02);
+      c.beginPath();
+      c.moveTo(hx, hy);
+      c.lineTo(...p(1, 0));
+      c.stroke();
+      const q = [p(0.22, 0), p(1, 0), p(1, 0.17), p(0.22, 0.17)];
+      this.poly(a.cover > 0.4 ? '#eef1f3' : '#f1e8d4', ...q.flat());
+      c.strokeStyle = 'rgba(107,74,48,.6)';
+      c.lineWidth = Math.max(0.5, tw * 0.008);
+      c.beginPath();
+      for (const u of [0.48, 0.74]) {
+        c.moveTo(...p(u, 0));
+        c.lineTo(...p(u, 0.17));
+      }
+      c.moveTo(...p(0.22, 0.085));
+      c.lineTo(...p(1, 0.085));
+      c.stroke();
+    }
+    this.dot(hx, hy, tw * 0.028, '#4a3a2c');
+    const lw: [number, number] = [x - tw * 0.075, winY + tw * 0.035];
+    if (this.lit) this.lights.push([lw[0], lw[1], tw * 0.35, WARM]);
+    return lw;
   }
 
   protected drawFlag(x: number, y: number, s: number, color: string, seed: number, star = false) {
@@ -286,27 +707,19 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     c.translate(-x, -y);
     const big = l.size >= 6;
     const roof = shade(l.roof, -0.05);
-    if (big) {
-      // 后面一座塔
-      const tx = x + hw * 0.32;
-      const ty = y - hh * 0.32;
-      const w = tw * 0.13;
-      const h = tw * 0.62;
-      this.poly('#f1eadb', tx - w, ty, tx, ty + w * 0.5, tx, ty + w * 0.5 - h, tx - w, ty - h);
-      this.poly('#d8cfbb', tx, ty + w * 0.5, tx + w, ty, tx + w, ty - h, tx, ty + w * 0.5 - h);
-      c.fillStyle = this.lit ? '#ffd677' : '#8fa5b2';
-      c.fillRect(tx - w * 0.6, ty - h * 0.7, w * 0.3, h * 0.16);
-      this.poly(roof, tx - w * 1.2, ty - h, tx, ty - h - tw * 0.3, tx, ty - h + w * 0.6);
-      this.poly(shade(roof, -0.2), tx, ty - h - tw * 0.3, tx + w * 1.2, ty - h, tx, ty - h + w * 0.6);
-      if (this.amb.cover > 0.2) this.poly(SNOW, tx - w * 0.5, ty - h - tw * 0.17, tx, ty - h - tw * 0.3, tx + w * 0.5, ty - h - tw * 0.17);
-    }
-    // Canvas 的 scale 只影响即时绘制；drawHouse 追加到 lights 的坐标需要显式同步同一变换。
+    // Canvas 的 scale 只影响即时绘制；追加到 lights 的坐标需要显式同步同一变换。
     const lightStart = this.lights.length;
-    const win = this.drawHouse(x - (big ? hw * 0.12 : 0), y + (big ? hh * 0.12 : 0), tw * (big ? 0.5 : 0.44), roof, '#f4ecd8');
-    // 旗
-    const fx = x - hw * (big ? 0.55 : 0.4);
-    const fy = y - tw * (big ? 0.62 : 0.55);
-    this.drawFlag(fx, fy + tw * 0.04, tw * 0.68, l.roof, l.index);
+    const kind = landmarkKind(l.index);
+    const sc = big ? 1.12 : 0.92;
+    let win: [number, number];
+    if (kind === 'clock') win = this.drawClockTower(x, y, tw, roof, sc, l.index);
+    else if (kind === 'library') win = this.drawLibrary(x, y, tw, roof, sc);
+    else win = this.drawWindmill(x, y, tw, roof, sc, l.index);
+    if (kind !== 'clock') {
+      const fx = x - hw * 0.62;
+      const fy = y - tw * 0.02;
+      this.drawFlag(fx, fy, tw * 0.6, l.roof, l.index);
+    }
     c.restore();
     for (let i = lightStart; i < this.lights.length; i++) {
       this.lights[i][1] = y + (this.lights[i][1] - y) * k;

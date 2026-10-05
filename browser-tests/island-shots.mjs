@@ -28,20 +28,32 @@ const TIMES = [
   { name: 'night', hm: '21:30' },
 ];
 
-/** 四座村落：不同的完成量，让房子数量有多有少；每村都留几件未完成的任务，岛上才有人走动。 */
+/**
+ * 四座村落：不同的完成量，让房子数量有多有少；每村都留几件未完成的任务，岛上才有人走动。
+ * 另有三个已完成的项目立成地标（钟楼、藏书阁、风车各一）。
+ */
 async function seed(page) {
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const { store, actions: A } = window.yuzhi;
-    const plan = [['写作', 18, 4], ['花园', 9, 3], ['搬家', 24, 5], ['学琴', 4, 2]];
-    const have = new Set(store.activeProjects().map((p) => p.name));
-    for (const [name, done, open] of plan) {
-      if (have.has(name)) continue;
+    const have = new Set(store.data.projects.map((p) => p.name));
+    const make = (name, done, open) => {
       const p = A.createProject(store, name);
       for (let k = 0; k < done + open; k++) {
         const t = A.createTask(store, { title: `${name} ${k + 1}`, projectId: p.id });
         if (k < done) A.markTaskDone(store, t.id);
       }
-    }
+      return p;
+    };
+    // 整批只提交一次：store 要等所有待提交的写入落盘才通知界面，逐条提交上百次会让画面迟迟不更新。
+    store.batch(() => {
+      for (const [name, done] of [['毕业论文', 21], ['旅行', 6], ['装修', 27]]) {
+        if (!have.has(name)) A.completeProject(store, make(name, done, 0).id, 'landmark');
+      }
+      for (const [name, done, open] of [['写作', 18, 4], ['花园', 9, 3], ['搬家', 24, 5], ['学琴', 4, 2]]) {
+        if (!have.has(name)) make(name, done, open);
+      }
+    });
+    await store.flush();
   });
 }
 
@@ -76,11 +88,14 @@ try {
       await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => Boolean(window.yuzhi?.renderer && window.yuzhi?.store), undefined, { timeout: 20_000 });
       await page.waitForFunction(() => document.body.dataset.readOnly === 'false', undefined, { timeout: 20_000 });
-      // 启动时持久化层可能还会重载一次数据，把刚铺的数据冲掉；等四座村落真正出现，否则重铺。
+      // main.ts 订阅 store 之后立即 update() 一次，renderer.scene 出现说明订阅已就位；
+      // 早于此刻铺的数据要等下一次定时刷新才会画出来。
+      await page.waitForFunction(() => Boolean(window.yuzhi.renderer.scene), undefined, { timeout: 20_000 });
+      // 启动时持久化层可能还会重载一次数据，把刚铺的数据冲掉；等村落和地标真正出现，否则重铺。
       for (let tries = 0; ; tries++) {
         await seed(page);
         const ok = await page
-          .waitForFunction(() => window.yuzhi.renderer.scene?.villages.length >= 4, undefined, { timeout: 8000 })
+          .waitForFunction(() => window.yuzhi.renderer.scene?.villages.length >= 4 && window.yuzhi.renderer.scene.landmarks.length >= 3, undefined, { timeout: 8000 })
           .then(() => true, () => false);
         if (ok) break;
         if (tries >= 2) throw new Error(`${vp.name}-${time.name}: seeded villages never appeared`);

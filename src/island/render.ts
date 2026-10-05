@@ -8,9 +8,18 @@ import { dayLight } from './ambience';
 import { tileHash } from './map';
 import type { LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
+import type { HouseVariant } from './render/paint/structures';
 import { isDeterioratingStageCue } from './render/simulation';
 import { HOUSE_SCALE, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
+
+/**
+ * 同一村落里逐户取值。hash(projectId + slotIdx) 只改了末位字符，FNV 的结果几乎不变，
+ * 一个村子的房子会全是同一种样式、同时亮灯或同时熄灯；这里再用地块哈希把户号充分打散。
+ */
+function houseHash(projectId: string, slot: number, salt: number): number {
+  return tileHash(slot, Math.floor(hash(projectId) * 1e6), 200 + salt);
+}
 
 export type { AgendaView, ChoresView, Hit, LandmarkView, Light, Scene, SceneryInspection, Selection, VillageView, WalkerView } from './render/model';
 export { mix, shade } from './render/utils';
@@ -197,8 +206,11 @@ export class IslandRenderer extends IslandEffectsPainter {
           const wall = boarded ? '#cfc4ab' : vv.stage >= 2 ? '#e6dcc6' : '#efe5cf';
           // 越冷清的村落，夜里亮灯的人家越少
           const litFrac = [0.9, 0.5, 0.25, 0.12][vv.stage];
+          // 房屋样式：四坡顶居多，夹几座双坡顶、两层和带披屋的
+          const vr = houseHash(vv.projectId, t.slotIdx, 1);
+          const variant: HouseVariant = vr < 0.42 ? 0 : vr < 0.72 ? 1 : vr < 0.87 ? 2 : 3;
           put(d, () => {
-            this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, hash(vv.projectId + t.slotIdx) < litFrac);
+            this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, houseHash(vv.projectId, t.slotIdx, 2) < litFrac, variant);
             if (vv.stage >= 2 && t.slotIdx % 2 === 0) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
           });
         }
