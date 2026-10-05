@@ -18,7 +18,7 @@ describe('real-life cultivation read model', () => {
     expect(cultivationState(store.data, '2026-10-05').field.score).toBe(2);
   });
 
-  it('maps local schedules into the calendar pipeline and the orchard', () => {
+  it('does not grow the orchard from planning alone; settlement is the cultivation fact', () => {
     const { store } = makeStore('2026-10-05');
     const event = createSchedule(store, {
       title: '散步',
@@ -33,10 +33,28 @@ describe('real-life cultivation read model', () => {
       classified: true,
       projectId: CHORES,
     });
-    expect(cultivationState(store.data, '2026-10-05').orchard.level).toBeGreaterThan(0);
+    expect(cultivationState(store.data, '2026-10-05').orchard).toMatchObject({ score: 0, level: 0 });
 
     settleDay(store, '2026-10-05', new Map([[itemKey('event', event.id), { outcome: 'done' }]]));
-    expect(cultivationState(store.data, '2026-10-05').orchard.score).toBeGreaterThan(1);
+    expect(cultivationState(store.data, '2026-10-05').orchard).toMatchObject({ score: 2, level: 2 });
+  });
+
+  it('lets an honestly settled missed schedule leave a small orchard trace', () => {
+    const { store } = makeStore('2026-10-05');
+    const event = createSchedule(store, {
+      title: '本来想散步',
+      date: '2026-10-05',
+      start: '18:00',
+      end: '19:00',
+      projectId: CHORES,
+    });
+
+    settleDay(store, '2026-10-05', new Map([[
+      itemKey('event', event.id),
+      { outcome: 'skipped', reason: 'no_energy' },
+    ]]));
+
+    expect(cultivationState(store.data, '2026-10-05').orchard).toMatchObject({ score: 0.5, level: 1 });
   });
 
   it('rejects a nonexistent DST wall-clock time even when the normalized interval stays positive', () => {
