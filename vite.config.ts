@@ -2,7 +2,7 @@ import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { handleIcsRequest } from './shared/icsProxy.ts';
 
-/** 开发时在本地提供 /api/ics，行为与 Cloudflare Pages Function 一致 */
+/** 开发时在本地提供 /api/ics，复用与生产 Worker 相同的代理逻辑 */
 function icsProxyDev(): Plugin {
   return {
     name: 'yuzhi-ics-proxy-dev',
