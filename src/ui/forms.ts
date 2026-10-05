@@ -27,11 +27,11 @@ export function openNew(
   const futureDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, 1)}">明天</option><option value="${addDays(today, 2)}">后天</option>`;
   const diaryDateOptions = `<option value="${today}">今天</option><option value="${addDays(today, -1)}">昨天</option><option value="${addDays(today, -2)}">前天</option>`;
   const body = `
-    <div class="seg" role="tablist">
-      <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}">Todo</button>
-      <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}">日程</button>
-      <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}">日记</button>
-      <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}">项目</button>
+    <div class="seg" role="group" aria-label="新建类型">
+      <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}" aria-pressed="${kind === 'task'}">Todo</button>
+      <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}" aria-pressed="${kind === 'schedule'}">日程</button>
+      <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}" aria-pressed="${kind === 'diary'}">日记</button>
+      <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}" aria-pressed="${kind === 'project'}">项目</button>
     </div>
     <form data-f="task" ${kind === 'task' ? '' : 'hidden'}>
       <label class="field">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off"></label>
@@ -68,7 +68,11 @@ export function openNew(
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-k]').forEach((b) =>
         b.addEventListener('click', () => {
-          box.querySelectorAll('[data-k]').forEach((x) => x.classList.toggle('on', x === b));
+          box.querySelectorAll<HTMLElement>('[data-k]').forEach((x) => {
+            const selected = x === b;
+            x.classList.toggle('on', selected);
+            x.setAttribute('aria-pressed', String(selected));
+          });
           box.querySelectorAll<HTMLFormElement>('form[data-f]').forEach((form) => (form.hidden = form.dataset.f !== b.dataset.k));
           box.querySelector<HTMLElement>(`form[data-f="${b.dataset.k}"] input, form[data-f="${b.dataset.k}"] textarea`)?.focus();
         }),
