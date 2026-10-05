@@ -3,8 +3,8 @@ import type { CalendarEvent, ISODate } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
-import { localDate, startOfLocalDay } from '../lib/date';
-import { ActionError } from './shared';
+import { fmtDay, localDate, startOfLocalDay } from '../lib/date';
+import { ActionError, operation, q } from './shared';
 import { entryId } from '../logic/days';
 import { applyRules, matchRule } from '../logic/classify';
 
@@ -26,7 +26,30 @@ function classifyEventsImpl(store: Store, title: string, projectId: string, rule
 /** 单独改一条事件的归属 */
 function setEventProjectImpl(store: Store, eventId: string, projectId: string | undefined) {
   const e = store.data.events.find((x) => x.id === eventId);
-  if (e) store.put('events', { ...e, projectId: projectId || CHORES, classified: true });
+  if (!e) return;
+  const nextProjectId = projectId || CHORES;
+  if (e.sourceId === LOCAL_CALENDAR_SOURCE_ID && e.projectId !== nextProjectId) {
+    if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
+      throw new ActionError('这个日程已经留下结算记录，不能直接修改');
+    }
+    const before = scheduleSnapshot(e);
+    const next = { ...e, projectId: nextProjectId, classified: true };
+    operation(store, {
+      date: store.today(),
+      kind: 'schedule-edited',
+      projectId: nextProjectId === CHORES ? undefined : nextProjectId,
+      payload: { before, after: scheduleSnapshot(next), change: 'project' },
+      life: [{
+        subjectType: 'schedule',
+        subjectId: e.id,
+        kind: 'event',
+        text: '修改了日程所属项目',
+      }],
+    });
+    store.put('events', next);
+    return;
+  }
+  store.put('events', { ...e, projectId: nextProjectId, classified: true });
 }
 
 function deleteRuleImpl(store: Store, id: string) {
@@ -126,8 +149,26 @@ function localScheduleStamp(date: ISODate, hm: string): string {
   return d.toISOString();
 }
 
-/** 用户在屿志里直接创建日程；它进入和外部日历相同的 agenda / 结算管线。 */
-function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEvent {
+function localHM(stamp: string): string {
+  const d = new Date(stamp);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function scheduleSnapshot(event: CalendarEvent) {
+  return {
+    title: event.title,
+    date: localDate(new Date(event.start)),
+    start: localHM(event.start),
+    end: localHM(event.end),
+    projectId: event.projectId,
+  };
+}
+
+function buildLocalSchedule(
+  store: Store,
+  input: LocalScheduleInput,
+  identity?: Pick<CalendarEvent, 'id' | 'uid' | 'projectId'>,
+): CalendarEvent {
   const title = input.title.trim();
   if (!title) throw new ActionError('写一句日程标题吧');
   if (!LOCAL_YMD.test(input.date)) throw new ActionError('日程日期格式不对');
@@ -136,20 +177,18 @@ function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEv
   }
   const start = localScheduleStamp(input.date, input.start);
   const end = localScheduleStamp(input.date, input.end);
-  // Compare actual local instants after Date normalization. During a DST
-  // spring-forward gap, wall-clock string order can be misleading.
   if (Date.parse(end) <= Date.parse(start)) {
     throw new ActionError('日程结束时间要晚于开始时间');
   }
   const requested = input.projectId;
   const projectId = requested === CHORES
     ? CHORES
-    : requested && store.project(requested)?.status === 'active'
+    : requested && (store.project(requested)?.status === 'active' || requested === identity?.projectId)
       ? requested
       : CHORES;
-  const eventUid = uid('schedule');
-  const event: CalendarEvent = {
-    id: `${LOCAL_CALENDAR_SOURCE_ID}|${eventUid}`,
+  const eventUid = identity?.uid ?? uid('schedule');
+  return {
+    id: identity?.id ?? `${LOCAL_CALENDAR_SOURCE_ID}|${eventUid}`,
     sourceId: LOCAL_CALENDAR_SOURCE_ID,
     uid: eventUid,
     title,
@@ -159,8 +198,52 @@ function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEv
     projectId,
     classified: true,
   };
+}
+
+/** 用户在屿志里直接创建日程；它进入和外部日历相同的 agenda / 结算管线。 */
+function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEvent {
+  const event = buildLocalSchedule(store, input);
+  const snapshot = scheduleSnapshot(event);
   store.put('events', event);
+  operation(store, {
+    date: store.today(),
+    kind: 'schedule-created',
+    projectId: event.projectId === CHORES ? undefined : event.projectId,
+    payload: { after: snapshot },
+    life: [{
+      subjectType: 'schedule',
+      subjectId: event.id,
+      kind: 'start',
+      text: `创建日程${q(event.title)}，安排在 ${fmtDay(snapshot.date)} ${snapshot.start}–${snapshot.end}`,
+    }],
+  });
   return event;
+}
+
+function editScheduleImpl(store: Store, eventId: string, input: LocalScheduleInput): CalendarEvent | undefined {
+  const event = store.data.events.find((item) => item.id === eventId);
+  if (!event || event.sourceId !== LOCAL_CALENDAR_SOURCE_ID) return undefined;
+  if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
+    throw new ActionError('这个日程已经留下结算记录，不能直接修改');
+  }
+  const next = buildLocalSchedule(store, input, { id: event.id, uid: event.uid, projectId: event.projectId });
+  const before = scheduleSnapshot(event);
+  const after = scheduleSnapshot(next);
+  if (JSON.stringify(before) === JSON.stringify(after)) return event;
+  operation(store, {
+    date: store.today(),
+    kind: 'schedule-edited',
+    projectId: next.projectId === CHORES ? undefined : next.projectId,
+    payload: { before, after },
+    life: [{
+      subjectType: 'schedule',
+      subjectId: event.id,
+      kind: 'event',
+      text: `修改日程${q(event.title)}`,
+    }],
+  });
+  store.put('events', next);
+  return next;
 }
 
 function deleteScheduleImpl(store: Store, eventId: string) {
@@ -169,11 +252,27 @@ function deleteScheduleImpl(store: Store, eventId: string) {
   if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
     throw new ActionError('这个日程已经留下结算记录，不能直接删除');
   }
+  const before = scheduleSnapshot(event);
+  operation(store, {
+    date: store.today(),
+    kind: 'schedule-deleted',
+    projectId: event.projectId === CHORES ? undefined : event.projectId,
+    payload: { before },
+    life: [{
+      subjectType: 'schedule',
+      subjectId: event.id,
+      kind: 'close',
+      text: '删除了日程；一生之书仍然保留',
+    }],
+  });
   store.del('events', eventId);
 }
 
 export const createSchedule = (...args: Parameters<typeof createScheduleImpl>): ReturnType<typeof createScheduleImpl> =>
   args[0].batch(() => createScheduleImpl(...args));
+
+export const editSchedule = (...args: Parameters<typeof editScheduleImpl>): ReturnType<typeof editScheduleImpl> =>
+  args[0].batch(() => editScheduleImpl(...args));
 
 export const deleteSchedule = (...args: Parameters<typeof deleteScheduleImpl>): ReturnType<typeof deleteScheduleImpl> =>
   args[0].batch(() => deleteScheduleImpl(...args));
