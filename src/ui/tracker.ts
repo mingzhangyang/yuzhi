@@ -777,8 +777,13 @@ export class Tracker {
     if (!event) return;
     const today = s.today();
     const date = dateOfStamp(event.start);
-    const projectOptions = s.activeProjects()
-      .map((project) => `<option value="${esc(project.id)}"${project.id === event.projectId ? ' selected' : ''}>${esc(project.name)}</option>`)
+    const activeProjects = s.activeProjects();
+    const currentProject = event.projectId && event.projectId !== CHORES ? s.project(event.projectId) : undefined;
+    const projects = currentProject && !activeProjects.some((project) => project.id === currentProject.id)
+      ? [currentProject, ...activeProjects]
+      : activeProjects;
+    const projectOptions = projects
+      .map((project) => `<option value="${esc(project.id)}"${project.id === event.projectId ? ' selected' : ''}>${esc(project.name)}${project.status === 'active' ? '' : '（已关闭）'}</option>`)
       .join('');
     openModal({
       title: '编辑日程',
