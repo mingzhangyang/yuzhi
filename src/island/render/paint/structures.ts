@@ -1,4 +1,4 @@
-import type { AgendaView, LandmarkView, Scene, VillageView } from '../model';
+import type { AgendaView, Scene, VillageView } from '../model';
 import type { Tile } from '../../map';
 import { PROP_LAMPS, propBox, type PlacedProp } from '../props-layout';
 import { LANTERN, SNOW, SNOW_SHADE, WARM, type HouseVariant } from '../style';
@@ -6,13 +6,6 @@ import { clamp, hash, shade } from '../utils';
 import { IslandTerrainPainter } from './terrain';
 
 /** Buildings and tangible island props. */
-export type LandmarkKind = 'clock' | 'library' | 'windmill';
-
-/** 按地标位轮换：前三座地标一定各不相同 */
-export function landmarkKind(index: number): LandmarkKind {
-  return (['clock', 'library', 'windmill'] as const)[((index % 3) + 3) % 3];
-}
-
 export abstract class IslandStructurePainter extends IslandTerrainPainter {
   protected facePoly(fill: string, x0: number, y0: number, w: number, h: number, slope: number) {
     this.poly(fill, x0, y0, x0 + w, y0 + w * slope, x0 + w, y0 + w * slope - h, x0, y0 - h);
@@ -671,8 +664,6 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     }
   }
 
-  /** 地标：村落合成的永久建筑。石台 + 主屋，规模大的多一座塔；返回窗户位置 */
-
   /**
    * 房子的屏幕轮廓（地面三角 + 墙 + 出檐屋顶），与 drawHouse 各样式的比例一致。
    * 带披屋的再加一块：披屋朝前的墙和单坡顶，取 drawLeanTo 的同一组局部坐标。
@@ -726,102 +717,6 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     ];
     if (this.amb.fest.has('christmas')) outlines.push(...this.treeOutline(x + tw * 0.24, y - tw * 0.02, tw * 0.4, 'pine', 0.1));
     return outlines;
-  }
-
-  /**
-   * 地标：石台加楼体，高度按样式；风车再加一圈帆扫过的圆，钟楼再加顶上的小旗。
-   * 都随建成动画纵向伸展（与 drawLandmark 的 scale(1, k) 一致）。
-   */
-  protected landmarkOutline(x: number, y: number, tw: number, l: LandmarkView, anim: number): [number, number][][] {
-    const k = 0.25 + 0.75 * anim;
-    const sc = l.size >= 6 ? 1.12 : 0.92;
-    const kind = landmarkKind(l.index);
-    const h = kind === 'clock' ? 1.33 : kind === 'library' ? 0.86 : 0.98;
-    const sy = (py: number) => y + (py - y) * k;
-    const top = sy(y - tw * h * sc);
-    // 半宽：石台 0.39tw；大藏书阁的第一重檐角在 ±(wi + wj + 2o)/2 = ±0.42tw，按 drawLibrary 的尺寸取
-    const hw = kind === 'library' ? Math.max(0.39, (0.54 * sc + 0.24) / 2) * tw : tw * 0.39;
-    const outlines: [number, number][][] = [
-      [
-        [x - tw * 0.39, y + tw * 0.1],
-        [x, y + tw * 0.28],
-        [x + tw * 0.39, y + tw * 0.1],
-        [x + hw, top],
-        [x - hw, top],
-      ],
-    ];
-    if (kind === 'windmill') {
-      // 与 drawWindmill 一致：轴心在塔顶左前方，帆长 0.52tw·sc，横向压扁到 0.82
-      const hx = x - tw * 0.15 * sc * 0.55;
-      const hy = y + tw * 0.04 - tw * 0.62 * sc + tw * 0.02;
-      const len = tw * 0.52 * sc;
-      outlines.push(Array.from({ length: 16 }, (_, i): [number, number] => {
-        const th = (i / 16) * Math.PI * 2;
-        return [hx + Math.cos(th) * len * 0.82, sy(hy + Math.sin(th) * len)];
-      }));
-    } else if (kind === 'clock') {
-      // 攒尖顶尖上的小旗（drawFlag：旗杆高 0.5·0.5tw，旗面宽 0.26·0.5tw）
-      const apex = y - tw * h * sc;
-      outlines.push([
-        [x - tw * 0.01, sy(apex + tw * 0.02)],
-        [x + tw * 0.14, sy(apex + tw * 0.02)],
-        [x + tw * 0.14, sy(apex - tw * 0.24)],
-        [x - tw * 0.01, sy(apex - tw * 0.24)],
-      ]);
-    }
-    return outlines;
-  }
-
-  protected drawLandmark(x: number, y: number, tw: number, l: LandmarkView, anim: number, selected: boolean): [number, number] {
-    const c = this.ctx;
-    const k = 0.25 + 0.75 * anim;
-    const hw = tw / 2;
-    const hh = tw / 4;
-    if (selected) {
-      c.strokeStyle = this.theme.accent;
-      c.lineWidth = 2;
-      c.beginPath();
-      c.ellipse(x, y, hw * 0.95, hh * 0.95, 0, 0, Math.PI * 2);
-      c.stroke();
-    }
-    // 石台：顶面、两侧，加一道砌缝
-    const pw = hw * 0.78;
-    const ph = hh * 0.78;
-    const pd = tw * 0.1;
-    this.poly('#cfc8b4', x - pw, y, x, y + ph, x, y + ph + pd, x - pw, y + pd);
-    this.poly('#b3ab95', x, y + ph, x + pw, y, x + pw, y + pd, x, y + ph + pd);
-    c.strokeStyle = 'rgba(90,80,60,.3)';
-    c.lineWidth = Math.max(0.5, tw * 0.012);
-    c.beginPath();
-    c.moveTo(x - pw, y + pd / 2);
-    c.lineTo(x, y + ph + pd / 2);
-    c.lineTo(x + pw, y + pd / 2);
-    c.stroke();
-    this.poly(this.amb.cover > 0.3 ? SNOW : '#e4dece', x, y - ph, x + pw, y, x, y + ph, x - pw, y);
-    c.save();
-    c.translate(x, y);
-    c.scale(1, k);
-    c.translate(-x, -y);
-    const big = l.size >= 6;
-    const roof = shade(l.roof, -0.05);
-    // Canvas 的 scale 只影响即时绘制；追加到 lights 的坐标需要显式同步同一变换。
-    const lightStart = this.lights.length;
-    const kind = landmarkKind(l.index);
-    const sc = big ? 1.12 : 0.92;
-    let win: [number, number];
-    if (kind === 'clock') win = this.drawClockTower(x, y, tw, roof, sc, l.index);
-    else if (kind === 'library') win = this.drawLibrary(x, y, tw, roof, sc);
-    else win = this.drawWindmill(x, y, tw, roof, sc, l.index);
-    if (kind !== 'clock') {
-      const fx = x - hw * 0.62;
-      const fy = y - tw * 0.02;
-      this.drawFlag(fx, fy, tw * 0.6, l.roof, l.index);
-    }
-    c.restore();
-    for (let i = lightStart; i < this.lights.length; i++) {
-      this.lights[i][1] = y + (this.lights[i][1] - y) * k;
-    }
-    return [win[0], y + (win[1] - y) * k];
   }
 
   protected shownGranaryRatio(scene: Scene): number {

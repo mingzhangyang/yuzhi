@@ -2,10 +2,10 @@ import { moonPhase } from '../../ambience';
 import type { Scene, Walker } from '../model';
 import { SNOW } from '../style';
 import { clamp, hash, luma, mix, rgb, shade } from '../utils';
-import { IslandStructurePainter } from './structures';
+import { IslandLandmarkPainter } from './landmarks';
 
 /** People, selection overlays, sky/weather effects, lighting, and labels. */
-export abstract class IslandEffectsPainter extends IslandStructurePainter {
+export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
   protected drawPerson(x: number, y: number, s: number, p: Walker, dim: number) {
     const c = this.ctx;
     const a = this.amb;

@@ -92,3 +92,31 @@ export function treeBounds(kind: 'pine' | 'round', seed: number): { w: number; t
   const lobes = roundLobes(seed);
   return { w: Math.max(...lobes.map(([dx, , r]) => Math.abs(dx) + r)), top: 0.66 + Math.max(...lobes.map(([, dy, r]) => r - dy)) };
 }
+
+/** 地标样式，顺序与 docs/art/landmark-concepts.webp 一致；前三种是最早的钟楼、藏书阁、风车 */
+export const LANDMARK_KINDS = ['clock', 'library', 'windmill', 'observatory', 'greenhouse', 'harbor', 'memorial', 'pavilion'] as const;
+export type LandmarkKind = (typeof LANDMARK_KINDS)[number];
+
+/**
+ * 按地标位轮换：前八座地标一定各不相同。0–2 号仍是钟楼、藏书阁、风车，
+ * 已经建成的前三座地标外观不变。
+ */
+export function landmarkKind(index: number): LandmarkKind {
+  const n = LANDMARK_KINDS.length;
+  return LANDMARK_KINDS[((index % n) + n) % n];
+}
+
+/**
+ * 各样式楼体的最高点（地块宽的倍数，再乘规模 sc），绘制和遮挡 / 点击轮廓共用：
+ * 钟楼到攒尖顶尖，风车到尖顶，观星台到望远镜口，纪念塔到火焰顶。
+ */
+export const LANDMARK_HEIGHT: Record<LandmarkKind, number> = {
+  clock: 1.33,
+  library: 0.86,
+  windmill: 0.98,
+  observatory: 0.68,
+  greenhouse: 0.6,
+  harbor: 0.56,
+  memorial: 1.0,
+  pavilion: 0.66,
+};
