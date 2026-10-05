@@ -59,6 +59,10 @@ try {
 
   await page.evaluate(() => window.yuzhi.tracker.open({ kind: 'diaries' }));
   assert((await page.locator('#trackerBody').textContent()).includes('已删除的日记'), 'deleted diary archive is missing');
+  const archivedDiaryLink = page.locator('.history-record button[data-act="diary"]').first();
+  assert(await archivedDiaryLink.isVisible(), 'deleted diary history is not exposed as a keyboard-focusable control');
+  await archivedDiaryLink.focus();
+  assert(await archivedDiaryLink.evaluate((el) => document.activeElement === el), 'deleted diary history cannot receive keyboard focus');
 
   // Schedule: create -> detail -> edit revision -> delete -> historical detail remains.
   await page.locator('#newBtn').click();
@@ -85,6 +89,10 @@ try {
 
   await page.evaluate(() => window.yuzhi.tracker.open({ kind: 'schedules' }));
   assert((await page.locator('#trackerBody').textContent()).includes('已删除的日程'), 'deleted schedule archive is missing');
+  const archivedScheduleLink = page.locator('.history-record button[data-act="schedule"]').first();
+  assert(await archivedScheduleLink.isVisible(), 'deleted schedule history is not exposed as a keyboard-focusable control');
+  await archivedScheduleLink.focus();
+  assert(await archivedScheduleLink.evaluate((el) => document.activeElement === el), 'deleted schedule history cannot receive keyboard focus');
 
   await context.close();
 } finally {
