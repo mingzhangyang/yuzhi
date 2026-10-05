@@ -4,7 +4,7 @@ import { moonPhase } from '../ambience';
 import { describe, type InfoContext, type InfoTarget } from '../info';
 import { tileHash, type Tile } from '../map';
 import type { AgendaView, Ambience, ChoresView, Hit, SceneryCandidate, SceneryFocus, SceneryInspection, VillageView, Walker } from './model';
-import { HOUSE_SCALE, personSize } from './style';
+import { personSize } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
 
@@ -329,7 +329,7 @@ export abstract class IslandInteraction extends IslandViewport {
     for (const p of this.walkers.values()) {
       const [x, y] = this.iso(p.x, p.y);
       const d = Math.hypot(pt.x - x, pt.y - (y - s0 * 0.7));
-      if (d < bd && !this.houseInFrontAt(p, pt)) {
+      if (d < bd && !this.occludedAt(p, pt)) {
         bd = d;
         best = p;
       }
@@ -338,32 +338,12 @@ export abstract class IslandInteraction extends IslandViewport {
   }
 
   /**
-   * 小人走到别人家房子后面时会被挡住；点在挡住它的房子上，应当落到房子所在的村落，而不是看不见的小人。
-   * 与绘制队列一致：房子的深度取地块中心，同深度时小人画在房子前面（站在门口），不算被挡。
+   * 小人走到房子、井、树、山或地标后面时会被挡住；点在挡住它的东西上，应当落到那里，而不是看不见的小人。
+   * 遮挡轮廓来自上一帧的绘制队列，深度规则与绘制一致：同深度时小人画在前面（站在门口），不算被挡。
    */
-  protected houseInFrontAt(p: Walker, pt: { x: number; y: number }): boolean {
-    const s = this.scene;
-    if (!s) return false;
-    const size = this.view.tw * HOUSE_SCALE;
-    for (const v of s.villages) {
-      const site = this.map.villages[v.slot];
-      for (const sl of site.slots.slice(0, v.houses)) {
-        if (sl.i + sl.j <= p.x + p.y) continue;
-        const [x, y] = this.iso(sl.i, sl.j);
-        // 房子的屏幕轮廓：地面三角 + 墙 + 出檐的四坡顶（与 drawHouse 的比例一致）
-        const hw = size / 2;
-        const outline: [number, number][] = [
-          [x - hw, y],
-          [x, y + size / 4],
-          [x + hw, y],
-          [x + hw * 1.14, y - size * 0.5],
-          [x, y - size * 0.92],
-          [x - hw * 1.14, y - size * 0.5],
-        ];
-        if (insidePolygon(pt, outline)) return true;
-      }
-    }
-    return false;
+  protected occludedAt(p: Walker, pt: { x: number; y: number }): boolean {
+    const d = p.x + p.y;
+    return this.occluders.some((o) => o.d > d && insidePolygon(pt, o.poly));
   }
 
   hitAt(pt: { x: number; y: number }): Hit {
