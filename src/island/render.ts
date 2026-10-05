@@ -8,7 +8,7 @@ import { dayLight } from './ambience';
 import { tileHash, type Tile } from './map';
 import { IslandPropArt } from './props';
 import type { AgendaView, Glow, LandmarkView, Scene, VillageView, Walker } from './render/model';
-import { IslandSimulation } from './render/simulation';
+import { IslandSimulation, isDeterioratingStageCue } from './render/simulation';
 import { LANTERN, SNOW, SNOW_SHADE, WARM } from './render/style';
 import { clamp, hash, mix, rgb, shade } from './render/utils';
 
@@ -1895,7 +1895,7 @@ export class IslandRenderer extends IslandSimulation {
       const center = m.villages[village.slot].center;
       const [x, y] = this.iso(center.i, center.j);
       const k = Math.min(1, cue.t / 1.2);
-      c.strokeStyle = cue.to >= 2 ? `rgba(130,130,115,${(1 - k) * 0.5})` : `rgba(225,235,205,${(1 - k) * 0.65})`;
+      c.strokeStyle = isDeterioratingStageCue(cue) ? `rgba(130,130,115,${(1 - k) * 0.5})` : `rgba(225,235,205,${(1 - k) * 0.65})`;
       c.lineWidth = Math.max(1, tw * 0.035);
       c.beginPath();
       c.ellipse(x, y - tw * 0.12, tw * (0.5 + k * 0.6), tw * (0.24 + k * 0.3), 0, 0, Math.PI * 2);
