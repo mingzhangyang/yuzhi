@@ -25,12 +25,17 @@ export const COLL_NAMES = Object.keys(COLLECTIONS) as Coll[];
 const DB_NAME = 'yuzhi';
 const FACT_SEQ_KEY = 'factSeq';
 /**
- * Schema 7 is a staging schema: it keeps legacy stores available long enough
- * for the business-data migration to read them. Schema 8 drops those stores
- * after the migrated data has been durably written.
+ * Schema 8 is both the previous production schema and the migration staging
+ * schema. Presence of legacy stores disambiguates them:
  *
- * Schema 8 also repairs databases that were briefly opened by the PR build
- * which reached schema 7 without deleting the legacy stores.
+ * - schema 8 without legacy stores: previous production data, safe to upgrade
+ *   directly to schema 9 (which adds diaries);
+ * - schema 8 with life / interruptions: an older-schema migration is staged or
+ *   being retried. Keep it at schema 8 until business migration succeeds and
+ *   the migrated data is durably written; only then may schema 9 delete the
+ *   legacy stores.
+ *
+ * Schema 9 is the current final schema.
  */
 const STAGING_SCHEMA_VERSION = 8;
 export const IDB_SCHEMA_VERSION = 9;
@@ -536,9 +541,18 @@ export class IdbPersistence implements Persistence {
       return current;
     }
     const currentVersion = current.version;
+    const hasLegacy = LEGACY_COLLECTIONS.some((name) => current.objectStoreNames.contains(name));
+
+    // Schema 8 is ambiguous by version alone. If legacy stores remain, this is
+    // a staged / interrupted migration and load() still needs those inputs.
+    if (currentVersion === STAGING_SCHEMA_VERSION && hasLegacy) {
+      this.assertRequiredStores(current);
+      return current;
+    }
+
     current.close();
     // Pre-v8 databases first reach staging schema 8 so legacy business stores
-    // survive migration. Existing production v8 can move straight to v9.
+    // survive migration. A clean production schema 8 can move directly to 9.
     const target = currentVersion >= STAGING_SCHEMA_VERSION ? IDB_SCHEMA_VERSION : STAGING_SCHEMA_VERSION;
     const staged = await this.openDatabase(target, true);
     this.assertRequiredStores(staged);
