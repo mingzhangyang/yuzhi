@@ -3,7 +3,7 @@ import type { ISODate, Task } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { historyEvent } from '../history-types';
-import { ActionError, operation, putSettlementEntry, semanticLife } from './shared';
+import { ActionError, operation, putSettlementEntry, q, semanticLife } from './shared';
 
 function createTaskImpl(store: Store, o: { title: string; projectId?: string; scheduledFor?: ISODate }): Task {
   const title = o.title.trim();
@@ -144,13 +144,26 @@ function dropTaskImpl(store: Store, taskId: string, note = '不重要了，移�
     projectId: t.projectId,
     taskId,
     payload: { source: 'manual', note },
-    life: t.projectId ? [semanticLife({
-      kind: 'drop',
-      projectId: t.projectId,
-      taskId,
-      reason: 'not_important',
-      event: historyEvent(note === '缩小规模时放下' ? 'history.life.taskDroppedTrim' : 'history.life.taskDroppedNotImportant', { title: t.title }),
-    })] : undefined,
+    life: t.projectId ? [
+      note === '不重要了，移出村落' || note === '缩小规模时放下'
+        ? semanticLife({
+            kind: 'drop',
+            projectId: t.projectId,
+            taskId,
+            reason: 'not_important',
+            event: historyEvent(
+              note === '缩小规模时放下' ? 'history.life.taskDroppedTrim' : 'history.life.taskDroppedNotImportant',
+              { title: t.title },
+            ),
+          })
+        : {
+            kind: 'drop',
+            projectId: t.projectId,
+            taskId,
+            reason: 'not_important',
+            text: `${q(t.title)}${note}`,
+          },
+    ] : undefined,
   });
 }
 

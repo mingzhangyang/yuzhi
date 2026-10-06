@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closeProject, closeStalledProject, createProject, createTask, settleDay } from '../src/actions';
+import { closeProject, closeStalledProject, createProject, createTask, dropTask, settleDay } from '../src/actions';
 import { BACKUP_FORMAT, parseBackup } from '../src/db';
 import { formatChronicleLine, formatHistoryEvent, formatLifeEntry } from '../src/history';
 import { lifeEntries } from '../src/logic/operations';
@@ -73,6 +73,51 @@ describe('semantic history localization', () => {
     closeProject(h.store, manual.id, '方向 changed');
     expect(h.store.project(manual.id)?.closeReason).toBe('方向 changed');
     expect(h.store.project(manual.id)?.closeReasonEvent).toBeUndefined();
+  });
+
+  it('preserves custom dropTask narration while keeping system notes semantic', () => {
+    const h = makeStore('2026-10-06');
+    const project = createProject(h.store, '项目');
+    const task = createTask(h.store, { title: '任务', projectId: project.id });
+
+    dropTask(h.store, task.id, '暂时搁置，等依赖完成');
+
+    const dropped = lifeEntries(h.store.data).find((entry) => entry.taskId === task.id && entry.kind === 'drop');
+    expect(dropped).toMatchObject({
+      text: '「任务」暂时搁置，等依赖完成',
+      reason: 'not_important',
+    });
+    expect(dropped?.event).toBeUndefined();
+    expect(formatLifeEntry(dropped!, 'en')).toBe('「任务」暂时搁置，等依赖完成');
+  });
+
+  it('rejects semantic history whose required parameters are missing or malformed', () => {
+    const h = makeStore('2026-10-06');
+    createProject(h.store, '备份项目');
+
+    const missingName = structuredClone(h.store.data);
+    missingName.chronicle[0] = {
+      ...missingName.chronicle[0],
+      events: [{ key: 'history.chron.projectCreated' }],
+    };
+    expect(() => parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 6,
+      exportedAt: '2026-10-06T00:00:00.000Z',
+      ...missingName,
+    }))).toThrow(/events/);
+
+    const invalidDate = structuredClone(h.store.data);
+    invalidDate.chronicle[0] = {
+      ...invalidDate.chronicle[0],
+      events: [{ key: 'history.chron.dayArchived', params: { date: 'not-a-date' } }],
+    };
+    expect(() => parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 6,
+      exportedAt: '2026-10-06T00:00:00.000Z',
+      ...invalidDate,
+    }))).toThrow(/events/);
   });
 
   it('accepts semantic fields in current-version backups and keeps the fallback text', () => {
