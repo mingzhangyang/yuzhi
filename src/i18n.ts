@@ -1,6 +1,7 @@
 import { uiEn, uiZh } from './i18n-ui';
 import { trackerEn, trackerZh } from './i18n-tracker';
 import { islandEn, islandZh } from './i18n-island';
+import { errorEn, errorZh } from './i18n-errors';
 
 export type Locale = 'zh-CN' | 'en';
 
@@ -106,6 +107,7 @@ const zh = {
   ...uiZh,
   ...trackerZh,
   ...islandZh,
+  ...errorZh,
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -210,6 +212,7 @@ const en: Record<MessageKey, string> = {
   ...uiEn,
   ...trackerEn,
   ...islandEn,
+  ...errorEn,
 };
 
 const catalog: Record<Locale, Record<MessageKey, string>> = { 'zh-CN': zh, en };
