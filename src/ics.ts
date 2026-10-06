@@ -1,5 +1,6 @@
 import ICAL from 'ical.js';
 import type { CalendarEvent } from './types';
+import { getLocale, t } from './i18n';
 
 type Time = InstanceType<typeof ICAL.Time>;
 
@@ -96,7 +97,7 @@ export function parseIcs(text: string, sourceId: string, from: Date, to: Date): 
     const em = new Date(e).getTime();
     if (em < fromMs && sm < fromMs) return;
     if (sm >= toMs) return;
-    const title = (ev.summary || '（无标题）').trim();
+    const title = (ev.summary || t('common.untitled')).trim();
     // 不守规矩的日历会给不同事件用同一个 UID：撞了就退回用实际开始时间区分
     let id = eventId(sourceId, ev.uid, occurrence);
     if (seen.has(id)) id = `${id}|${s}`;
@@ -125,10 +126,10 @@ export function parseIcs(text: string, sourceId: string, from: Date, to: Date): 
 export async function fetchIcs(url: string): Promise<string> {
   const res = await fetch(`/api/ics?url=${encodeURIComponent(url)}`);
   if (!res.ok) {
-    let msg = `获取失败（${res.status}）`;
+    let msg = t('error.calendarFetchFailed', { status: res.status });
     try {
       const j = await res.json();
-      if (j?.error) msg = j.error;
+      if (j?.error && getLocale() === 'zh-CN') msg = j.error;
     } catch {
       /* 不是 JSON */
     }
