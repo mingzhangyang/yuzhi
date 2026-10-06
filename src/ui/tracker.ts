@@ -9,7 +9,7 @@ import { $, esc, setHTML, setText, toast } from './dom';
 import { closeModal, confirmModal, openModal } from './modal';
 import { roofOf, houseCount } from './scene';
 import * as A from '../actions';
-import { STAGE_NAMES } from '../logic/config';
+import { t as tr } from '../i18n';
 import { addDays, dateOfStamp, diffDays, fmtDay, relDay } from '../lib/date';
 import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
@@ -54,13 +54,16 @@ function emblem(color: string, stage: number) {
   return `<svg viewBox="0 0 50 50" aria-hidden="true"><rect width="50" height="50" fill="${color}22"/><path d="M8 34 25 26l17 8-17 8z" fill="#93b65a"/><path d="M17 34v-8l8-4 8 4v8l-8 4z" fill="#efe5cf"/><path d="M15 27 25 16l10 11-10-5z" fill="${roof}"/><rect x="27" y="29" width="3" height="5" fill="#6b5240"/></svg>`;
 }
 
+const STAGE_KEYS = ['stage.normal', 'stage.quiet', 'stage.dusty', 'stage.leaving'] as const;
+const stageName = (stage: number) => tr(STAGE_KEYS[stage] ?? STAGE_KEYS[0]);
+
 function lifeList(entries: readonly LifeEntry[], today: ISODate, limit = 60) {
-  if (!entries.length) return '<p class="empty">还没有记录。</p>';
+  if (!entries.length) return `<p class="empty">${esc(tr('tracker.noRecords'))}</p>`;
   const rows = entries
     .slice()
     .sort((a, b) => compareLifeEntries(b, a))
     .slice(0, limit)
-    .map((e) => `<li class="k-${e.kind}"><time>${e.baseline ? '既有记录' : esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
+    .map((e) => `<li class="k-${e.kind}"><time>${e.baseline ? esc(tr('tracker.legacyRecord')) : esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
     .join('');
   return `<ol class="life">${rows}</ol>`;
 }
@@ -206,7 +209,7 @@ export class Tracker {
 
   /* ---------------- 视图 ---------------- */
 
-  private back$(label = '总览') {
+  private back$(label = tr('tracker.overview')) {
     return `<button class="backlink" data-act="back">‹ ${esc(label)}</button>`;
   }
 
@@ -222,8 +225,8 @@ export class Tracker {
         const v = vs.get(p.id)!;
         const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
         const progressAt = lastProgressAt(s.data, p.id);
-        const since = progressAt ? `距上次推进 ${diffDays(progressAt, today)} 天` : `立项 ${diffDays(p.createdAt, today)} 天，还没推进`;
-        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${open} 件未完成 · ${since}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${STAGE_NAMES[v.stage]}</span></button>`;
+        const since = progressAt ? tr('tracker.progressSince', { days: diffDays(progressAt, today) }) : tr('tracker.noProgress', { days: diffDays(p.createdAt, today) });
+        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(tr('tracker.openTasks', { count: open }))} · ${esc(since)}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${esc(stageName(v.stage))}</span></button>`;
       })
       .join('');
     const groups = unclassifiedGroups(s.data.events);
@@ -243,22 +246,22 @@ export class Tracker {
       .filter((event) => dateOfStamp(event.start) >= today)
       .sort((a, b) => a.start.localeCompare(b.start))[0] ?? localSchedules[0];
     const html = `
-      <div class="ptitle">小岛总览 <small>${ps.length} 个村落</small></div>
-      <form class="add" data-form="quick"><input name="quick" placeholder="添加一件事…" autocomplete="off" aria-label="新任务"><select name="qproj" aria-label="住进哪个村落"><option value="">停在码头</option>${projOpts}</select><button class="btn primary">添加</button></form>
-      <p class="hint">不选村落的任务会先乘船停在码头，等你安排。</p>
-      <div class="sect">村落 <button class="linkbtn" data-act="new-project">＋ 新村落</button></div>
-      <div class="rows">${rows || '<p class="empty">岛上还没有村落。建一个项目，它就是第一座村落；也可以在「⋯」里放几个示例村落。</p>'}</div>
-      <div class="sect">培育区 <small>现实生活自动映射</small></div>
+      <div class="ptitle">${esc(tr('tracker.islandOverview'))} <small>${esc(tr('tracker.villagesCount', { count: ps.length }))}</small></div>
+      <form class="add" data-form="quick"><input name="quick" placeholder="${esc(tr('tracker.quickPlaceholder'))}" autocomplete="off" aria-label="${esc(tr('tracker.newTaskAria'))}"><select name="qproj" aria-label="${esc(tr('tracker.villageAria'))}"><option value="">${esc(tr('tracker.dockOption'))}</option>${projOpts}</select><button class="btn primary">${esc(tr('common.add'))}</button></form>
+      <p class="hint">${esc(tr('tracker.quickHint'))}</p>
+      <div class="sect">${esc(tr('tracker.villages'))} <button class="linkbtn" data-act="new-project">${esc(tr('tracker.newVillage'))}</button></div>
+      <div class="rows">${rows || `<p class="empty">${esc(tr('tracker.noVillages'))}</p>`}</div>
+      <div class="sect">${esc(tr('tracker.cultivation'))} <small>${esc(tr('tracker.cultivationSub'))}</small></div>
       <div class="rows">${cultivationRows}</div>
-      <div class="sect">现实输入 <small>可回看与管理</small></div>
-      <button class="row" data-act="diaries"><i class="sw" style="background:#9b78a8"></i><span class="tx"><b>日记 · ${diaries.length} 篇</b><span>${latestDiary ? `${fmtDay(latestDiary.date)} · ${esc(latestDiary.text.length > 46 ? latestDiary.text.slice(0, 45) + '…' : latestDiary.text)}` : '把经历、感受和线索写下来'}</span></span><span class="end">›</span></button>
-      <button class="row" data-act="schedules"><i class="sw" style="background:#7397a7"></i><span class="tx"><b>本地日程 · ${localSchedules.length} 条</b><span>${nextSchedule ? `${relDay(dateOfStamp(nextSchedule.start), today)} ${timeOf(nextSchedule.start)} · ${esc(nextSchedule.title)}` : '自己创建的日程会进入日历与结算'}</span></span><span class="end">›</span></button>
-      <div class="sect">码头 <small>${b.dock} 船待安排 · ${b.overdue} 件过期</small></div>
-      <button class="row" data-act="dock"><i class="sw" style="background:#a8794a"></i><span class="tx"><b>${b.dock ? `${b.dock} 条船停在码头` : '码头空着'}</b><span>${b.dock ? '决定它们住进哪个村落、排在哪天，或者婉拒' : '新任务会先停在这里'}</span></span><span class="end">›</span></button>
+      <div class="sect">${esc(tr('tracker.realInput'))} <small>${esc(tr('tracker.realInputSub'))}</small></div>
+      <button class="row" data-act="diaries"><i class="sw" style="background:#9b78a8"></i><span class="tx"><b>${esc(tr('tracker.diariesCount', { count: diaries.length }))}</b><span>${latestDiary ? `${fmtDay(latestDiary.date)} · ${esc(latestDiary.text.length > 46 ? latestDiary.text.slice(0, 45) + '…' : latestDiary.text)}` : esc(tr('tracker.diaryEmptyPreview'))}</span></span><span class="end">›</span></button>
+      <button class="row" data-act="schedules"><i class="sw" style="background:#7397a7"></i><span class="tx"><b>${esc(tr('tracker.schedulesCount', { count: localSchedules.length }))}</b><span>${nextSchedule ? `${relDay(dateOfStamp(nextSchedule.start), today)} ${timeOf(nextSchedule.start)} · ${esc(nextSchedule.title)}` : esc(tr('tracker.scheduleEmptyPreview'))}</span></span><span class="end">›</span></button>
+      <div class="sect">${esc(tr('tracker.dock'))} <small>${esc(tr('tracker.dockMeta', { ships: b.dock, overdue: b.overdue }))}</small></div>
+      <button class="row" data-act="dock"><i class="sw" style="background:#a8794a"></i><span class="tx"><b>${esc(b.dock ? tr('tracker.shipsAtDock', { count: b.dock }) : tr('tracker.dockEmpty'))}</b><span>${esc(tr(b.dock ? 'tracker.dockBusyHint' : 'tracker.dockEmptyHint'))}</span></span><span class="end">›</span></button>
       ${this.coastRow()}
-      ${groups.length ? `<div class="sect">日历 <small>${groups.length} 类事件待归类</small></div><button class="row" data-act="classify"><i class="sw" style="background:var(--dusk)"></i><span class="tx"><b>有新的日历事件不知道归哪</b><span>指定一次，以后同类自动归位</span></span><span class="end">›</span></button>` : ''}
+      ${groups.length ? `<div class="sect">${esc(tr('tracker.calendar'))} <small>${esc(tr('tracker.unclassifiedCount', { count: groups.length }))}</small></div><button class="row" data-act="classify"><i class="sw" style="background:var(--dusk)"></i><span class="tx"><b>${esc(tr('tracker.unclassifiedTitle'))}</b><span>${esc(tr('tracker.unclassifiedHint'))}</span></span><span class="end">›</span></button>` : ''}
     `;
-    return [html, '小岛总览', `${ps.length} 个村落 · 码头 ${b.dock} 船`];
+    return [html, tr('tracker.islandOverview'), tr('tracker.overviewSub', { villages: ps.length, ships: b.dock })];
   }
 
   private diaries(): [string, string, string] {
