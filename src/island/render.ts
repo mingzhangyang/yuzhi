@@ -390,7 +390,7 @@ export class IslandRenderer extends IslandEffectsPainter {
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
-      this.label(x, y + tw * 0.2, s.dockShips ? `码头 · ${s.dockShips} 船` : '码头', null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock');
+      this.label(x, y + tw * 0.2, s.dockLabel, null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock');
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
       this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary', false, compact && sel?.kind !== 'granary');
       const ch = s.chores;
