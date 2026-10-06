@@ -3,6 +3,7 @@ import {
   canonicalUrl,
   localeFromPath,
   localeMetadata,
+  socialImageUrl,
   structuredDataForLocale,
   type Locale,
 } from '../shared/locale';
@@ -46,9 +47,12 @@ function localizedHtml(response: Response, locale: Locale): Response {
     .on('meta[property="og:title"]', setContent(meta.title))
     .on('meta[property="og:description"]', setContent(meta.socialDescription))
     .on('meta[property="og:url"]', setContent(canonicalUrl(locale)))
+    .on('meta[property="og:image"]', setContent(socialImageUrl(locale)))
+    .on('meta[property="og:image:type"]', setContent(meta.socialImageType))
     .on('meta[property="og:image:alt"]', setContent(meta.imageAlt))
     .on('meta[name="twitter:title"]', setContent(meta.title))
     .on('meta[name="twitter:description"]', setContent(meta.socialDescription))
+    .on('meta[name="twitter:image"]', setContent(socialImageUrl(locale)))
     .on('link[rel="canonical"]', setHref(canonicalUrl(locale)))
     .on('link[rel="manifest"]', setHref(meta.manifestHref))
     .on('#appStructuredData', {

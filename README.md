@@ -17,6 +17,8 @@ npm test           # 规则层单元测试（vitest）
 npm run build      # 类型检查 + 打包到 dist/
 ```
 
+生产发布后的最终门禁见 [Production acceptance](docs/PRODUCTION_ACCEPTANCE.md)：Cloudflare 部署完成后手动运行 GitHub Actions 的 **Production acceptance** workflow，以真实生产域名而不是本地预览作为验收对象。
+
 ## 部署到 Cloudflare
 
 生产环境只使用 **Cloudflare Workers + Static Assets**。Wrangler 会把 `dist/` 作为 SPA 静态资源，并让 `/api/*`、`/en` 与 `/en/*` 优先进入 `worker/index.ts`；其中英文路由由 Worker 在返回 HTML 前写入英文 SEO / social metadata，`.ics` 代理只转发、不保存，拒绝内网地址、限制 5MB、只放行日历内容。

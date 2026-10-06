@@ -37,6 +37,9 @@ has(
 has(english.text, '<meta property="og:locale" content="en_US">', 'English Open Graph locale');
 has(english.text, '<meta property="og:locale:alternate" content="zh_CN">', 'alternate Open Graph locale');
 has(english.text, '<meta property="og:url" content="https://yuzhi.orangely.xyz/en/">', 'English Open Graph URL');
+has(english.text, '<meta property="og:image" content="https://yuzhi.orangely.xyz/brand/yuzhi-og-en.png">', 'English Open Graph image');
+has(english.text, '<meta property="og:image:type" content="image/png">', 'English Open Graph image type');
+has(english.text, '<meta name="twitter:image" content="https://yuzhi.orangely.xyz/brand/yuzhi-og-en.png">', 'English Twitter image');
 has(english.text, '<link rel="canonical" href="https://yuzhi.orangely.xyz/en/">', 'English canonical');
 has(english.text, '<link rel="manifest" href="/site-en.webmanifest">', 'English manifest');
 has(english.text, '"inLanguage":"en"', 'English structured data');
@@ -46,13 +49,25 @@ const chinese = await fetchText('/');
 has(chinese.text, '<html lang="zh-CN">', 'Chinese document language');
 has(chinese.text, '<link rel="canonical" href="https://yuzhi.orangely.xyz/">', 'Chinese canonical');
 has(chinese.text, '<link rel="manifest" href="/site.webmanifest">', 'Chinese manifest');
+has(chinese.text, '<meta property="og:image" content="https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg">', 'Chinese Open Graph image');
+has(chinese.text, '<meta property="og:image:type" content="image/jpeg">', 'Chinese Open Graph image type');
+has(chinese.text, '<meta name="twitter:image" content="https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg">', 'Chinese Twitter image');
 assert(!chinese.text.includes('<meta property="og:locale" content="en_US">'), 'root HTML was unexpectedly rewritten as English');
 
-const [zhManifestResponse, enManifestResponse] = await Promise.all([
+const [zhManifestResponse, enManifestResponse, zhImageResponse, enImageResponse] = await Promise.all([
   fetch(baseURL + '/site.webmanifest'),
   fetch(baseURL + '/site-en.webmanifest'),
+  fetch(baseURL + '/brand/yuzhi-og.jpg'),
+  fetch(baseURL + '/brand/yuzhi-og-en.png'),
 ]);
 assert(zhManifestResponse.ok && enManifestResponse.ok, 'locale manifests must both be served');
+assert(
+  zhImageResponse.ok
+    && enImageResponse.ok
+    && zhImageResponse.headers.get('content-type')?.includes('image/jpeg')
+    && enImageResponse.headers.get('content-type')?.includes('image/png'),
+  'localized social images must both be served with their declared media types',
+);
 const [zhManifest, enManifest] = await Promise.all([
   zhManifestResponse.json(),
   enManifestResponse.json(),

@@ -10,6 +10,7 @@ import {
   localeMetadata,
   localePath,
   normalizeLocalePreference,
+  socialImageUrl,
   structuredDataForLocale,
   type Locale,
 } from '../shared/locale';
@@ -358,9 +359,12 @@ function applyDocumentMetadata(target: Locale): void {
   setMetaContent('meta[property="og:title"]', meta.title);
   setMetaContent('meta[property="og:description"]', meta.socialDescription);
   setMetaContent('meta[property="og:url"]', canonicalUrl(target));
+  setMetaContent('meta[property="og:image"]', socialImageUrl(target));
+  setMetaContent('meta[property="og:image:type"]', meta.socialImageType);
   setMetaContent('meta[property="og:image:alt"]', meta.imageAlt);
   setMetaContent('meta[name="twitter:title"]', meta.title);
   setMetaContent('meta[name="twitter:description"]', meta.socialDescription);
+  setMetaContent('meta[name="twitter:image"]', socialImageUrl(target));
   setLinkHref('link[rel="canonical"]', canonicalUrl(target));
   setLinkHref('link[rel="manifest"]', meta.manifestHref);
   const structured = document.querySelector<HTMLScriptElement>('#appStructuredData');
