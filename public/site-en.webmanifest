@@ -1,0 +1,19 @@
+{
+  "name": "Yuzhi",
+  "short_name": "Yuzhi",
+  "description": "Turn your journal, Todos, and schedule into a living island shaped by your real life.",
+  "lang": "en",
+  "start_url": "/en/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eceee2",
+  "theme_color": "#0b4f4c",
+  "icons": [
+    {
+      "src": "/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

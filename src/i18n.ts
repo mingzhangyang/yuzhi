@@ -3,13 +3,23 @@ import { trackerEn, trackerZh } from './i18n-tracker';
 import { islandEn, islandZh } from './i18n-island';
 import { errorEn, errorZh } from './i18n-errors';
 import { historyEn, historyZh } from './i18n-history';
+import {
+  DEFAULT_LOCALE,
+  canonicalUrl,
+  localeFromPath,
+  localeMetadata,
+  localePath,
+  normalizeLocalePreference,
+  structuredDataForLocale,
+  type Locale,
+} from '../shared/locale';
 
-export type Locale = 'zh-CN' | 'en';
+export type { Locale } from '../shared/locale';
 
 export type MessageVars = Record<string, string | number>;
 
 const zh = {
-  'app.title': '屿志 Yuzhi｜把日记、待办与日程种成一座小岛',
+  'app.title': localeMetadata['zh-CN'].title,
   'language.switch': 'EN',
   'language.switchAria': 'Switch to English',
   'shell.tagline': '一座由现实生活培育出来的岛。你记录 Todo、日程和日记，小岛负责生长、提醒和讲故事。',
@@ -115,7 +125,7 @@ const zh = {
 export type MessageKey = keyof typeof zh;
 
 const en: Record<MessageKey, string> = {
-  'app.title': 'Yuzhi | Grow an island from your real life',
+  'app.title': localeMetadata.en.title,
   'language.switch': '中文',
   'language.switchAria': '切换到中文',
   'shell.tagline': 'An island cultivated by real life. You record todos, schedules, and journals; the island grows, reminds, and tells the story.',
@@ -220,7 +230,7 @@ const en: Record<MessageKey, string> = {
 
 const catalog: Record<Locale, Record<MessageKey, string>> = { 'zh-CN': zh, en };
 const STORAGE_KEY = 'yuzhi.locale';
-let locale: Locale = 'zh-CN';
+let locale: Locale = DEFAULT_LOCALE;
 const listeners = new Set<() => void>();
 
 const pluralRules: Record<Locale, Intl.PluralRules> = {
@@ -242,17 +252,33 @@ function interpolate(template: string, vars: MessageVars = {}, target: Locale = 
 }
 
 export function resolveLocale(preferred?: string | null, languages: readonly string[] = []): Locale {
-  const candidates = [preferred, ...languages].filter((value): value is string => Boolean(value));
-  for (const candidate of candidates) {
-    const normalized = candidate.toLowerCase();
-    if (normalized === 'zh' || normalized.startsWith('zh-')) return 'zh-CN';
-    if (normalized === 'en' || normalized.startsWith('en-')) return 'en';
+  for (const candidate of [preferred, ...languages]) {
+    const resolved = normalizeLocalePreference(candidate);
+    if (resolved) return resolved;
   }
-  return 'zh-CN';
+  return DEFAULT_LOCALE;
 }
 
 function browserLanguages(): readonly string[] {
-  return typeof navigator === 'undefined' ? [] : navigator.languages;
+  if (typeof navigator === 'undefined') return [];
+  if (navigator.languages.length) return navigator.languages;
+  return navigator.language ? [navigator.language] : [];
+}
+
+function browserPathname(): string | null {
+  return typeof location === 'undefined' ? null : location.pathname;
+}
+
+function syncLocalePath(target: Locale): void {
+  if (typeof history === 'undefined' || typeof location === 'undefined') return;
+  const pathname = localePath(target);
+  if (location.pathname === pathname) return;
+  try {
+    history.replaceState(history.state, '', `${pathname}${location.search}${location.hash}`);
+  } catch {
+    // URL synchronization is a progressive enhancement (for example, it is
+    // unavailable on opaque origins used by some test/browser environments).
+  }
 }
 
 function storedLocale(): string | null {
@@ -263,11 +289,15 @@ function storedLocale(): string | null {
   }
 }
 
-export function initI18n(options: { detectBrowser?: boolean } = {}): Locale {
-  // Keep rollout Chinese-first until every interactive surface and persisted
-  // system narrative has been localized. The browser resolver is already here
-  // so the final rollout only changes policy, not architecture.
-  locale = resolveLocale(storedLocale(), options.detectBrowser ? browserLanguages() : []);
+export function initI18n(
+  options: { detectBrowser?: boolean; pathname?: string | null; syncPath?: boolean } = {},
+): Locale {
+  const pathLocale = localeFromPath(options.pathname ?? browserPathname());
+  locale = pathLocale ?? resolveLocale(
+    storedLocale(),
+    options.detectBrowser === false ? [] : browserLanguages(),
+  );
+  if (options.syncPath !== false) syncLocalePath(locale);
   applyDocumentTranslations();
   return locale;
 }
@@ -294,6 +324,7 @@ export function setLocale(next: Locale, persist = true): void {
       // Locale persistence is optional; even accessing storage may be blocked.
     }
   }
+  syncLocalePath(locale);
   applyDocumentTranslations();
   for (const listener of listeners) listener();
 }
@@ -307,10 +338,39 @@ export function onLocaleChange(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+function setMetaContent(selector: string, value: string): void {
+  document.querySelector<HTMLMetaElement>(selector)?.setAttribute('content', value);
+}
+
+function setLinkHref(selector: string, value: string): void {
+  document.querySelector<HTMLLinkElement>(selector)?.setAttribute('href', value);
+}
+
+function applyDocumentMetadata(target: Locale): void {
+  const meta = localeMetadata[target];
+  document.title = meta.title;
+  setMetaContent('meta[name="description"]', meta.description);
+  setMetaContent('meta[name="application-name"]', meta.applicationName);
+  setMetaContent('meta[name="apple-mobile-web-app-title"]', meta.appleTitle);
+  setMetaContent('meta[property="og:locale"]', meta.ogLocale);
+  setMetaContent('meta[property="og:locale:alternate"]', meta.ogLocaleAlternate);
+  setMetaContent('meta[property="og:site_name"]', meta.siteName);
+  setMetaContent('meta[property="og:title"]', meta.title);
+  setMetaContent('meta[property="og:description"]', meta.socialDescription);
+  setMetaContent('meta[property="og:url"]', canonicalUrl(target));
+  setMetaContent('meta[property="og:image:alt"]', meta.imageAlt);
+  setMetaContent('meta[name="twitter:title"]', meta.title);
+  setMetaContent('meta[name="twitter:description"]', meta.socialDescription);
+  setLinkHref('link[rel="canonical"]', canonicalUrl(target));
+  setLinkHref('link[rel="manifest"]', meta.manifestHref);
+  const structured = document.querySelector<HTMLScriptElement>('#appStructuredData');
+  if (structured) structured.textContent = JSON.stringify(structuredDataForLocale(target));
+}
+
 export function applyDocumentTranslations(root?: ParentNode): void {
   if (typeof document === 'undefined') return;
   document.documentElement.lang = locale;
-  document.title = t('app.title');
+  applyDocumentMetadata(locale);
   const scope = root ?? document;
   scope.querySelectorAll<HTMLElement>('[data-i18n]').forEach((node) => {
     const key = node.dataset.i18n as MessageKey | undefined;
