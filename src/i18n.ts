@@ -308,6 +308,13 @@ export function formatCalendarDay(date: string, target: Locale = locale): string
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(dt);
 }
 
+export function formatFullDate(date: string, target: Locale = locale): string {
+  const [year, month, day] = dateParts(date);
+  if (target === 'zh-CN') return String(year) + '年' + String(month) + '月' + String(day) + '日';
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(dt);
+}
+
 export function formatWeekday(date: string, target: Locale = locale): string {
   const [year, month, day] = dateParts(date);
   const index = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
