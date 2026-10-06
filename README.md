@@ -17,9 +17,11 @@ npm test           # 规则层单元测试（vitest）
 npm run build      # 类型检查 + 打包到 dist/
 ```
 
+生产发布后的最终门禁见 [Production acceptance](docs/PRODUCTION_ACCEPTANCE.md)：Cloudflare 部署完成后手动运行 GitHub Actions 的 **Production acceptance** workflow，以真实生产域名而不是本地预览作为验收对象。
+
 ## 部署到 Cloudflare
 
-生产环境只使用 **Cloudflare Workers + Static Assets**。Wrangler 会把 `dist/` 作为 SPA 静态资源，并让 `/api/*`、`/en` 与 `/en/*` 优先进入 `worker/index.ts`；其中英文路由由 Worker 在返回 HTML 前写入英文 SEO / social metadata，`.ics` 代理只转发、不保存，拒绝内网地址、限制 5MB、只放行日历内容。
+生产环境只使用 **Cloudflare Workers + Static Assets**。Wrangler 会把 `dist/` 作为 SPA 静态资源，并让 `/`、`/en`、`/en/*` 与 `/api/*` 优先进入 `worker/index.ts`；两个公开语言入口都由 Worker 从统一 locale policy 写入原始 SEO / social metadata，`.ics` 代理只转发、不保存，拒绝内网地址、限制 5MB、只放行日历内容。
 
 目标生产域名是 `https://yuzhi.orangely.xyz`。仓库里的 `wrangler.toml` 已固定：
 
@@ -28,7 +30,7 @@ npm run build      # 类型检查 + 打包到 dist/
 - `workers.dev`：关闭
 - Version preview URLs：关闭
 - SPA fallback：开启
-- Worker-first 路由：`/api/*`、`/en`、`/en/*`（英文 HTML 由 Worker 预先本地化 metadata）
+- Worker-first 路由：`/`、`/en`、`/en/*`、`/api/*`（中英文入口的 raw metadata 都由统一 locale policy 生成）
 
 本地验证与手动部署：
 

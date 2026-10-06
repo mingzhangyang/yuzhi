@@ -45,6 +45,9 @@ try {
       canonical: document.querySelector('link[rel="canonical"]')?.getAttribute('href'),
       manifest: document.querySelector('link[rel="manifest"]')?.getAttribute('href'),
       ogLocale: document.querySelector('meta[property="og:locale"]')?.getAttribute('content'),
+      ogImage: document.querySelector('meta[property="og:image"]')?.getAttribute('content'),
+      ogImageType: document.querySelector('meta[property="og:image:type"]')?.getAttribute('content'),
+      twitterImage: document.querySelector('meta[name="twitter:image"]')?.getAttribute('content'),
       structured: JSON.parse(document.getElementById('appStructuredData')?.textContent ?? '{}'),
     }));
 
@@ -54,8 +57,15 @@ try {
       `English shell or language switch not exposed: ${JSON.stringify(initial)}`);
     assert(initial.canonical === 'https://yuzhi.orangely.xyz/en/' && initial.manifest === '/site-en.webmanifest',
       `English canonical/manifest mismatch: ${JSON.stringify(initial)}`);
-    assert(initial.ogLocale === 'en_US' && initial.structured.inLanguage === 'en',
-      `English social/structured metadata mismatch: ${JSON.stringify(initial)}`);
+    assert(
+      initial.ogLocale === 'en_US'
+        && initial.ogImage === 'https://yuzhi.orangely.xyz/brand/yuzhi-og-en.png'
+        && initial.ogImageType === 'image/png'
+        && initial.twitterImage === 'https://yuzhi.orangely.xyz/brand/yuzhi-og-en.png'
+        && initial.structured.inLanguage === 'en'
+        && initial.structured.image === 'https://yuzhi.orangely.xyz/brand/yuzhi-og-en.png',
+      `English social/structured metadata mismatch: ${JSON.stringify(initial)}`,
+    );
 
     await page.locator('#langBtn').click();
     await page.waitForFunction(() => location.pathname === '/' && document.documentElement.lang === 'zh-CN', undefined, { timeout });
@@ -64,11 +74,19 @@ try {
       path: location.pathname,
       switchText: document.getElementById('langBtn')?.textContent,
       canonical: document.querySelector('link[rel="canonical"]')?.getAttribute('href'),
+      ogImage: document.querySelector('meta[property="og:image"]')?.getAttribute('content'),
+      ogImageType: document.querySelector('meta[property="og:image:type"]')?.getAttribute('content'),
+      twitterImage: document.querySelector('meta[name="twitter:image"]')?.getAttribute('content'),
     }));
     assert(chineseChoice.stored === 'zh-CN' && chineseChoice.path === '/' && chineseChoice.switchText === 'EN',
       `explicit Chinese choice did not persist: ${JSON.stringify(chineseChoice)}`);
-    assert(chineseChoice.canonical === 'https://yuzhi.orangely.xyz/',
-      `Chinese canonical did not restore: ${JSON.stringify(chineseChoice)}`);
+    assert(
+      chineseChoice.canonical === 'https://yuzhi.orangely.xyz/'
+        && chineseChoice.ogImage === 'https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg'
+        && chineseChoice.ogImageType === 'image/jpeg'
+        && chineseChoice.twitterImage === 'https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg',
+      `Chinese canonical/social metadata did not restore: ${JSON.stringify(chineseChoice)}`,
+    );
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);

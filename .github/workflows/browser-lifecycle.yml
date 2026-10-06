@@ -14,11 +14,13 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'vite.config.ts'
+      - 'scripts/**'
       - 'browser-tests/**'
       - 'public/browser-smoke-secondary.html'
       - 'public/site.webmanifest'
       - 'public/site-en.webmanifest'
       - 'public/sitemap.xml'
+      - 'public/brand/yuzhi-og*'
       - '.github/workflows/browser-lifecycle.yml'
   workflow_dispatch:
 

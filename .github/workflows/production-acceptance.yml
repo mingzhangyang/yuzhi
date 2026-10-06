@@ -1,0 +1,59 @@
+name: Production acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Require main branch dispatch
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Production acceptance must be dispatched from main; got $GITHUB_REF" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Install browser smoke driver
+        run: npm install --no-save --package-lock=false playwright@1.63.0
+
+      - name: Validate deployed locale and metadata contract
+        env:
+          BASE_URL: https://yuzhi.orangely.xyz
+          EXPECTED_ORIGIN: https://yuzhi.orangely.xyz
+          EXPECTED_REVISION: ${{ github.sha }}
+          PW_CHANNEL: chrome
+          SHOT_DIR: production-shots
+        run: node browser-tests/production-acceptance.mjs
+
+      - name: Re-run core browser invariants against production
+        env:
+          BASE_URL: https://yuzhi.orangely.xyz
+          PW_CHANNEL: chrome
+        run: |
+          node browser-tests/input-focus-smoke.mjs
+          node browser-tests/capture-smoke.mjs
+          node browser-tests/life-book-smoke.mjs
+          node browser-tests/lifecycle-smoke.mjs
+
+      - name: Upload production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-acceptance-screenshots
+          path: production-shots
+          if-no-files-found: ignore
+          retention-days: 14

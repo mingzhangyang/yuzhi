@@ -1,8 +1,10 @@
 import { handleIcsRequest } from '../shared/icsProxy';
 import {
+  DEFAULT_LOCALE,
   canonicalUrl,
   localeFromPath,
   localeMetadata,
+  socialImageUrl,
   structuredDataForLocale,
   type Locale,
 } from '../shared/locale';
@@ -26,7 +28,7 @@ function localizedHtml(response: Response, locale: Locale): Response {
     },
   });
 
-  return new HTMLRewriter()
+  const rewritten = new HTMLRewriter()
     .on('html', {
       element(element) {
         element.setAttribute('lang', meta.htmlLang);
@@ -46,9 +48,12 @@ function localizedHtml(response: Response, locale: Locale): Response {
     .on('meta[property="og:title"]', setContent(meta.title))
     .on('meta[property="og:description"]', setContent(meta.socialDescription))
     .on('meta[property="og:url"]', setContent(canonicalUrl(locale)))
+    .on('meta[property="og:image"]', setContent(socialImageUrl(locale)))
+    .on('meta[property="og:image:type"]', setContent(meta.socialImageType))
     .on('meta[property="og:image:alt"]', setContent(meta.imageAlt))
     .on('meta[name="twitter:title"]', setContent(meta.title))
     .on('meta[name="twitter:description"]', setContent(meta.socialDescription))
+    .on('meta[name="twitter:image"]', setContent(socialImageUrl(locale)))
     .on('link[rel="canonical"]', setHref(canonicalUrl(locale)))
     .on('link[rel="manifest"]', setHref(meta.manifestHref))
     .on('#appStructuredData', {
@@ -57,10 +62,19 @@ function localizedHtml(response: Response, locale: Locale): Response {
       },
     })
     .transform(response);
+
+  const headers = new Headers(rewritten.headers);
+  headers.set('x-yuzhi-locale-metadata', meta.htmlLang);
+  return new Response(rewritten.body, {
+    status: rewritten.status,
+    statusText: rewritten.statusText,
+    headers,
+  });
 }
 
-// Cloudflare Worker (with Static Assets): APIs run here; the English route also
-// runs Worker-first so crawlers/social previews receive localized head metadata.
+// Cloudflare Worker (with Static Assets): APIs run here; both public locale
+// entry routes run Worker-first so raw crawler/social metadata comes from the
+// shared locale policy rather than the static HTML fallback.
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -70,8 +84,9 @@ export default {
     }
 
     const asset = await env.ASSETS.fetch(request);
-    const requestedLocale = localeFromPath(url.pathname);
-    if (requestedLocale !== 'en' || !asset.headers.get('content-type')?.includes('text/html')) return asset;
+    const requestedLocale = localeFromPath(url.pathname)
+      ?? (url.pathname === '/' ? DEFAULT_LOCALE : null);
+    if (!requestedLocale || !asset.headers.get('content-type')?.includes('text/html')) return asset;
     return localizedHtml(asset, requestedLocale);
   },
 } satisfies ExportedHandler<Env>;

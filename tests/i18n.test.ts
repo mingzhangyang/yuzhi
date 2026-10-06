@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatCalendarDay, formatFullDate, getLocale, initI18n, message, resolveLocale, setLocale } from '../src/i18n';
-import { canonicalUrl, localeFromPath, localeMetadata, localePath } from '../shared/locale';
+import { canonicalUrl, localeFromPath, localeMetadata, localePath, socialImageUrl } from '../shared/locale';
 import { ActionError } from '../src/actions/shared';
 import { fmtDay, relDay, weekday } from '../src/lib/date';
 
@@ -28,6 +28,10 @@ describe('i18n', () => {
     expect(localePath('en')).toBe('/en/');
     expect(canonicalUrl('en')).toBe('https://yuzhi.orangely.xyz/en/');
     expect(localeMetadata.en.ogLocale).toBe('en_US');
+    expect(socialImageUrl('zh-CN')).toBe('https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg');
+    expect(socialImageUrl('en')).toBe('https://yuzhi.orangely.xyz/brand/yuzhi-og-en.png');
+    expect(localeMetadata['zh-CN'].socialImageType).toBe('image/jpeg');
+    expect(localeMetadata.en.socialImageType).toBe('image/png');
   });
 
   it('lets an explicit English route win over stored/browser rollout policy', () => {

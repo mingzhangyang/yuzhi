@@ -14,6 +14,8 @@ export interface LocaleMetadata {
   siteName: string;
   socialDescription: string;
   imageAlt: string;
+  socialImagePath: string;
+  socialImageType: string;
   manifestHref: string;
 }
 
@@ -29,6 +31,8 @@ export const localeMetadata: Record<Locale, LocaleMetadata> = {
     siteName: '屿志 Yuzhi',
     socialDescription: '把日记、待办与日程，种成一座会生长的小岛。',
     imageAlt: '屿志 Yuzhi：把日记、待办与日程，种成一座会生长的小岛',
+    socialImagePath: '/brand/yuzhi-og.jpg',
+    socialImageType: 'image/jpeg',
     manifestHref: '/site.webmanifest',
   },
   en: {
@@ -42,6 +46,8 @@ export const localeMetadata: Record<Locale, LocaleMetadata> = {
     siteName: 'Yuzhi',
     socialDescription: 'Turn your journal, Todos, and schedule into a living island shaped by your real life.',
     imageAlt: 'Yuzhi: turn your journal, Todos, and schedule into a growing island',
+    socialImagePath: '/brand/yuzhi-og-en.png',
+    socialImageType: 'image/png',
     manifestHref: '/site-en.webmanifest',
   },
 };
@@ -68,6 +74,10 @@ export function canonicalUrl(locale: Locale): string {
   return `${SITE_ORIGIN}${localePath(locale)}`;
 }
 
+export function socialImageUrl(locale: Locale): string {
+  return `${SITE_ORIGIN}${localeMetadata[locale].socialImagePath}`;
+}
+
 export function structuredDataForLocale(locale: Locale): Record<string, unknown> {
   const meta = localeMetadata[locale];
   return {
@@ -80,6 +90,6 @@ export function structuredDataForLocale(locale: Locale): Record<string, unknown>
     applicationCategory: 'ProductivityApplication',
     operatingSystem: 'Web',
     inLanguage: meta.htmlLang,
-    image: `${SITE_ORIGIN}/brand/yuzhi-og.jpg`,
+    image: socialImageUrl(locale),
   };
 }
