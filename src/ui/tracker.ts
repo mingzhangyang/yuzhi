@@ -393,7 +393,7 @@ export class Tracker {
       ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">${esc(tr('tracker.deleteSchedule'))}</button></div>` : ''}
       <div class="sect">版本历史 <small>${versions.length}</small></div>
       ${versionRows || '<p class="empty">还没有版本快照。</p>'}
-      <div class="sect">一生之书 <small>${life.length}</small></div>
+      <div class="sect">${esc(tr('common.history'))} <small>${life.length}</small></div>
       ${lifeList(life, today)}`;
     return [html, snapshot.title, current ? tr('tracker.scheduleLifeBook') : tr('tracker.deletedHistory')];
   }
@@ -409,51 +409,51 @@ export class Tracker {
     const stage = v?.stage ?? 0;
     const chips = [
       active
-        ? `<span class="chip ${stage ? 'warn' : 'ok'}">${STAGE_NAMES[stage]}</span>`
+        ? `<span class="chip ${stage ? 'warn' : 'ok'}">${esc(stageName(stage))}</span>`
         : p.status === 'closed'
-          ? '<span class="chip warn">已关闭 · 未竟之书</span>'
-          : `<span class="chip ok">已落成 · ${p.resting === 'landmark' ? '海岸上的地标' : '灯塔里的档案'}</span>`,
-      v?.postponePenalty ? '<span class="chip warn">有事连续推迟 3 次以上</span>' : '',
-      active && stage === 3 ? '<span class="chip warn">任务可能放弃</span>' : '',
-      `<span class="chip">${houseCount(s, p.id)} 间房</span>`,
+          ? `<span class="chip warn">${esc(tr('tracker.closedUnfinished'))}</span>`
+          : `<span class="chip ok">${esc(tr(p.resting === 'landmark' ? 'tracker.completedLandmark' : 'tracker.completedArchive'))}</span>`,
+      v?.postponePenalty ? `<span class="chip warn">${esc(tr('tracker.postponePenalty'))}</span>` : '',
+      active && stage === 3 ? `<span class="chip warn">${esc(tr('tracker.mayAbandon'))}</span>` : '',
+      `<span class="chip">${esc(tr('tracker.houses', { count: houseCount(s, p.id) }))}</span>`,
     ].join('');
     const progressAt = lastProgressAt(s.data, p.id);
     const since = progressAt ? diffDays(progressAt, today) : null;
     const taskRows = open
       .map((t) => {
         const late = t.scheduledFor && t.scheduledFor < today;
-        const meta = [t.scheduledFor ? relDay(t.scheduledFor, today) + (late ? ' · 过期' : '') : '无日期', t.postponeCount ? `推迟 ${t.postponeCount} 次` : '', stage === 3 ? '可能放弃' : ''].filter(Boolean).join(' · ');
-        return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="今天做完了" aria-label="今天做完了">✓</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="改日期" aria-label="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="不重要了" aria-label="不重要了">✕</button></div>` : ''}</div>`;
+        const meta = [t.scheduledFor ? relDay(t.scheduledFor, today) + (late ? ' · ' + tr('tracker.overdue') : '') : tr('tracker.noDate'), t.postponeCount ? tr('tracker.postponedCount', { count: t.postponeCount }) : '', stage === 3 ? tr('tracker.mayAbandon') : ''].filter(Boolean).join(' · ');
+        return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="${esc(tr('tracker.doneToday'))}" aria-label="${esc(tr('tracker.doneToday'))}">✓</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="${esc(tr('tracker.reschedule'))}" aria-label="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="${esc(tr('tracker.notImportant'))}" aria-label="${esc(tr('tracker.notImportant'))}">✕</button></div>` : ''}</div>`;
       })
       .join('');
     const life = lifeBookEntries(s.data, { type: 'project', id: p.id }, stageLifeEntries(s.data, today));
     const html = `
       ${this.back$()}
-      <div class="who"><div class="emblem">${emblem(roofOf(p.islandSlot), active ? stage : 2)}</div><div><div class="fname">${esc(p.name)}</div><div class="fmeta">${fmtDay(p.createdAt)}立项 · 已 ${diffDays(p.createdAt, today)} 天${p.closedAt ? ` · ${fmtDay(p.closedAt)}关闭` : ''}${p.doneAt ? ` · ${fmtDay(p.doneAt)}落成` : ''}</div></div></div>
+      <div class="who"><div class="emblem">${emblem(roofOf(p.islandSlot), active ? stage : 2)}</div><div><div class="fname">${esc(p.name)}</div><div class="fmeta">${esc(tr('tracker.projectStarted', { date: fmtDay(p.createdAt), days: diffDays(p.createdAt, today), closed: p.closedAt ? tr('tracker.projectClosedAt', { date: fmtDay(p.closedAt) }) : '', done: p.doneAt ? tr('tracker.projectDoneAt', { date: fmtDay(p.doneAt) }) : '' }))}</div></div></div>
       <div class="chips">${chips}</div>
       ${
         p.status === 'done'
-          ? `<div class="sect">一生之书小结</div>${summaryHTML(summarize(s.data, p, p.doneAt ?? today), true)}`
-          : `<div class="nums"><div><b>${open.length}</b><span>未完成</span></div><div><b>${done.length}</b><span>已完成</span></div><div><b>${since ?? '—'}</b><span>距上次推进（天）</span></div></div>`
+          ? `<div class="sect">${esc(tr('tracker.lifeSummary'))}</div>${summaryHTML(summarize(s.data, p, p.doneAt ?? today), true)}`
+          : `<div class="nums"><div><b>${open.length}</b><span>${esc(tr('tracker.incomplete'))}</span></div><div><b>${done.length}</b><span>${esc(tr('tracker.completed'))}</span></div><div><b>${since ?? '—'}</b><span>${esc(tr('tracker.sinceProgressDays'))}</span></div></div>`
       }
-      ${p.closeReason ? `<p class="hint">停下的原因：${esc(p.closeReason)}</p>` : ''}
-      ${active && !open.length && done.length ? `<div class="ready"><span>村里的事都做完了。要举行落成仪式吗？</span><button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">落成仪式</button></div>` : ''}
-      ${p.status === 'done' ? '' : `<div class="sect">住在这里的任务 <small>${open.length}</small></div>`}
-      ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="添加任务…" autocomplete="off" aria-label="新任务">${dateSelect('pdate', today, { current: today, withNone: true, mode: 'task' })}<button class="btn primary">添加</button></form>` : ''}
-      ${p.status === 'done' ? '' : `<div>${taskRows || (active ? '<p class="empty">村里还没有人。添加一件要做的事吧。</p>' : '')}</div>`}
-      ${done.length ? `<details class="hint"><summary>已完成 ${done.length} 件</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
-      <div class="sect">一生之书 <small>${life.length} 条</small></div>
+      ${p.closeReason ? `<p class="hint">${esc(tr('tracker.stopReason', { reason: p.closeReason }))}</p>` : ''}
+      ${active && !open.length && done.length ? `<div class="ready"><span>${esc(tr('tracker.readyCeremony'))}</span><button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">${esc(tr('tracker.ceremony'))}</button></div>` : ''}
+      ${p.status === 'done' ? '' : `<div class="sect">${esc(tr('tracker.tasksHere'))} <small>${open.length}</small></div>`}
+      ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="${esc(tr('tracker.addTaskPlaceholder'))}" autocomplete="off" aria-label="${esc(tr('tracker.newTaskAria'))}">${dateSelect('pdate', today, { current: today, withNone: true, mode: 'task' })}<button class="btn primary">${esc(tr('common.add'))}</button></form>` : ''}
+      ${p.status === 'done' ? '' : `<div>${taskRows || (active ? `<p class="empty">${esc(tr('tracker.villageEmpty'))}</p>` : '')}</div>`}
+      ${done.length ? `<details class="hint"><summary>${esc(tr('tracker.completedTasks', { count: done.length }))}</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
+      <div class="sect">${esc(tr('common.history'))} <small>${life.length}</small></div>
       ${lifeList(life, today)}
       <div class="btnrow">
-        ${active ? `<button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">完成项目 · 落成仪式</button>` : ''}
-        ${active ? `<button class="btn small" data-act="rename" data-id="${esc(p.id)}">改名</button>` : ''}
-        ${active && stage >= 1 ? `<button class="btn small" data-act="prompt" data-id="${esc(p.id)}">重新启动 / 缩小规模</button>` : ''}
-        ${active ? `<button class="btn small danger" data-act="close" data-id="${esc(p.id)}">正式关闭</button>` : ''}
-        ${p.status === 'closed' ? `<button class="btn small" data-act="reopen" data-id="${esc(p.id)}">重新立起</button>` : ''}
-        ${p.status === 'done' && p.resting === 'landmark' ? `<button class="btn small" data-act="rest" data-to="archive" data-id="${esc(p.id)}">收进档案馆</button>` : ''}
-        ${p.status === 'done' && p.resting !== 'landmark' ? `<button class="btn small primary" data-act="rest" data-to="landmark" data-id="${esc(p.id)}">重新立为地标</button>` : ''}
+        ${active ? `<button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">${esc(tr('tracker.completeProject'))}</button>` : ''}
+        ${active ? `<button class="btn small" data-act="rename" data-id="${esc(p.id)}">${esc(tr('tracker.rename'))}</button>` : ''}
+        ${active && stage >= 1 ? `<button class="btn small" data-act="prompt" data-id="${esc(p.id)}">${esc(tr('tracker.restartTrim'))}</button>` : ''}
+        ${active ? `<button class="btn small danger" data-act="close" data-id="${esc(p.id)}">${esc(tr('tracker.closeProject'))}</button>` : ''}
+        ${p.status === 'closed' ? `<button class="btn small" data-act="reopen" data-id="${esc(p.id)}">${esc(tr('tracker.reopen'))}</button>` : ''}
+        ${p.status === 'done' && p.resting === 'landmark' ? `<button class="btn small" data-act="rest" data-to="archive" data-id="${esc(p.id)}">${esc(tr('tracker.moveArchive'))}</button>` : ''}
+        ${p.status === 'done' && p.resting !== 'landmark' ? `<button class="btn small primary" data-act="rest" data-to="landmark" data-id="${esc(p.id)}">${esc(tr('tracker.makeLandmarkAgain'))}</button>` : ''}
       </div>`;
-    return [html, p.name, active ? STAGE_NAMES[stage] + ` · ${open.length} 件未完成` : p.status === 'done' ? (p.resting === 'landmark' ? '海岸上的地标' : '灯塔里的档案') : '已关闭'];
+    return [html, p.name, active ? stageName(stage) + ` · ${tr('tracker.openTasks', { count: open })}` : p.status === 'done' ? tr(p.resting === 'landmark' ? 'tracker.landmark' : 'tracker.archiveRecord') : tr('tracker.closed')];
   }
 
   private task(t: TaskView): [string, string, string] {
@@ -461,24 +461,24 @@ export class Tracker {
     const today = s.today();
     const p = s.project(t.projectId);
     const late = t.status === 'open' && t.scheduledFor && t.scheduledFor < today;
-    const statusChip = t.status === 'open' ? `<span class="chip ok">进行中</span>` : t.status === 'done' ? `<span class="chip ok">已完成</span>` : `<span class="chip">已放下</span>`;
+    const statusChip = t.status === 'open' ? `<span class="chip ok">${esc(tr('tracker.inProgress'))}</span>` : t.status === 'done' ? `<span class="chip ok">${esc(tr('tracker.completed'))}</span>` : `<span class="chip">${esc(tr('tracker.dropped'))}</span>`;
     const entries = s.data.entries.filter((e) => e.itemType === 'task' && e.itemId === t.id);
     const life = lifeBookEntries(s.data, { type: 'task', id: t.id }, stageLifeEntries(s.data, today));
     const projOpts = s.activeProjects().map((x) => `<option value="${esc(x.id)}"${x.id === t.projectId ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
     const html = `
-      ${this.back$(p ? p.name : '码头')}
-      <div class="who"><div class="emblem" style="background:${p ? roofOf(p.islandSlot) + '22' : 'var(--chip)'}">${p ? '🧑‍🌾' : '⛵'}</div><div><div class="fname">${esc(t.title)}</div><div class="fmeta">${p ? `住在「${esc(p.name)}」` : '停在码头，等你安排'} · ${fmtDay(t.createdAt)}来到岛上</div></div></div>
-      <div class="chips">${statusChip}${t.scheduledFor ? `<span class="chip ${late ? 'warn' : ''}">${relDay(t.scheduledFor, today)}${late ? ' · 过期' : ''}</span>` : '<span class="chip">无日期</span>'}${t.postponeCount ? `<span class="chip warn">推迟 ${t.postponeCount} 次</span>` : ''}</div>
-      <div class="nums"><div><b>${entries.filter((e) => e.outcome !== 'skipped').length}</b><span>做过</span></div><div><b>${entries.filter((e) => e.outcome === 'skipped').length}</b><span>没做</span></div><div><b>${diffDays(t.createdAt, today)}</b><span>来岛天数</span></div></div>
+      ${this.back$(p ? p.name : tr('tracker.dock'))}
+      <div class="who"><div class="emblem" style="background:${p ? roofOf(p.islandSlot) + '22' : 'var(--chip)'}">${p ? '🧑‍🌾' : '⛵'}</div><div><div class="fname">${esc(t.title)}</div><div class="fmeta">${p ? esc(tr('tracker.livesIn', { name: p.name })) : esc(tr('tracker.waitingDock'))} · ${esc(tr('tracker.arrivedAt', { date: fmtDay(t.createdAt) }))}</div></div></div>
+      <div class="chips">${statusChip}${t.scheduledFor ? `<span class="chip ${late ? 'warn' : ''}">${relDay(t.scheduledFor, today)}${late ? ' · ' + esc(tr('tracker.overdue')) : ''}</span>` : `<span class="chip">${esc(tr('tracker.noDate'))}</span>`}${t.postponeCount ? `<span class="chip warn">${esc(tr('tracker.postponedCount', { count: t.postponeCount }))}</span>` : ''}</div>
+      <div class="nums"><div><b>${entries.filter((e) => e.outcome !== 'skipped').length}</b><span>${esc(tr('tracker.did'))}</span></div><div><b>${entries.filter((e) => e.outcome === 'skipped').length}</b><span>${esc(tr('tracker.didNot'))}</span></div><div><b>${diffDays(t.createdAt, today)}</b><span>${esc(tr('tracker.daysOnIsland'))}</span></div></div>
       ${
         t.status === 'open'
-          ? `<form class="add" data-form="tedit" data-id="${esc(t.id)}"><select name="tproj" aria-label="所属村落"><option value="">停在码头</option>${projOpts}</select>${dateSelect('tdate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small">保存</button></form>
-             <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${esc(t.id)}">今天做完了</button>` : ''}<button class="btn small" data-act="trename" data-id="${esc(t.id)}">改名</button><button class="btn small" data-act="drop" data-id="${esc(t.id)}">不重要了</button></div>`
+          ? `<form class="add" data-form="tedit" data-id="${esc(t.id)}"><select name="tproj" aria-label="${esc(tr('tracker.projectVillageAria'))}"><option value="">${esc(tr('tracker.dockOption'))}</option>${projOpts}</select>${dateSelect('tdate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small">${esc(tr('common.save'))}</button></form>
+             <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${esc(t.id)}">${esc(tr('tracker.doneToday'))}</button>` : ''}<button class="btn small" data-act="trename" data-id="${esc(t.id)}">改名</button><button class="btn small" data-act="drop" data-id="${esc(t.id)}">${esc(tr('tracker.notImportant'))}</button></div>`
           : ''
       }
-      <div class="sect">一生之书</div>
+      <div class="sect">${esc(tr('common.history'))}</div>
       ${lifeList(life, today)}`;
-    return [html, t.title, p ? p.name : '码头'];
+    return [html, t.title, p ? p.name : tr('tracker.dock')];
   }
 
   private dock(): [string, string, string] {
@@ -489,7 +489,7 @@ export class Tracker {
     const projOpts = s.activeProjects().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const shipRows = ships
       .map(
-        (t) => `<form class="ship" data-form="arrange" data-id="${esc(t.id)}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="住进哪个村落">${projOpts || '<option value="">（先建一个村落）</option>'}</select>${dateSelect('adate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small primary"${projOpts ? '' : ' disabled'}>安排</button><button type="button" class="btn small" data-act="decline" data-id="${esc(t.id)}">婉拒</button></div></form>`,
+        (t) => `<form class="ship" data-form="arrange" data-id="${esc(t.id)}"><b>⛵ ${esc(t.title)}</b><div class="ctl"><select name="aproj" aria-label="${esc(tr('tracker.villageAria'))}">${projOpts || `<option value="">${esc(tr('tracker.buildVillageFirst'))}</option>`}</select>${dateSelect('adate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small primary"${projOpts ? '' : ' disabled'}>${esc(tr('tracker.arrange'))}</button><button type="button" class="btn small" data-act="decline" data-id="${esc(t.id)}">${esc(tr('tracker.decline'))}</button></div></form>`,
       )
       .join('');
     const ints = interruptions(s.data).sort((a, b) => b.date.localeCompare(a.date));
@@ -499,23 +499,23 @@ export class Tracker {
     const topP = [...byProj.entries()].sort((a, b) => b[1] - a[1])[0];
     const html = `
       ${this.back$()}
-      <div class="ptitle" style="margin-top:8px">码头 <small>${ships.length} 船</small></div>
-      <p class="pdesc">新任务乘船停在这里。决定它住进哪个村落、排在什么时候，或者婉拒。</p>
-      <form class="add" data-form="quick"><input name="quick" placeholder="又来了一件事…" autocomplete="off" aria-label="新任务"><input type="hidden" name="qproj" value=""><button class="btn primary">靠岸</button></form>
-      ${shipRows || '<p class="empty">码头空着，没有待安排的船。</p>'}
-      <div class="sect">过期未完成 <small>${overdue.length}</small></div>
+      <div class="ptitle" style="margin-top:8px">${esc(tr('tracker.dock'))} <small>${esc(tr('tracker.dockShips', { count: ships.length }))}</small></div>
+      <p class="pdesc">${esc(tr('tracker.dockDesc'))}</p>
+      <form class="add" data-form="quick"><input name="quick" placeholder="${esc(tr('tracker.anotherThing'))}" autocomplete="off" aria-label="${esc(tr('tracker.newTaskAria'))}"><input type="hidden" name="qproj" value=""><button class="btn primary">${esc(tr('tracker.land'))}</button></form>
+      ${shipRows || `<p class="empty">${esc(tr('tracker.noShips'))}</p>`}
+      <div class="sect">${esc(tr('tracker.overdueIncomplete'))} <small>${overdue.length}</small></div>
       ${
         overdue
           .map((t) => {
             const p = s.project(t.projectId);
-            return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · 原定${relDay(t.scheduledFor!, today)}</span></div><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">排到今天</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="改日期" title="改日期">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="不重要了" title="不重要了">✕</button></div></div>`;
+            return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · ${esc(tr('tracker.originally', { date: relDay(t.scheduledFor!, today) }))}</span></div><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">${esc(tr('tracker.toToday'))}</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.reschedule'))}" title="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.notImportant'))}" title="${esc(tr('tracker.notImportant'))}">✕</button></div></div>`;
           })
-          .join('') || '<p class="empty">没有过期的事。</p>'
+          .join('') || `<p class="empty">${esc(tr('tracker.noOverdue'))}</p>`
       }
-      <div class="sect">打断记录 <small>近 7 天 ${week.length} 次</small></div>
-      ${week.length && topP ? `<p class="hint">最近的打断多落在${topP[0] ? `「${esc(s.project(topP[0])?.name ?? '已关闭的项目')}」` : '杂务'}（${topP[1]} 次）。</p>` : ''}
-      ${ints.length ? `<ol class="life">${ints.slice(0, 30).map((i) => `<li><time>${esc(relDay(i.date, today))}</time><span>${esc(i.title)}${i.projectId ? ` · ${esc(s.project(i.projectId)?.name ?? '')}` : ''}</span></li>`).join('')}</ol>` : '<p class="empty">还没有被打断的记录。</p>'}`;
-    return [html, '码头', `${ships.length} 船待安排`];
+      <div class="sect">${esc(tr('tracker.interruptions'))} <small>${esc(tr('tracker.last7Days', { count: week.length }))}</small></div>
+      ${week.length && topP ? `<p class="hint">${esc(topP[0] ? tr('tracker.interruptionHintProject', { name: s.project(topP[0])?.name ?? tr('common.closedProject'), count: topP[1] }) : tr('tracker.interruptionHintChores', { count: topP[1] }))}</p>` : ''}
+      ${ints.length ? `<ol class="life">${ints.slice(0, 30).map((i) => `<li><time>${esc(relDay(i.date, today))}</time><span>${esc(i.title)}${i.projectId ? ` · ${esc(s.project(i.projectId)?.name ?? '')}` : ''}</span></li>`).join('')}</ol>` : `<p class="empty">${esc(tr('tracker.noInterruptions'))}</p>`}`;
+    return [html, tr('tracker.dock'), tr('tracker.dockSub', { count: ships.length })];
   }
 
   private granary(): [string, string, string] {
@@ -525,13 +525,13 @@ export class Tracker {
     const evs = s.data.events.filter((e) => !e.allDay && dateOfStamp(e.start) === today).sort((a, b) => a.start.localeCompare(b.start));
     const html = `
       ${this.back$()}
-      <div class="ptitle" style="margin-top:8px">粮仓 <small>今天的精力和时间</small></div>
-      <div class="nums"><div><b>${g.available.toFixed(1)}</b><span>可用（小时）</span></div><div><b>${g.scheduledHours.toFixed(1)}</b><span>日历已排</span></div><div><b>${Math.round(g.factor * 100)}%</b><span>精力</span></div></div>
-      <p class="hint">可用时间 = 工作时段（${esc(s.data.settings.workStart)}–${esc(s.data.settings.workEnd)}）− 日历上已排的时间。近 7 天每有一次「没精力」，建议容量下调一成${g.noEnergy ? `，现在是 ${g.noEnergy} 次` : ''}。</p>
-      <div class="sect">今天的日历 <small>${evs.length}</small></div>
-      ${evs.map((e) => `<div class="task"><div class="tt"><b>${esc(e.title)}</b><span>${timeOf(e.start)}–${timeOf(e.end)} · ${esc(e.projectId === CHORES ? '杂务' : s.project(e.projectId)?.name ?? '未归类')}</span></div></div>`).join('') || '<p class="empty">今天日历上没有安排。</p>'}
-      <div class="btnrow"><button class="btn small" data-act="settings">调整工作时段</button></div>`;
-    return [html, '粮仓', `可用 ${g.available.toFixed(1)} 小时`];
+      <div class="ptitle" style="margin-top:8px">${esc(tr('tracker.granary'))} <small>${esc(tr('tracker.granarySubhead'))}</small></div>
+      <div class="nums"><div><b>${g.available.toFixed(1)}</b><span>${esc(tr('tracker.availableHours'))}</span></div><div><b>${g.scheduledHours.toFixed(1)}</b><span>${esc(tr('tracker.scheduledHours'))}</span></div><div><b>${Math.round(g.factor * 100)}%</b><span>${esc(tr('tracker.energy'))}</span></div></div>
+      <p class="hint">${esc(tr('tracker.granaryHint', { start: s.data.settings.workStart, end: s.data.settings.workEnd, extra: g.noEnergy ? tr('tracker.granaryHintExtra', { count: g.noEnergy }) : '' }))}</p>
+      <div class="sect">${esc(tr('tracker.todayCalendar'))} <small>${evs.length}</small></div>
+      ${evs.map((e) => `<div class="task"><div class="tt"><b>${esc(e.title)}</b><span>${timeOf(e.start)}–${timeOf(e.end)} · ${esc(e.projectId === CHORES ? tr('common.chores') : s.project(e.projectId)?.name ?? tr('common.unclassified'))}</span></div></div>`).join('') || `<p class="empty">${esc(tr('tracker.noCalendarToday'))}</p>`}
+      <div class="btnrow"><button class="btn small" data-act="settings">${esc(tr('tracker.adjustHours'))}</button></div>`;
+    return [html, tr('tracker.granary'), tr('tracker.availableSub', { hours: g.available.toFixed(1) })];
   }
 
   private coastRow(): string {
@@ -539,7 +539,7 @@ export class Tracker {
     const marks = s.data.projects.filter((p) => p.status === 'done' && p.resting === 'landmark').length;
     const books = s.data.projects.filter((p) => (p.status === 'done' && p.resting !== 'landmark') || p.status === 'closed').length;
     if (!marks && !books) return '';
-    return `<div class="sect">海岸与灯塔</div><button class="row" data-act="archive"><i class="sw" style="background:#c8473a"></i><span class="tx"><b>${marks} 座地标 · 灯塔里 ${books} 本书</b><span>完成和关闭的项目都在这里，可以按年份翻看</span></span><span class="end">›</span></button>`;
+    return `<div class="sect">${esc(tr('tracker.coastLighthouse'))}</div><button class="row" data-act="archive"><i class="sw" style="background:#c8473a"></i><span class="tx"><b>${esc(tr('tracker.coastMeta', { marks, books }))}</b><span>${esc(tr('tracker.coastHint'))}</span></span><span class="end">›</span></button>`;
   }
 
   /** 档案馆：山顶的灯塔。地标、落成之书（按年份）、未竟之书 */
@@ -560,21 +560,21 @@ export class Tracker {
       }
       return [...years.entries()]
         .sort((a, b) => b[0].localeCompare(a[0]))
-        .map(([y, list]) => `<div class="year">${y} 年 <small>${list.length} 本</small></div><div class="rows">${list.sort((a, b) => (dateOf(b) ?? '').localeCompare(dateOf(a) ?? '')).map((p) => row(p, meta(p))).join('')}</div>`)
+        .map(([y, list]) => `<div class="year">${esc(tr('tracker.yearBooks', { year: y, count: list.length }))}</div><div class="rows">${list.sort((a, b) => (dateOf(b) ?? '').localeCompare(dateOf(a) ?? '')).map((p) => row(p, meta(p))).join('')}</div>`)
         .join('');
     };
-    const span = (p: Project, end?: string) => (end ? `${fmtDay(p.createdAt)}–${fmtDay(end)} · 用时 ${diffDays(p.createdAt, end) + 1} 天` : fmtDay(p.createdAt) + ' 立项');
+    const span = (p: Project, end?: string) => (end ? tr('tracker.projectSpan', { start: fmtDay(p.createdAt), end: fmtDay(end), days: diffDays(p.createdAt, end) + 1 }) : tr('tracker.projectStartOnly', { date: fmtDay(p.createdAt) }));
     const html = `
       ${this.back$()}
-      <div class="ptitle" style="margin-top:8px">山顶的灯塔 <small>档案馆</small></div>
-      <p class="pdesc">完成的项目立在海岸上，或收在这里；正式关闭的项目放在「未竟之书」，记着它为什么停下。</p>
-      <div class="sect">海岸上的地标 <small>${marks.length}</small></div>
-      <div class="rows">${marks.map((p) => row(p, span(p, p.doneAt))).join('') || '<p class="empty">还没有地标。完成一个项目时可以把它立在海岸上。</p>'}</div>
-      <div class="sect">落成之书 <small>${books.length}</small></div>
-      ${byYear(books, (p) => p.doneAt, (p) => span(p, p.doneAt)) || '<p class="empty">书架还空着。</p>'}
-      <div class="sect">未竟之书 <small>${closed.length}</small></div>
-      ${byYear(closed, (p) => p.closedAt, (p) => span(p, p.closedAt) + (p.closeReason ? ' · ' + p.closeReason : '')) || '<p class="empty">没有中途停下的项目。</p>'}`;
-    return [html, '档案馆', `${marks.length} 座地标 · ${books.length + closed.length} 本书`];
+      <div class="ptitle" style="margin-top:8px">${esc(tr('tracker.lighthouse'))} <small>${esc(tr('tracker.archive'))}</small></div>
+      <p class="pdesc">${esc(tr('tracker.archiveDesc'))}</p>
+      <div class="sect">${esc(tr('tracker.landmarks'))} <small>${marks.length}</small></div>
+      <div class="rows">${marks.map((p) => row(p, span(p, p.doneAt))).join('') || `<p class="empty">${esc(tr('tracker.noLandmarks'))}</p>`}</div>
+      <div class="sect">${esc(tr('tracker.completedBooks'))} <small>${books.length}</small></div>
+      ${byYear(books, (p) => p.doneAt, (p) => span(p, p.doneAt)) || `<p class="empty">${esc(tr('tracker.emptyShelf'))}</p>`}
+      <div class="sect">${esc(tr('tracker.unfinishedBooks'))} <small>${closed.length}</small></div>
+      ${byYear(closed, (p) => p.closedAt, (p) => span(p, p.closedAt) + (p.closeReason ? ' · ' + p.closeReason : '')) || `<p class="empty">${esc(tr('tracker.noUnfinished'))}</p>`}`;
+    return [html, tr('tracker.archive'), tr('tracker.archiveSub', { marks: marks.length, books: books.length + closed.length })];
   }
 
   private chores(): [string, string, string] {
@@ -584,10 +584,10 @@ export class Tracker {
     const projOpts = s.activeProjects().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     const html = `
       ${this.back$()}
-      <div class="ptitle" style="margin-top:8px">杂务区 <small>没有归属的日历事件</small></div>
-      <p class="pdesc">这些事件不属于任何项目。如果其实属于某个村落，可以改过去。</p>
-      ${evs.map((e) => `<div class="task"><div class="tt"><b>${esc(e.title)}</b><span>${relDay(dateOfStamp(e.start), today)} ${timeOf(e.start)}</span></div><div class="acts"><select data-act-change="evproj" data-id="${esc(e.id)}" aria-label="改归属"><option value="">杂务</option>${projOpts}</select></div></div>`).join('') || '<p class="empty">最近一周没有杂务。</p>'}`;
-    return [html, '杂务区', `${evs.length} 个事件`];
+      <div class="ptitle" style="margin-top:8px">${esc(tr('tracker.choresArea'))} <small>${esc(tr('tracker.choresSubhead'))}</small></div>
+      <p class="pdesc">${esc(tr('tracker.choresDesc'))}</p>
+      ${evs.map((e) => `<div class="task"><div class="tt"><b>${esc(e.title)}</b><span>${relDay(dateOfStamp(e.start), today)} ${timeOf(e.start)}</span></div><div class="acts"><select data-act-change="evproj" data-id="${esc(e.id)}" aria-label="${esc(tr('tracker.changeOwnershipAria'))}"><option value="">${esc(tr('common.chores'))}</option>${projOpts}</select></div></div>`).join('') || `<p class="empty">${esc(tr('tracker.noRecentChores'))}</p>`}`;
+    return [html, tr('tracker.choresArea'), tr('tracker.eventsCount', { count: evs.length })];
   }
 
   /* ---------------- 交互 ---------------- */
