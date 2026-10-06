@@ -274,19 +274,19 @@ export class Tracker {
     const currentIds = new Set(entries.map((entry) => entry.id));
     const deletedIds = history.subjectIds('diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${history.diaryVersions(entry.id).length} 版</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="删除日记" aria-label="删除 ${esc(fmtDay(entry.date))} 的日记">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(tr('common.version', { count: history.diaryVersions(entry.id).length }))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteScheduleAria', { title: fmtDay(entry.date) }))}">✕</button></div></div>`)
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
         const snapshot = history.diaryLatest(id);
         if (!snapshot) return '';
-        return `<div class="task history-record"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(id)}"><b>${esc(fmtDay(snapshot.date))}</b><span>${esc(snapshot.text.length > 100 ? snapshot.text.slice(0, 99) + '…' : snapshot.text)}</span></button><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
+        return `<div class="task history-record"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(id)}"><b>${esc(fmtDay(snapshot.date))}</b><span>${esc(snapshot.text.length > 100 ? snapshot.text.slice(0, 99) + '…' : snapshot.text)}</span></button><div class="acts"><span class="chip">${esc(tr('tracker.deletedHistory'))}</span></div></div>`;
       })
       .join('');
     return [
-      `${this.back$()}<div class="ptitle">日记 <button class="linkbtn" data-act="new-diary">＋ 写日记</button></div><p class="hint">每篇日记都有自己的一生之书和版本历史。删除正文后，历史仍会留在这里。</p><div class="rows">${rows || '<p class="empty">还没有日记。写下今天发生的事，花园就会记住它。</p>'}</div>${deletedRows ? `<div class="sect">已删除的日记 <small>${deletedIds.length}</small></div><div class="rows">${deletedRows}</div>` : ''}`,
-      '日记',
-      `${entries.length} 篇 · ${deletedIds.length} 篇历史归档`,
+      `${this.back$()}<div class="ptitle">${esc(tr('tracker.diaries'))} <button class="linkbtn" data-act="new-diary">${esc(tr('tracker.writeDiary'))}</button></div><p class="hint">${esc(tr('tracker.diariesHint'))}</p><div class="rows">${rows || `<p class="empty">${esc(tr('tracker.noDiaries'))}</p>`}</div>${deletedRows ? `<div class="sect">${esc(tr('tracker.deletedDiaries'))} <small>${deletedIds.length}</small></div><div class="rows">${deletedRows}</div>` : ''}`,
+      tr('tracker.diaries'),
+      tr('tracker.diariesSub', { count: entries.length, archived: deletedIds.length }),
     ];
   }
 
@@ -296,28 +296,28 @@ export class Tracker {
     const current = s.data.diaries.find((entry) => entry.id === id);
     const history = buildLifeBookIndex(s.data);
     const snapshot = history.diaryLatest(id);
-    if (!snapshot) return [`${this.back$('日记')}<p class="empty">这篇日记没有可读的历史。</p>`, '日记', '历史不可用'];
+    if (!snapshot) return [`${this.back$(tr('tracker.diaries'))}<p class="empty">${esc(tr('tracker.diaryUnavailable'))}</p>`, tr('tracker.diaries'), tr('tracker.historyUnavailable')];
     const versions = history.diaryVersions(id);
     const life = history.entries({ type: 'diary', id });
     const versionRows = versions
       .slice()
       .reverse()
       .map((version, index) => {
-        const label = version.kind === 'created' ? '初版' : `修订 ${versions.length - index - 1}`;
-        return `<details class="revision"><summary>${label} · ${esc(fmtDay(version.recordedOn))}<span>${esc(fmtDay(version.snapshot.date))} 的记录</span></summary><div class="revision-body">${esc(version.snapshot.text).replace(/\n/g, '<br>')}</div></details>`;
+        const label = version.kind === 'created' ? tr('tracker.firstVersion') : tr('tracker.revision', { count: versions.length - index - 1 });
+        return `<details class="revision"><summary>${label} · ${esc(fmtDay(version.recordedOn))}<span>${esc(tr('tracker.recordOf', { date: fmtDay(version.snapshot.date) }))}</span></summary><div class="revision-body">${esc(version.snapshot.text).replace(/\n/g, '<br>')}</div></details>`;
       })
       .join('');
     const html = `
-      ${this.back$('日记')}
-      <div class="who"><div class="emblem" style="background:#9b78a822">✎</div><div><div class="fname">${esc(fmtDay(snapshot.date))} 的日记</div><div class="fmeta">${current ? '正文仍在花园里' : '正文已删除 · 一生之书保留'} · ${versions.length} 个版本</div></div></div>
-      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${current ? '当前日记' : '已删除'}</span><span class="chip">${life.length} 条历史</span></div>
+      ${this.back$(tr('tracker.diaries'))}
+      <div class="who"><div class="emblem" style="background:#9b78a822">✎</div><div><div class="fname">${esc(tr('tracker.diaryOf', { date: fmtDay(snapshot.date) }))}</div><div class="fmeta">${esc(tr(current ? 'tracker.diaryAlive' : 'tracker.diaryDeletedHistory'))} · ${esc(tr('common.versions', { count: versions.length }))}</div></div></div>
+      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentDiary' : 'tracker.deleted'))}</span><span class="chip">${esc(tr('tracker.historyCount', { count: life.length }))}</span></div>
       <div class="journal-body">${esc(snapshot.text).replace(/\n/g, '<br>')}</div>
-      ${current ? `<div class="btnrow"><button class="btn small primary" data-act="edit-diary" data-id="${esc(id)}">编辑</button><button class="btn small danger" data-act="delete-diary" data-id="${esc(id)}">删除正文</button></div>` : ''}
-      <div class="sect">版本历史 <small>${versions.length}</small></div>
-      ${versionRows || '<p class="empty">还没有版本快照。</p>'}
-      <div class="sect">一生之书 <small>${life.length}</small></div>
+      ${current ? `<div class="btnrow"><button class="btn small primary" data-act="edit-diary" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-diary" data-id="${esc(id)}">${esc(tr('tracker.deleteBody'))}</button></div>` : ''}
+      <div class="sect">${esc(tr('common.versionHistory'))} <small>${versions.length}</small></div>
+      ${versionRows || `<p class="empty">${esc(tr('tracker.noVersionSnapshots'))}</p>`}
+      <div class="sect">${esc(tr('common.history'))} <small>${life.length}</small></div>
       ${lifeList(life, today)}`;
-    return [html, '日记的一生之书', current ? fmtDay(snapshot.date) : '已删除 · 历史保留'];
+    return [html, tr('tracker.diaryLifeBook'), current ? fmtDay(snapshot.date) : tr('tracker.deletedHistory')];
   }
 
   private schedules(): [string, string, string] {
@@ -338,14 +338,14 @@ export class Tracker {
         const date = dateOfStamp(event.start);
         const settled = settledIds.has(event.id);
         const where = event.projectId === CHORES
-          ? '杂务 / 生活'
+          ? tr('common.choresLife')
           : event.projectId
-            ? s.project(event.projectId)?.name ?? '已关闭的项目'
-            : '未归类';
+            ? s.project(event.projectId)?.name ?? tr('common.closedProject')
+            : tr('common.unclassified');
         const history = settled
-          ? '<span class="chip">已留入历史</span>'
-          : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="删除日程" aria-label="删除日程 ${esc(event.title)}">✕</button>`;
-        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${historyIndex.scheduleVersions(event.id).length} 版</span>${history}</div></div>`;
+          ? `<span class="chip">${esc(tr('tracker.keptInHistory'))}</span>`
+          : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="${esc(tr('tracker.deleteSchedule'))}" aria-label="${esc(tr('tracker.deleteScheduleAria', { title: event.title }))}">✕</button>`;
+        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${esc(tr('common.version', { count: historyIndex.scheduleVersions(event.id).length }))}</span>${history}</div></div>`;
       })
       .join('');
     const deletedRows = deletedIds
@@ -356,9 +356,9 @@ export class Tracker {
       })
       .join('');
     return [
-      `${this.back$()}<div class="ptitle">本地日程 <button class="linkbtn" data-act="new-schedule">＋ 日程</button></div><p class="hint">本地日程的创建、修改、结算和删除都进入同一本一生之书。</p><div class="rows">${rows || '<p class="empty">还没有自己创建的日程。添加一个安排，它会进入日历与结算。</p>'}</div>${deletedRows ? `<div class="sect">已删除的日程 <small>${deletedIds.length}</small></div><div class="rows">${deletedRows}</div>` : ''}`,
-      '本地日程',
-      `${events.length} 条 · ${deletedIds.length} 条历史归档`,
+      `${this.back$()}<div class="ptitle">${esc(tr('tracker.localSchedules'))} <button class="linkbtn" data-act="new-schedule">${esc(tr('tracker.addSchedule'))}</button></div><p class="hint">${esc(tr('tracker.schedulesHint'))}</p><div class="rows">${rows || `<p class="empty">${esc(tr('tracker.noSchedules'))}</p>`}</div>${deletedRows ? `<div class="sect">${esc(tr('tracker.deletedSchedules'))} <small>${deletedIds.length}</small></div><div class="rows">${deletedRows}</div>` : ''}`,
+      tr('tracker.localSchedules'),
+      tr('tracker.schedulesSub', { count: events.length, archived: deletedIds.length }),
     ];
   }
 
@@ -368,34 +368,34 @@ export class Tracker {
     const current = s.data.events.find((event) => event.id === id && event.sourceId === LOCAL_CALENDAR_SOURCE_ID);
     const history = buildLifeBookIndex(s.data);
     const snapshot = history.scheduleLatest(id);
-    if (!snapshot) return [`${this.back$('本地日程')}<p class="empty">这条日程没有可读的历史。</p>`, '日程', '历史不可用'];
+    if (!snapshot) return [`${this.back$(tr('tracker.localSchedules'))}<p class="empty">${esc(tr('tracker.scheduleUnavailable'))}</p>`, tr('tracker.schedule'), tr('tracker.historyUnavailable')];
     const versions = history.scheduleVersions(id);
     const life = history.entries({ type: 'schedule', id });
     const settled = s.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === id);
     const where = snapshot.projectId === CHORES
-      ? '杂务 / 生活'
+      ? tr('common.choresLife')
       : snapshot.projectId
-        ? s.project(snapshot.projectId)?.name ?? '已关闭的项目'
-        : '未归类';
+        ? s.project(snapshot.projectId)?.name ?? tr('common.closedProject')
+        : tr('common.unclassified');
     const versionRows = versions
       .slice()
       .reverse()
       .map((version, index) => {
-        const label = version.kind === 'created' ? '初版' : `修订 ${versions.length - index - 1}`;
+        const label = version.kind === 'created' ? tr('tracker.firstVersion') : tr('tracker.revision', { count: versions.length - index - 1 });
         const v = version.snapshot;
-        return `<details class="revision"><summary>${label} · ${esc(fmtDay(version.recordedOn))}<span>${esc(fmtDay(v.date))} ${esc(v.start)}–${esc(v.end)}</span></summary><div class="revision-body"><b>${esc(v.title)}</b><br>${esc(v.projectId === CHORES ? '杂务 / 生活' : s.project(v.projectId)?.name ?? '未归类')}</div></details>`;
+        return `<details class="revision"><summary>${label} · ${esc(fmtDay(version.recordedOn))}<span>${esc(fmtDay(v.date))} ${esc(v.start)}–${esc(v.end)}</span></summary><div class="revision-body"><b>${esc(v.title)}</b><br>${esc(v.projectId === CHORES ? tr('common.choresLife') : s.project(v.projectId)?.name ?? tr('common.unclassified'))}</div></details>`;
       })
       .join('');
     const html = `
-      ${this.back$('本地日程')}
+      ${this.back$(tr('tracker.localSchedules'))}
       <div class="who"><div class="emblem" style="background:#7397a722">◷</div><div><div class="fname">${esc(snapshot.title)}</div><div class="fmeta">${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)} · ${esc(where)}</div></div></div>
-      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${current ? '当前日程' : '已删除'}</span>${settled ? '<span class="chip">已有结算事实</span>' : ''}<span class="chip">${versions.length} 个版本</span></div>
-      ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">编辑</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">删除日程</button></div>` : ''}
+      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentSchedule' : 'tracker.deleted'))}</span>${settled ? `<span class="chip">${esc(tr('tracker.settledFact'))}</span>` : ''}<span class="chip">${esc(tr('common.versions', { count: versions.length }))}</span></div>
+      ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">${esc(tr('tracker.deleteSchedule'))}</button></div>` : ''}
       <div class="sect">版本历史 <small>${versions.length}</small></div>
       ${versionRows || '<p class="empty">还没有版本快照。</p>'}
       <div class="sect">一生之书 <small>${life.length}</small></div>
       ${lifeList(life, today)}`;
-    return [html, snapshot.title, current ? '日程的一生之书' : '已删除 · 历史保留'];
+    return [html, snapshot.title, current ? tr('tracker.scheduleLifeBook') : tr('tracker.deletedHistory')];
   }
 
   private project(p: Project): [string, string, string] {
