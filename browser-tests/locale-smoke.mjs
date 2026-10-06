@@ -18,6 +18,12 @@ async function waitForApp(page) {
   await page.waitForFunction(() => Boolean(window.yuzhi?.store), undefined, { timeout });
 }
 
+async function dismissWelcomeIfOpen(page) {
+  if (!(await page.locator('#mdl').isVisible())) return;
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.getElementById('mdl')?.hidden === true, undefined, { timeout });
+}
+
 const browser = await chromium.launch({ channel: channel || undefined, headless: true });
 
 try {
@@ -26,6 +32,7 @@ try {
     const page = await english.newPage();
     await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await waitForApp(page);
+    await dismissWelcomeIfOpen(page);
 
     const initial = await page.evaluate(() => ({
       path: location.pathname,
