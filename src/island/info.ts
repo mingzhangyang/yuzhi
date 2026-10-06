@@ -171,7 +171,7 @@ function timeOf(stamp: string | undefined): string | undefined {
 }
 
 function agendaInfo(target: Extract<InfoTarget, { kind: 'agenda' }>): MapInfo {
-  const chores = target.target === '__chores__';
+  const chores = target.target === 'chores';
   const name = target.targetName ?? (chores ? tr('common.chores') : tr('island.projectSchedule'));
   const consequence = tr(chores ? 'island.choresConsequence' : 'island.projectConsequence');
   const lines: string[] = [];
