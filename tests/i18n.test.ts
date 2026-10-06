@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { formatCalendarDay, getLocale, initI18n, message, resolveLocale, setLocale } from '../src/i18n';
+import { formatCalendarDay, formatFullDate, getLocale, initI18n, message, resolveLocale, setLocale } from '../src/i18n';
+import { ActionError } from '../src/actions/shared';
 import { fmtDay, relDay, weekday } from '../src/lib/date';
 
 describe('i18n', () => {
@@ -37,16 +38,28 @@ describe('i18n', () => {
   it('keeps message keys aligned across locales and interpolates values', () => {
     expect(message('zh-CN', 'chron.count', { count: 3 })).toBe('共 3 条');
     expect(message('en', 'chron.count', { count: 3 })).toBe('3 entries');
+    expect(message('en', 'forms.newTask')).toBe('New Todo');
+    expect(message('en', 'tracker.dock')).toBe('Dock');
+    expect(message('en', 'island.driftBottle')).toBe('Drift bottle');
+    expect(message('en', 'error.taskRequired')).toBe('Write down something to do');
   });
 
   it('formats calendar labels in the active locale without changing stored dates', () => {
     expect(formatCalendarDay('2026-10-03', 'zh-CN')).toBe('10月3日');
     expect(formatCalendarDay('2026-10-03', 'en')).toBe('Oct 3');
+    expect(formatFullDate('2026-10-03', 'zh-CN')).toBe('2026年10月3日');
+    expect(formatFullDate('2026-10-03', 'en')).toBe('Oct 3, 2026');
 
     setLocale('en', false);
     expect(fmtDay('2026-10-03')).toBe('Oct 3');
     expect(weekday('2026-10-03')).toBe('Sat');
     expect(relDay('2026-10-03', '2026-10-03')).toBe('Today');
     expect(relDay('2026-10-02', '2026-10-03')).toBe('Yesterday');
+  });
+
+  it('localizes action errors through semantic message keys', () => {
+    setLocale('en', false);
+    expect(new ActionError('error.taskRequired').message).toBe('Write down something to do');
+    expect(new ActionError('error.villageLimit', { count: 8 }).message).toContain('maximum 8');
   });
 });
