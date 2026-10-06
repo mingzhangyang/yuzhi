@@ -27,8 +27,16 @@ function localizedHtml(response: Response, locale: Locale): Response {
   });
 
   return new HTMLRewriter()
-    .on('html', { element: (element) => element.setAttribute('lang', meta.htmlLang) })
-    .on('title', { element: (element) => element.setInnerContent(meta.title) })
+    .on('html', {
+      element(element) {
+        element.setAttribute('lang', meta.htmlLang);
+      },
+    })
+    .on('title', {
+      element(element) {
+        element.setInnerContent(meta.title);
+      },
+    })
     .on('meta[name="description"]', setContent(meta.description))
     .on('meta[name="application-name"]', setContent(meta.applicationName))
     .on('meta[name="apple-mobile-web-app-title"]', setContent(meta.appleTitle))
