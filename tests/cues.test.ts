@@ -12,6 +12,7 @@ function scene(overrides: Partial<Scene> = {}): Scene {
     now: new Date(2026, 9, 4, 14).getTime(),
     villages: [],
     dockShips: 0,
+    dockLabel: '码头',
     choresCount: 0,
     chores: { count: 0, woodpile: 0, later: 0, ended: 0 },
     cultivation: [],
