@@ -45,6 +45,8 @@ describe('i18n', () => {
     expect(message('zh-CN', 'ceremony.occurrences', { count: 2 })).toBe('2 次');
     expect(message('en', 'ceremony.occurrence', { count: 1 })).toBe('1 occurrence');
     expect(message('en', 'ceremony.occurrences', { count: 2 })).toBe('2 occurrences');
+    expect(message('en', 'common.version', { count: 1 })).toBe('1 version');
+    expect(message('en', 'common.versions', { count: 2 })).toBe('2 versions');
   });
 
   it('formats calendar labels in the active locale without changing stored dates', () => {
