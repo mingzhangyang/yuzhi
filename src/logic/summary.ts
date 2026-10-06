@@ -4,6 +4,7 @@ import { progressWeight } from './metrics';
 import { compareLifeEntries, lifeEntries } from './operations';
 import { stageLifeEntries } from './decay';
 import { taskStates } from './read-model';
+import { t, type MessageKey } from '../i18n';
 
 export interface Blocker {
   text: string;
@@ -35,11 +36,11 @@ export interface ProjectSummary {
   turns: Turn[];
 }
 
-const REASON: Record<SkipReason, string> = {
-  interrupted: '被打断',
-  no_energy: '没精力',
-  not_important: '不重要了',
-  postponed: '推到明天',
+const REASON_KEY: Record<SkipReason, MessageKey> = {
+  interrupted: 'reason.interrupted',
+  no_energy: 'reason.noEnergy',
+  not_important: 'reason.notImportant',
+  postponed: 'reason.postponed',
 };
 
 export function summarize(data: Data, p: Project, end: ISODate): ProjectSummary {
@@ -68,20 +69,20 @@ export function summarize(data: Data, p: Project, end: ISODate): ProjectSummary 
   const blockers: Blocker[] = [...reasons.entries()]
     .filter(([r]) => r !== 'not_important')
     .sort((a, b) => b[1] - a[1])
-    .map(([r, n]) => ({ text: REASON[r], count: n }));
+    .map(([r, n]) => ({ text: t(REASON_KEY[r]), count: n }));
   const worst = [...postponedTask.values()].sort((a, b) => b.n - a.n)[0];
-  if (worst && worst.n >= 2) blockers.push({ text: `「${worst.title}」一再推迟`, count: worst.n });
+  if (worst && worst.n >= 2) blockers.push({ text: t('summary.repeatedPostpone', { title: worst.title }), count: worst.n });
 
   // 关键转折：第一块砖、阶段起伏、重新启动 / 缩小规模、最忙的一天
   const turns: Turn[] = [];
   const days = [...perDay.keys()].sort();
-  if (days.length) turns.push({ date: days[0], text: '第一块砖落进村落' });
+  if (days.length) turns.push({ date: days[0], text: t('summary.firstBrick') });
   for (const l of life) {
     if (l.kind === 'restart' || l.kind === 'trim') turns.push({ date: l.date, text: l.text });
     else if (l.kind === 'stage') turns.push({ date: l.date, text: l.text });
   }
   const busiest = [...perDay.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
-  if (busiest && busiest[1] >= 2) turns.push({ date: busiest[0], text: `最忙的一天，推进了 ${busiest[1]} 件事` });
+  if (busiest && busiest[1] >= 2) turns.push({ date: busiest[0], text: t('summary.busiest', { count: busiest[1] }) });
   turns.sort((a, b) => a.date.localeCompare(b.date));
   // 太长时只留开头、结尾和中间最重要的几条
   const trimmed = turns.length > 7 ? [...turns.slice(0, 3), ...turns.slice(-4)] : turns;
