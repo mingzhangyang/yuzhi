@@ -423,13 +423,13 @@ export function seedDemo(store: Store) {
         return t;
       };
 
-      const write = A.createProject(store, '写一本小书');
+      const write = A.createProject(store, t('forms.demoBook'));
       back(write.id, 24);
-      const team = A.createProject(store, '团队');
+      const team = A.createProject(store, t('forms.demoTeam'));
       back(team.id, 12);
-      const move = A.createProject(store, '搬家');
+      const move = A.createProject(store, t('forms.demoMove'));
       back(move.id, 34);
-      const gym = A.createProject(store, '健身');
+      const gym = A.createProject(store, t('forms.demoFitness'));
       back(gym.id, 10);
 
       const settled = new Map<ISODate, Map<string, A.Decision>>();
@@ -438,38 +438,38 @@ export function seedDemo(store: Store) {
         settled.get(date)!.set(`task|${id}`, d);
       };
       // 写书：荒了两周多，最近四天认真推进
-      for (let k = 4; k >= 1; k--) mark(addDays(today, -k), doneOn(write.id, `第 ${5 - k} 章初稿`, addDays(today, -k)).id, { outcome: k === 2 ? 'partial' : 'done' });
+      for (let k = 4; k >= 1; k--) mark(addDays(today, -k), doneOn(write.id, t('forms.demoChapterDraft', { chapter: 5 - k }), addDays(today, -k)).id, { outcome: k === 2 ? 'partial' : 'done' });
       // 团队：前几天很忙，之后安静了几天
-      for (let k = 11; k >= 9; k--) mark(addDays(today, -k), doneOn(team.id, ['整理需求', '和设计对齐', '写周报'][11 - k], addDays(today, -k)).id, { outcome: 'done' });
-      const tPost = doneOn(team.id, '季度复盘', addDays(today, -2));
+      for (let k = 11; k >= 9; k--) mark(addDays(today, -k), doneOn(team.id, [t('forms.demoRequirements'), t('forms.demoDesignSync'), t('forms.demoWeeklyReport')][11 - k], addDays(today, -k)).id, { outcome: 'done' });
+      const tPost = doneOn(team.id, t('forms.demoQuarterReview'), addDays(today, -2));
       mark(addDays(today, -2), tPost.id, { outcome: 'skipped', reason: 'interrupted' });
       // 健身：没精力的几天不伤害村落
-      mark(addDays(today, -3), doneOn(gym.id, '慢跑 3 公里', addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
+      mark(addDays(today, -3), doneOn(gym.id, t('forms.demoJog'), addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
       for (const [date, m] of [...settled.entries()].sort((a, b) => a[0].localeCompare(b[0]))) A.settleDay(store, date, m);
 
     // 一个已经落成的项目：立在海岸上
-      const photo = A.createProject(store, '整理旧照片');
+      const photo = A.createProject(store, t('forms.demoPhotos'));
       back(photo.id, 40);
       for (let k = 0; k < 7; k++) {
         const d = addDays(today, -38 + k * 4);
-        const t = doneOn(photo.id, ['扫描相册', '去重', '按年份归档', '补写说明', '做一本电子相册', '备份到硬盘', '分享给家人'][k], d);
+        const t = doneOn(photo.id, [t('forms.demoScanAlbums'), t('forms.demoDeduplicate'), t('forms.demoSortByYear'), t('forms.demoAddNotes'), t('forms.demoPhotoBook'), t('forms.demoBackupDrive'), t('forms.demoShareFamily')][k], d);
         A.settleDay(store, d, new Map([[`task|${t.id}`, { outcome: 'done' }]]));
       }
       A.completeProject(store, photo.id, 'landmark');
       store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
       for (const op of store.data.operations) if (op.projectId === photo.id && op.kind === 'project-completed') store.put('operations', { ...op, date: addDays(today, -10) });
-      for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes('整理旧照片')) store.put('chronicle', { ...c, date: addDays(today, -10) });
+      for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes(photo.name)) store.put('chronicle', { ...c, date: addDays(today, -10) });
 
-      A.createTask(store, { title: '第 5 章初稿', projectId: write.id, scheduledFor: today });
-      A.createTask(store, { title: '找出版社聊聊', projectId: write.id });
-      A.createTask(store, { title: '准备周会', projectId: team.id, scheduledFor: today });
-      A.createTask(store, { title: '回复客户邮件', projectId: team.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoChapterDraft', { chapter: 5 }), projectId: write.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoPublisherChat'), projectId: write.id });
+      A.createTask(store, { title: t('forms.demoTeamMeeting'), projectId: team.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoClientReply'), projectId: team.id, scheduledFor: today });
       A.rescheduleTask(store, tPost.id, today);
-      A.createTask(store, { title: '比价搬家公司', projectId: move.id, scheduledFor: addDays(today, -6) });
-      A.createTask(store, { title: '打包书架', projectId: move.id });
-      A.createTask(store, { title: '力量训练', projectId: gym.id, scheduledFor: today });
-      A.createTask(store, { title: '预约牙医' });
-      A.createTask(store, { title: '朋友婚礼的礼物' });
+      A.createTask(store, { title: t('forms.demoMovingQuotes'), projectId: move.id, scheduledFor: addDays(today, -6) });
+      A.createTask(store, { title: t('forms.demoPackShelf'), projectId: move.id });
+      A.createTask(store, { title: t('forms.demoStrength'), projectId: gym.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoDentist') });
+      A.createTask(store, { title: t('forms.demoWeddingGift') });
       A.refreshStages(store);
     });
     toast(t('forms.demoDone'));
