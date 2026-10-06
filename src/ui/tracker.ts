@@ -20,7 +20,7 @@ import { stageLifeEntries } from '../logic/decay';
 import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
 import { cultivationAreas, cultivationState } from '../logic/cultivation';
-import { bindDateSelects, dateSelect, readDate } from './date-select';
+import { bindDateSelects, dateSelect, readDate, restoreDateSelectValue } from './date-select';
 
 export type View =
   | { kind: 'overview' }
@@ -65,6 +65,16 @@ function lifeList(entries: readonly LifeEntry[], today: ISODate, limit = 60) {
   return `<ol class="life">${rows}</ol>`;
 }
 
+export interface TrackerDraftState {
+  view: string;
+  controls: Array<{
+    key: string;
+    value: string;
+    checked?: boolean;
+    selected?: string[];
+  }>;
+}
+
 export class Tracker {
   view: View = { kind: 'overview' };
   private body = $('trackerBody');
@@ -91,6 +101,48 @@ export class Tracker {
     this.view = v;
     this.render();
     this.hooks.onViewChange(v);
+  }
+
+  captureDraftState(): TrackerDraftState {
+    const seen = new Map<string, number>();
+    const controls = [...this.body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input[name], textarea[name], select[name]')]
+      .map((control) => {
+        const base = `${control.tagName}:${control instanceof HTMLInputElement ? control.type : ''}:${control.name}`;
+        const index = seen.get(base) ?? 0;
+        seen.set(base, index + 1);
+        const key = `${base}:${index}`;
+        if (control instanceof HTMLInputElement && (control.type === 'checkbox' || control.type === 'radio')) {
+          return { key, value: control.value, checked: control.checked };
+        }
+        if (control instanceof HTMLSelectElement && control.multiple) {
+          return { key, value: control.value, selected: [...control.options].filter((option) => option.selected).map((option) => option.value) };
+        }
+        return { key, value: control.value };
+      });
+    return { view: JSON.stringify(this.view), controls };
+  }
+
+  restoreDraftState(state: TrackerDraftState): void {
+    if (state.view !== JSON.stringify(this.view)) return;
+    const saved = new Map(state.controls.map((control) => [control.key, control]));
+    const seen = new Map<string, number>();
+    for (const control of this.body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input[name], textarea[name], select[name]')) {
+      const base = `${control.tagName}:${control instanceof HTMLInputElement ? control.type : ''}:${control.name}`;
+      const index = seen.get(base) ?? 0;
+      seen.set(base, index + 1);
+      const draft = saved.get(`${base}:${index}`);
+      if (!draft) continue;
+      if (control instanceof HTMLInputElement && (control.type === 'checkbox' || control.type === 'radio')) {
+        control.checked = Boolean(draft.checked);
+      } else if (control instanceof HTMLSelectElement && control.multiple && draft.selected) {
+        const selected = new Set(draft.selected);
+        for (const option of control.options) option.selected = selected.has(option.value);
+      } else if (control instanceof HTMLSelectElement && control.hasAttribute('data-date-select')) {
+        restoreDateSelectValue(control, draft.value);
+      } else {
+        control.value = draft.value;
+      }
+    }
   }
 
   render() {

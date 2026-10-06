@@ -14,14 +14,16 @@ import * as A from './actions';
 import { autoRefresh } from './calendar';
 import { pendingDays } from './logic/days';
 import { agendaAt } from './logic/agenda';
-import { SEASONS, fmtDay, localDate, relDay, seasonOf, weekday } from './lib/date';
-import { FESTIVAL_NAMES, festivalsOf, weatherOf } from './island/ambience';
+import { fmtDay, localDate, relDay, seasonOf, weekday } from './lib/date';
+import { festivalsOf, weatherOf } from './island/ambience';
 import { unclassifiedGroups } from './logic/classify';
 import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
 import { markDriftSeen } from './ui/drift';
+import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonName, t, toggleLocale, weatherName } from './i18n';
 
 async function boot() {
+  initI18n();
   initModal();
   let settle!: SettleSheet;
   let ceremony!: Ceremony;
@@ -101,9 +103,11 @@ async function boot() {
 
   const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
   const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
-  if (!session.supportsWriterLock && tabNotice) {
-    const text = tabNotice.querySelector('span');
-    if (text) text.textContent = '此浏览器不支持安全的多标签页写入协调；为保护本地数据，此页保持只读。';
+  const tabNoticeText = tabNotice?.querySelector<HTMLElement>('span') ?? null;
+  if (tabNoticeText) {
+    const key = session.supportsWriterLock ? 'shell.readOnly' : 'shell.readOnlyUnsupported';
+    tabNoticeText.dataset.i18n = key;
+    setText(tabNoticeText, t(key));
   }
 
   // Store/UI writability is a projection of coordinator state. No caller keeps
@@ -208,9 +212,18 @@ async function boot() {
     }, 30);
   };
 
+  const renderLegend = () => {
+    $('legend').innerHTML =
+      `<span><i style="background:${ROOFS[0]}"></i>${t('legend.project')}</span><span>${t('legend.todo')}</span><span><i style="background:#a8794a"></i>${t('legend.dock')}</span><span><i style="background:#e2ad2f"></i>${t('legend.granary')}</span><span><i style="background:#d8dcdc"></i>${t('legend.fog')}</span><span>${t('legend.cultivation')}</span><span>${t('legend.agenda')}</span><span>${t('legend.drift')}</span>`;
+  };
+  const syncLanguageButton = () => {
+    const button = $('langBtn');
+    setText(button, t('language.switch'));
+    button.setAttribute('aria-label', t('language.switchAria'));
+  };
   buildStats();
-  $('legend').innerHTML =
-    `<span><i style="background:${ROOFS[0]}"></i>村落 = 项目</span><span>小人 = 没做完的 Todo</span><span><i style="background:#a8794a"></i>船 = 码头上待安排的 Todo</span><span><i style="background:#e2ad2f"></i>粮仓 = 今天的可用时间</span><span><i style="background:#d8dcdc"></i>海雾 = 没结算的日子</span><span>农田 / 果园 / 鱼塘 / 花园 = 现实生活培育区</span><span>告示牌、灯和条幅 = 日程此刻层</span><span>漂流瓶 = 待归类日程</span>`;
+  renderLegend();
+  syncLanguageButton();
 
   renderer = new IslandRenderer($('map') as HTMLCanvasElement, $('mapwrap'));
   let dusk = false;
@@ -313,11 +326,11 @@ async function boot() {
     currentInspection = r;
     const { info } = r;
     const driftAction = r.target?.kind === 'drift'
-      ? `<div class="mi-actions"><button type="button" class="mi-action"${store.isReadOnly ? ' disabled' : ''}>${store.isReadOnly ? '只读标签页无法归类' : '捞起并归类'}</button></div>`
+      ? `<div class="mi-actions"><button type="button" class="mi-action"${store.isReadOnly ? ' disabled' : ''}>${store.isReadOnly ? t('map.driftReadOnly') : t('map.driftClassify')}</button></div>`
       : '';
     setHTML(
       infoBox,
-      `<div class="mi-head"><b>${esc(info.title)}</b>${info.sub ? `<small>${esc(info.sub)}</small>` : ''}<button type="button" class="mi-x" aria-label="关闭">×</button></div>` +
+      `<div class="mi-head"><b>${esc(info.title)}</b>${info.sub ? `<small>${esc(info.sub)}</small>` : ''}<button type="button" class="mi-x" aria-label="${esc(t('common.close'))}">×</button></div>` +
         info.lines.map((l) => `<p>${esc(l)}</p>`).join('') +
         driftAction,
     );
@@ -427,27 +440,36 @@ async function boot() {
 
     const pend = pendingDays(store.data, today);
     const light = lightNow(now, dusk);
+    const listSeparator = getLocale() === 'zh-CN' ? '、' : ', ';
     const allDayText = agenda.allDay.length
-      ? ` · ${agenda.allDay.slice(0, 2).join('、')}${agenda.allDay.length > 2 ? `，另外 ${agenda.allDay.length - 2} 件` : ''}`
+      ? ` · ${agenda.allDay.slice(0, 2).join(listSeparator)}${agenda.allDay.length > 2 ? t('map.allDayMore', { count: agenda.allDay.length - 2 }) : ''}`
       : '';
-    setText($('date'), `${fmtDay(today)} ${weekday(today)} · ${SEASONS[seasonOf(today)]}${allDayText}`);
+    setText($('date'), `${fmtDay(today)} ${weekday(today)} · ${seasonName(seasonOf(today))}${allDayText}`);
     const sb = $('settleBtn');
-    setHTML(sb, `${light === 'day' ? '结算' : '晚间结算'}${pend.length ? `<span class="dot">${pend.length}</span>` : ''}`);
+    setHTML(sb, `${t(light === 'day' ? 'shell.settleDay' : 'shell.settle')}${pend.length ? `<span class="dot">${pend.length}</span>` : ''}`);
     const wb = $('weather');
-    const lt = { day: '白天', dusk: '黄昏', night: '夜里' }[light];
-    const sky = { clear: '晴', cloudy: '多云', rain: '小雨', snow: '小雪' }[weatherOf(today, seasonOf(today))];
-    const fest = festivalsOf(today).map((f) => ' · ' + FESTIVAL_NAMES[f]).join('');
-    setText(wb, `${SEASONS[seasonOf(today)]}季 · ${lt} · ${sky}${fest}${pend.length ? ` · 海雾 ${pend.length} 天` : ''}`);
+    const festival = festivalsOf(today).map((f) => ' · ' + festivalName(f)).join('');
+    const fog = pend.length ? t('map.fogSuffix', { count: pend.length }) : '';
+    setText(wb, t('map.weather', {
+      season: seasonName(seasonOf(today)),
+      light: lightName(light),
+      weather: weatherName(weatherOf(today, seasonOf(today))),
+      festival,
+      fog,
+    }));
     wb.classList.toggle('dusk', light !== 'day' || pend.length > 0);
     $('fogbar').hidden = !pend.length;
-    if (pend.length) setHTML($('fogTxt'), `<b>海雾笼罩着小岛</b><span>${pend.map((d) => esc(relDay(d, today))).join('、')}还没结算。补上记录，雾就散了；超过 3 天会自动归档为「未记录」。</span>`);
+    if (pend.length) {
+      const days = pend.map((d) => relDay(d, today)).join(listSeparator);
+      setHTML($('fogTxt'), `<b>${esc(t('map.fogTitle'))}</b><span>${esc(t('map.fogBody', { days }))}</span>`);
+    }
     const ps = store.activeProjects().length;
-    setText($('mapDesc'), ps ? `${ps} 座村落。Todo、日程、日记和结算会自动培育岛上的四个公共区域。` : '项目是村落；现实里的 Todo、日程、日记和结算会继续把小岛培育起来。');
+    setText($('mapDesc'), ps ? t('map.descActive', { count: ps }) : t('map.descEmpty'));
 
-    // 编年史
+    // 编年史的历史正文仍按原语言保存；PR 2 会把系统叙述迁成语义事件。
     const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
-    setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(c.text)}</span></li>`).join('') : '<li class="empty">每天结算后，这里会自动多一行。</li>');
-    setText($('chronCount'), `共 ${store.data.chronicle.length} 条`);
+    setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(c.text)}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
+    setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
     scheduleAgendaRefresh(agenda, now);
   }
 
@@ -470,7 +492,7 @@ async function boot() {
       A.refreshStages(store);
       return A.archiveOldDays(store);
     });
-    if (archived.length) toast(`${archived.map(fmtDay).join('、')}没有记录，已归档。不算做了，也不算没做。`);
+    if (archived.length) toast(t('daily.archived', { days: archived.map(fmtDay).join(getLocale() === 'zh-CN' ? '、' : ', ') }));
   }
 
   function resumeWriterDuties() {
@@ -483,6 +505,14 @@ async function boot() {
   }
 
   session.setWriterActivation(resumeWriterDuties);
+  onLocaleChange(() => {
+    const trackerDraft = tracker.captureDraftState();
+    syncLanguageButton();
+    buildStats();
+    renderLegend();
+    update();
+    tracker.restoreDraftState(trackerDraft);
+  });
   store.subscribe(update);
   update();
   renderer.start();
@@ -521,6 +551,7 @@ async function boot() {
   $('settleBtn').onclick = () => settle.open();
   $('fogGo').onclick = () => settle.open();
   $('newBtn').onclick = () => openNew(store, 'task', openProjectAfterCreate);
+  $('langBtn').onclick = () => toggleLocale();
   function afterImport() {
     // 导入可能带来早于归档期限的事件日子，马上归档，不要等到明天
     daily();

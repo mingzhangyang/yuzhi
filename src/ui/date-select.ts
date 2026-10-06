@@ -45,20 +45,51 @@ export function readDate(sel: HTMLSelectElement): ISODate | undefined {
   return sel.value && sel.value !== 'other' ? (sel.value as ISODate) : undefined;
 }
 
+export interface DateSelectRestorePlan {
+  addOption: boolean;
+  committedValue: string;
+}
+
+/**
+ * Decide how to restore a drafted date after the select markup is rebuilt.
+ * Custom dates are runtime options, so assigning select.value alone is not
+ * sufficient when the rebuilt select does not contain that option.
+ */
+export function dateSelectRestorePlan(optionValues: readonly string[], value: string): DateSelectRestorePlan {
+  const committedValue = value === 'other' ? '' : value;
+  return {
+    addOption: Boolean(committedValue) && !optionValues.includes(committedValue),
+    committedValue,
+  };
+}
+
+export function restoreDateSelectValue(sel: HTMLSelectElement, value: string): void {
+  const plan = dateSelectRestorePlan([...sel.options].map((option) => option.value), value);
+  if (plan.addOption) {
+    const option = document.createElement('option');
+    option.value = plan.committedValue;
+    option.textContent = fmtDay(plan.committedValue as ISODate);
+    const other = [...sel.options].find((candidate) => candidate.value === 'other') ?? null;
+    sel.insertBefore(option, other);
+  }
+  sel.value = value;
+  sel.dataset.committedDate = plan.committedValue;
+}
+
 export function bindDateSelects(root: ParentNode, today: ISODate) {
   root.querySelectorAll<HTMLSelectElement>('select[data-date-select]').forEach((sel) => {
     // "other" is a transient editing sentinel, never a committed date. Keep
-    // the last real selection separately so canceling the native picker is a
-    // no-op instead of silently changing the date.
-    let committedValue = sel.value === 'other' ? '' : sel.value;
+    // the last real selection on the element so locale-driven DOM restoration
+    // can synchronize the picker state after rebuilding its options.
+    sel.dataset.committedDate = sel.value === 'other' ? (sel.dataset.committedDate ?? '') : sel.value;
 
     sel.addEventListener('change', () => {
       if (sel.value !== 'other') {
-        committedValue = sel.value;
+        sel.dataset.committedDate = sel.value;
         return;
       }
 
-      const previousValue = committedValue;
+      const previousValue = sel.dataset.committedDate ?? '';
       const input = document.createElement('input');
       input.type = 'date';
       input.value = previousValue;
@@ -78,16 +109,8 @@ export function bindDateSelects(root: ParentNode, today: ISODate) {
         }
 
         done = true;
-        if (value) {
-          if (![...sel.options].some((option) => option.value === value)) {
-            sel.add(new Option(fmtDay(value), value), sel.options[sel.options.length - 1]);
-          }
-          sel.value = value;
-          committedValue = value;
-        } else {
-          sel.value = previousValue;
-          committedValue = previousValue;
-        }
+        if (value) restoreDateSelectValue(sel, value);
+        else restoreDateSelectValue(sel, previousValue);
         input.remove();
         sel.hidden = false;
         sel.dispatchEvent(new Event('input', { bubbles: true }));

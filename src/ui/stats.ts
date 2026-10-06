@@ -3,18 +3,19 @@ import { $, setText } from './dom';
 import { backlog, backlogSeries, condition, conditionSeries, granary, progress } from '../logic/metrics';
 import { addDays, hmToMinutes } from '../lib/date';
 import { dateOfStamp } from '../lib/date';
+import { t } from '../i18n';
 
 const STATS = [
-  { k: 'granary', n: '粮仓', u: '小时' },
-  { k: 'progress', n: '推进度', u: '件 / 7天' },
-  { k: 'backlog', n: '积压', u: '件' },
-  { k: 'condition', n: '状态', u: '%' },
+  { k: 'granary', n: 'stats.granary', u: 'stats.hours' },
+  { k: 'progress', n: 'stats.progress', u: 'stats.items7d' },
+  { k: 'backlog', n: 'stats.backlog', u: 'stats.items' },
+  { k: 'condition', n: 'stats.condition', u: null },
 ] as const;
 
 export function buildStats() {
   $('stats').innerHTML = STATS.map(
     (s) =>
-      `<div class="card stat" id="st-${s.k}"><div class="top"><span>${s.n}</span><span id="st-${s.k}-r"></span></div><div class="mid"><div class="val"><span id="st-${s.k}-v"></span><small>${s.u}</small></div><svg viewBox="0 0 72 26" preserveAspectRatio="none" aria-hidden="true"><path id="st-${s.k}-p" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></div><div class="foot" id="st-${s.k}-f"></div></div>`,
+      `<div class="card stat" id="st-${s.k}"><div class="top"><span>${t(s.n)}</span><span id="st-${s.k}-r"></span></div><div class="mid"><div class="val"><span id="st-${s.k}-v"></span><small>${s.u ? t(s.u) : '%'}</small></div><svg viewBox="0 0 72 26" preserveAspectRatio="none" aria-hidden="true"><path id="st-${s.k}-p" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></div><div class="foot" id="st-${s.k}-f"></div></div>`,
   ).join('');
 }
 
@@ -54,18 +55,20 @@ export function updateStats(store: Store) {
   set(
     'granary',
     fmtH(g.available),
-    `工作时段 ${d.settings.workStart}–${d.settings.workEnd}`,
-    g.noEnergy ? `日历已排 ${fmtH(g.scheduledHours)} 小时；近 7 天没精力 ${g.noEnergy} 次，少排一些` : `日历已排 ${fmtH(g.scheduledHours)} 小时（${todayEvents} 个事件），共 ${fmtH((we - ws) / 60)} 小时`,
+    t('stats.workHours', { start: d.settings.workStart, end: d.settings.workEnd }),
+    g.noEnergy
+      ? t('stats.scheduledTired', { scheduled: fmtH(g.scheduledHours), count: g.noEnergy })
+      : t('stats.scheduled', { scheduled: fmtH(g.scheduledHours), events: todayEvents, hours: fmtH((we - ws) / 60) }),
     gSeries,
     g.workHours > 0 && g.available / g.workHours < 0.2,
   );
 
   const p = progress(d, today);
-  set('progress', fmtH(p.week), `今天 ${fmtH(p.series[p.series.length - 1])}`, '近 7 天确认做了的条目，做了一部分算半件', p.series);
+  set('progress', fmtH(p.week), t('stats.today', { value: fmtH(p.series[p.series.length - 1]) }), t('stats.progressFoot'), p.series);
 
   const b = backlog(d, today);
-  set('backlog', String(b.total), `码头 ${b.dock}　过期 ${b.overdue}`, b.total ? '码头上待安排的 + 过了日期还没做完的' : '码头清空，没有过期的事', backlogSeries(d, today), b.total >= 10);
+  set('backlog', String(b.total), t('stats.backlogRight', { dock: b.dock, overdue: b.overdue }), b.total ? t('stats.backlogFoot') : t('stats.backlogEmpty'), backlogSeries(d, today), b.total >= 10);
 
   const c = condition(d, today);
-  set('condition', c.ratio == null ? '—' : String(Math.round(c.ratio * 100)), c.settled ? `${c.good} / ${c.settled} 条` : '还没有结算记录', '近 7 天已结算条目里，做了和做了一部分的占比', conditionSeries(d, today), c.ratio != null && c.ratio < 0.4);
+  set('condition', c.ratio == null ? '—' : String(Math.round(c.ratio * 100)), c.settled ? t('stats.settled', { good: c.good, settled: c.settled }) : t('stats.noSettlements'), t('stats.conditionFoot'), conditionSeries(d, today), c.ratio != null && c.ratio < 0.4);
 }
