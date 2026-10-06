@@ -133,38 +133,60 @@ function renameTaskImpl(store: Store, taskId: string, title: string) {
   store.put('tasks', { ...raw, title: n });
 }
 
-/** 不重要了：任务移出，不算惩罚 */
-function dropTaskImpl(store: Store, taskId: string, note = '不重要了，移出村落') {
+type DropTaskOrigin =
+  | { kind: 'manual'; note: string }
+  | { kind: 'project-trim' };
+
+function recordDroppedTask(store: Store, taskId: string, origin: DropTaskOrigin) {
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
   const today = store.today();
+  const manualNote = origin.kind === 'manual' ? origin.note : undefined;
+  const life = !t.projectId
+    ? undefined
+    : origin.kind === 'project-trim'
+      ? [semanticLife({
+          kind: 'drop',
+          projectId: t.projectId,
+          taskId,
+          reason: 'not_important',
+          event: historyEvent('history.life.taskDroppedTrim', { title: t.title }),
+        })]
+      : origin.note === '不重要了，移出村落'
+        ? [semanticLife({
+            kind: 'drop',
+            projectId: t.projectId,
+            taskId,
+            reason: 'not_important',
+            event: historyEvent('history.life.taskDroppedNotImportant', { title: t.title }),
+          })]
+        : [{
+            kind: 'drop' as const,
+            projectId: t.projectId,
+            taskId,
+            reason: 'not_important' as const,
+            text: `${q(t.title)}${origin.note}`,
+          }];
   operation(store, {
     date: today,
     kind: 'task-dropped',
     projectId: t.projectId,
     taskId,
-    payload: { source: 'manual', note },
-    life: t.projectId ? [
-      note === '不重要了，移出村落' || note === '缩小规模时放下'
-        ? semanticLife({
-            kind: 'drop',
-            projectId: t.projectId,
-            taskId,
-            reason: 'not_important',
-            event: historyEvent(
-              note === '缩小规模时放下' ? 'history.life.taskDroppedTrim' : 'history.life.taskDroppedNotImportant',
-              { title: t.title },
-            ),
-          })
-        : {
-            kind: 'drop',
-            projectId: t.projectId,
-            taskId,
-            reason: 'not_important',
-            text: `${q(t.title)}${note}`,
-          },
-    ] : undefined,
+    payload: origin.kind === 'project-trim'
+      ? { source: 'project-trim' }
+      : { source: 'manual', note: manualNote },
+    life,
   });
+}
+
+/** 不重要了：任务移出，不算惩罚。自定义 note 始终按用户文本保留。 */
+function dropTaskImpl(store: Store, taskId: string, note = '不重要了，移出村落') {
+  return recordDroppedTask(store, taskId, { kind: 'manual', note });
+}
+
+/** 仅供 project trim 领域流程使用；不通过用户 note 推断系统来源。 */
+export function dropTaskForTrim(store: Store, taskId: string) {
+  return recordDroppedTask(store, taskId, { kind: 'project-trim' });
 }
 
 /** 在结算之外直接记下「今天做完了」（例如没有日期的任务） */

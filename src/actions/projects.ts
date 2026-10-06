@@ -8,7 +8,7 @@ import { uid } from '../lib/id';
 import { addDays } from '../lib/date';
 import { MAX_VILLAGES, PROMPT_SNOOZE_DAYS, TRIM_TO_NEGLECT } from '../logic/config';
 import { ActionError, operation, semanticChronicle, semanticLife } from './shared';
-import { dropTask } from './tasks';
+import { dropTaskForTrim } from './tasks';
 
 function createProjectImpl(store: Store, name: string): Project {
   const n = name.trim();
@@ -65,7 +65,7 @@ function trimProjectImpl(store: Store, id: string, dropTaskIds: string[]) {
   const p = store.project(id);
   if (!p) return;
   const today = store.today();
-  for (const tid of dropTaskIds) dropTask(store, tid, '缩小规模时放下');
+  for (const tid of dropTaskIds) dropTaskForTrim(store, tid);
   store.put('projects', { ...p, resets: [...(p.resets ?? []), { date: today, neglect: TRIM_TO_NEGLECT, kind: 'trim' }], promptSnoozeUntil: undefined });
   operation(store, {
     date: today,

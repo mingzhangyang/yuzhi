@@ -5,6 +5,7 @@ import { localDate } from './lib/date';
 import { MAX_VILLAGES } from './logic/config';
 import { runMigrationSteps, type MigrationStep } from './migrations';
 import { isChronicleHistoryEvent, isLifeHistoryEvent, isStalledReasonHistoryEvent } from './history-types';
+import { formatChronicleEvents, formatHistoryEvent } from './history';
 
 /** 数据集合名 → 主键字段 */
 export const COLLECTIONS = {
@@ -1175,6 +1176,29 @@ function checkRelations(d: Data, source: string) {
     if (factSeqs.has(fact.seq)) fail(`事实序号 ${fact.seq} 重复`);
     factSeqs.add(fact.seq);
   }
+  for (const p of d.projects) {
+    if (p.closeReasonEvent) {
+      const fallback = formatHistoryEvent(p.closeReasonEvent, 'zh-CN');
+      if (!p.closeReason?.trim()) fail(`项目「${p.name}」的语义关闭原因缺少兼容文本`);
+      if (p.closeReason !== fallback) fail(`项目「${p.name}」的语义关闭原因与兼容文本不一致`);
+    }
+  }
+  for (const line of d.chronicle) {
+    if (line.events?.length) {
+      const fallback = formatChronicleEvents(line.events, 'zh-CN');
+      if (line.text !== fallback) fail(`编年史 ${line.id} 的语义事件与兼容文本不一致`);
+    }
+  }
+  for (const event of d.operations) {
+    const life = event.payload?.life;
+    if (!Array.isArray(life)) continue;
+    for (const snapshot of life) {
+      if (snapshot.event && snapshot.text !== formatHistoryEvent(snapshot.event, 'zh-CN')) {
+        fail(`操作 ${event.id} 的一生之书语义事件与兼容文本不一致`);
+      }
+    }
+  }
+
   const slots = new Set<number>();
   for (const p of d.projects) {
     if (p.status !== 'active') continue;

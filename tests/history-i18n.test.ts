@@ -173,6 +173,63 @@ describe('semantic history localization', () => {
     reject(wrongCloseReason, /closeReasonEvent/);
   });
 
+  it('requires deterministic compatibility fallback for every persisted semantic history record', () => {
+    const h = makeStore('2026-10-06');
+    const stalled = createProject(h.store, '停滞项目');
+    closeStalledProject(h.store, stalled.id, ['postponed']);
+
+    const missingCloseFallback = structuredClone(h.store.data) as unknown as Record<string, unknown>;
+    const projectRows = missingCloseFallback.projects as Record<string, unknown>[];
+    projectRows[0] = { ...projectRows[0], closeReason: undefined };
+    expect(() => parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 6,
+      exportedAt: '2026-10-06T00:00:00.000Z',
+      ...missingCloseFallback,
+    }))).toThrow(/兼容文本/);
+
+    const mismatchedChronicle = structuredClone(h.store.data) as unknown as Record<string, unknown>;
+    const chronicleRows = mismatchedChronicle.chronicle as Record<string, unknown>[];
+    chronicleRows[0] = { ...chronicleRows[0], text: '被篡改的 fallback' };
+    expect(() => parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 6,
+      exportedAt: '2026-10-06T00:00:00.000Z',
+      ...mismatchedChronicle,
+    }))).toThrow(/兼容文本/);
+
+    const mismatchedLife = structuredClone(h.store.data) as unknown as Record<string, unknown>;
+    const operationRows = mismatchedLife.operations as Array<Record<string, unknown>>;
+    const operationWithLife = operationRows.find((row) => {
+      const payload = row.payload as Record<string, unknown> | undefined;
+      return Array.isArray(payload?.life) && payload.life.length > 0;
+    });
+    expect(operationWithLife).toBeTruthy();
+    const payload = operationWithLife!.payload as Record<string, unknown>;
+    const lifeRows = payload.life as Array<Record<string, unknown>>;
+    lifeRows[0] = { ...lifeRows[0], text: '被篡改的 fallback' };
+    expect(() => parseBackup(JSON.stringify({
+      format: BACKUP_FORMAT,
+      version: 6,
+      exportedAt: '2026-10-06T00:00:00.000Z',
+      ...mismatchedLife,
+    }))).toThrow(/兼容文本/);
+  });
+
+  it('does not infer project-trim provenance from a user-supplied note string', () => {
+    const h = makeStore('2026-10-06');
+    const project = createProject(h.store, '项目');
+    const task = createTask(h.store, { title: '任务', projectId: project.id });
+
+    dropTask(h.store, task.id, '缩小规模时放下');
+
+    const dropped = lifeEntries(h.store.data).find((entry) => entry.taskId === task.id && entry.kind === 'drop');
+    expect(dropped?.event).toBeUndefined();
+    expect(dropped?.text).toBe('「任务」缩小规模时放下');
+    const operation = h.store.data.operations.find((entry) => entry.taskId === task.id && entry.kind === 'task-dropped');
+    expect(operation?.payload?.source).toBe('manual');
+  });
+
   it('accepts semantic fields in current-version backups and keeps the fallback text', () => {
     const h = makeStore('2026-10-06');
     createProject(h.store, '备份项目');
