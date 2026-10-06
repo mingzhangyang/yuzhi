@@ -4,6 +4,12 @@
   --accent: #4f7136; --accent-ink: #ffffff; --accent-soft: #e2ead3; --chip: #f0f2e8; --warn: #a8622a; --warn-soft: #f5e6d5;
   --map: #e3e8d6; --label: #ffffff; --sea: #b4d8de; --sea-deep: #97c4cd; --dusk: #c8693a; --dusk-soft: #f7e3d4;
   --good: #4f8a3a; --shadow: 0 1px 2px rgba(50,60,30,.05), 0 8px 22px rgba(50,60,30,.05);
+  /* Typography: system sans for UI/readability, restrained serif for identity and narrative headings. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-display: "Noto Serif SC", "Songti SC", STSong, Georgia, "Times New Roman", SimSun, serif;
+  --font-size-caption: 12px;
+  --font-size-reading: 15px;
+  --line-height-reading: 1.72;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -24,7 +30,7 @@
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -36,7 +42,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 
 .wrap { max-width: 1360px; margin: 0 auto; padding: 18px clamp(12px, 2.4vw, 28px) 36px; }
 header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
-h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 700; font-size: clamp(21px, 2.8vw, 30px); margin: 0; letter-spacing: .02em; line-height: 1.25; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 2.8vw, 30px); margin: 0; letter-spacing: .02em; line-height: 1.25; }
 .brand { min-width: 0; }
 .brand-title { display: flex; align-items: center; gap: 10px; }
 .brand-mark { width: 46px; height: 46px; border-radius: 12px; display: block; flex: none; box-shadow: 0 2px 9px rgba(20, 60, 54, .12); }
@@ -81,7 +87,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
 .panel { padding: 14px 14px 16px; min-width: 0; }
 .ptitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 650; font-size: 14.5px; }
-.ptitle small { font-weight: 500; font-size: 11px; color: var(--faint); }
+.ptitle small { font-weight: 500; font-size: var(--font-size-caption); color: var(--faint); }
 .pdesc { margin: 2px 0 12px; font-size: 12px; color: var(--muted); }
 .maphead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .badge { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
@@ -129,17 +135,17 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .who { display: flex; gap: 12px; align-items: center; margin: 10px 0 8px; }
 .emblem { width: 50px; height: 50px; border-radius: 12px; flex: none; border: 1px solid var(--line); display: grid; place-items: center; }
 .emblem svg { width: 100%; height: 100%; display: block; border-radius: 11px; }
-.fname { font-size: 20px; font-weight: 700; font-family: "Noto Serif SC", "Songti SC", serif; line-height: 1.3; word-break: break-word; }
+.fname { font-size: 20px; font-weight: 700; font-family: var(--font-display); line-height: 1.3; word-break: break-word; }
 .fmeta { font-size: 12px; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
-.chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--chip); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.chip { font-size: var(--font-size-caption); padding: 2px 8px; border-radius: 6px; background: var(--chip); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .chip.ok { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .chip.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .nums { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; margin-bottom: 12px; }
 .nums div { text-align: center; }
 .nums div + div { border-left: 1px solid var(--line); }
 .nums b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.3; }
-.nums span { font-size: 11px; color: var(--faint); }
+.nums span { font-size: var(--font-size-caption); color: var(--faint); }
 .sect { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 6px; }
 .sect small { font-weight: 500; color: var(--faint); }
 .life { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }
@@ -155,7 +161,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .row .tx { flex: 1; min-width: 0; }
 .row .tx b { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .tx span { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .end { font-size: 11px; color: var(--faint); white-space: nowrap; }
+.row .end { font-size: var(--font-size-caption); color: var(--faint); white-space: nowrap; }
 .row.static { cursor: default; }
 .row.static:hover { border-color: var(--line); }
 .task { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
@@ -164,18 +170,18 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .history-link { border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 0; }
 .history-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 .task .tt b { font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task .tt span { font-size: 11px; color: var(--faint); }
+.task .tt span { font-size: var(--font-size-caption); color: var(--faint); }
 .task .tt span.late { color: var(--warn); }
 .task .acts { display: flex; gap: 4px; flex: none; align-items: center; }
 .history-record { opacity: .82; }
 .history-record .tt b { color: var(--muted); }
-.journal-body { margin: 12px 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--chip); font-size: 13px; line-height: 1.75; word-break: break-word; }
+.journal-body { margin: 12px 0; padding: 12px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--chip); font-size: var(--font-size-reading); line-height: var(--line-height-reading); word-break: break-word; }
 .revision { border-top: 1px dashed var(--line); padding: 7px 0; }
 .revision:first-of-type { border-top: 0; }
 .revision summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); }
-.revision summary span { float: right; font-weight: 400; font-size: 11px; color: var(--faint); }
-.revision-body { margin-top: 7px; padding: 8px 10px; border-radius: 8px; background: var(--chip); color: var(--muted); font-size: 12px; line-height: 1.65; word-break: break-word; }
-.field textarea.history-editor { min-height: 220px; line-height: 1.7; }
+.revision summary span { float: right; font-weight: 400; font-size: var(--font-size-caption); color: var(--faint); }
+.revision-body { margin-top: 7px; padding: 8px 10px; border-radius: 8px; background: var(--chip); color: var(--muted); font-size: 13.5px; line-height: 1.7; word-break: break-word; }
+.field textarea.history-editor { min-height: 220px; font-size: var(--font-size-reading); line-height: var(--line-height-reading); }
 .iconbtn { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; padding: 0; display: grid; place-items: center; font-size: 13px; line-height: 1; color: var(--muted); }
 .iconbtn:hover { border-color: var(--accent); color: var(--accent); }
 .add { display: flex; gap: 6px; margin: 8px 0 4px; }
@@ -196,7 +202,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .dlg-back { position: fixed; inset: 0; z-index: 50; background: rgba(22,28,16,.42); display: flex; align-items: center; justify-content: center; padding: 20px; }
 .dlg { outline: none; width: 100%; max-width: 480px; max-height: 86vh; overflow: auto; padding: 20px 20px 18px; border-radius: 16px; }
 .dlg .kick { font-size: 12px; color: var(--warn); font-weight: 600; }
-.dlg h2 { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 21px; margin: 4px 0 8px; line-height: 1.35; }
+.dlg h2 { font-family: var(--font-display); font-size: 21px; margin: 4px 0 8px; line-height: 1.35; }
 .dlg p { margin: 0 0 8px; line-height: 1.7; }
 .dlg .x { float: right; border: 0; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--faint); padding: 2px 4px; }
 .opt { display: block; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--chip); border-radius: 11px; padding: 10px 12px; margin-top: 8px; cursor: pointer; }
@@ -226,7 +232,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .diary-date-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 4px; font-size: 12.5px; color: var(--muted); }
 .diary-date-row select { width: auto; max-width: 180px; border: 1px solid var(--line); border-radius: 99px; background: var(--chip); padding: 6px 28px 6px 10px; }
 .diary-writing { margin-top: 8px; }
-.field.diary-writing textarea { min-height: 220px; line-height: 1.7; resize: vertical; background: var(--panel); padding: 12px; }
+.field.diary-writing textarea { min-height: 220px; font-size: var(--font-size-reading); line-height: var(--line-height-reading); resize: vertical; background: var(--panel); padding: 12px; }
 .srcs { margin: 6px 0 4px; }
 .err { color: var(--warn); font-size: 12px; }
 .checklist label { display: flex; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
@@ -237,7 +243,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .sbox { width: 100%; max-width: 520px; max-height: 92vh; display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; }
 .shead { padding: 16px 18px 10px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, var(--dusk-soft), var(--panel)); }
 .shead .kick { font-size: 12px; color: var(--dusk); font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
-.shead h2 { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 22px; margin: 2px 0 6px; }
+.shead h2 { font-family: var(--font-display); font-size: 22px; margin: 2px 0 6px; }
 .shead .x { border: 0; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--faint); padding: 0 2px; }
 .daytabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
 .daytabs button { flex: none; border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 3px 11px; font-size: 12px; cursor: pointer; color: var(--muted); }
@@ -288,7 +294,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .chead .kick { font-size: 12px; color: #b07a1a; font-weight: 600; letter-spacing: .2em; display: flex; justify-content: space-between; align-items: center; }
 .chead .kick span { flex: 1; text-align: center; padding-left: 22px; }
 .chead .x { border: 0; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--faint); padding: 0 2px; }
-.chead h2 { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 26px; margin: 6px 0 2px; }
+.chead h2 { font-family: var(--font-display); font-size: 26px; margin: 6px 0 2px; }
 .csub { margin: 0; font-size: 12.5px; color: var(--muted); }
 .cbody { flex: 1; overflow-y: auto; padding: 14px 20px 6px; }
 .cfoot { padding: 8px 20px 14px; text-align: center; border-top: 1px solid var(--line); }
@@ -297,7 +303,7 @@ h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 70
 .sum-nums div { text-align: center; }
 .sum-nums div + div { border-left: 1px solid var(--line); }
 .sum-nums b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.3; }
-.sum-nums span { font-size: 11px; color: var(--faint); }
+.sum-nums span { font-size: var(--font-size-caption); color: var(--faint); }
 .sum-list { list-style: none; margin: 0; padding: 0; }
 .sum-list li { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
 .sum-list li:last-child { border-bottom: 0; }
@@ -332,6 +338,7 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
    Keep touch-entry controls at their focused size from the start so opening the
    software keyboard does not rescale the surrounding UI. */
 @media (max-width: 720px), (hover: none) and (pointer: coarse) {
+  :root { --font-size-reading: 16px; }
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
   textarea,
   select,
