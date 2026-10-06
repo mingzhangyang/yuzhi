@@ -17,6 +17,7 @@ import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { entryId, type SettleItem } from '../logic/days';
 import { nextFactSeq } from '../logic/operations';
+import { t, type MessageKey, type MessageVars } from '../i18n';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
   interrupted: '被打断',
@@ -25,7 +26,15 @@ export const REASON_TEXT: Record<SkipReason, string> = {
   postponed: '推到明天',
 };
 
-export class ActionError extends Error {}
+export class ActionError extends Error {
+  constructor(
+    readonly key: MessageKey,
+    readonly vars?: MessageVars,
+  ) {
+    super(t(key, vars));
+    this.name = 'ActionError';
+  }
+}
 
 export const q = (s: string) => `「${s}」`;
 
