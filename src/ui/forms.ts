@@ -68,7 +68,7 @@ export function openNew(
       <form class="capture-form" data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
         <div class="capture-fields">
           <label class="field capture-primary">${esc(t('forms.scheduleTitle'))}<input name="title" placeholder="${esc(t('forms.schedulePlaceholder'))}" autocomplete="off" ${kind === 'schedule' ? 'autofocus' : ''}></label>
-          <label class="field">日期${dateSelect('date', today, { current: today, withNone: false, mode: 'schedule' })}</label>
+          <label class="field">${esc(t('forms.dateLabel'))}${dateSelect('date', today, { current: today, withNone: false, mode: 'schedule' })}</label>
           <div class="capture-time-grid">
             <label class="field">${esc(t('forms.start'))}<input name="start" type="time" value="09:00"></label>
             <label class="field">${esc(t('forms.end'))}<input name="end" type="time" value="10:00"></label>
