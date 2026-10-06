@@ -42,6 +42,9 @@ describe('i18n', () => {
     expect(message('en', 'tracker.dock')).toBe('Dock');
     expect(message('en', 'island.driftBottle')).toBe('Drift bottle');
     expect(message('en', 'error.taskRequired')).toBe('Write down something to do');
+    expect(message('zh-CN', 'ceremony.occurrences', { count: 2 })).toBe('2 次');
+    expect(message('en', 'ceremony.occurrence', { count: 1 })).toBe('1 occurrence');
+    expect(message('en', 'ceremony.occurrences', { count: 2 })).toBe('2 occurrences');
   });
 
   it('formats calendar labels in the active locale without changing stored dates', () => {
