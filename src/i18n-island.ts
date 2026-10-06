@@ -181,7 +181,7 @@ export const islandEn: Record<IslandMessageKey, string> = {
   'island.reminderOnly': 'This is only a current reminder; nothing has happened yet.',
   'island.laterSchedules': '{name} has {count} more scheduled later today.',
   'island.signOnly': 'The sign shows plans, not completion.',
-  'island.endedSchedules': '{name} has {count} events that ended and are waiting for evening review.',
+  'island.endedSchedules': '{name} has {count} {count|event that has|events that have} ended and {count|is|are} waiting for evening review.',
   'island.choresEndedConsequence': 'Confirming it as done adds to the woodpile; not doing it does not change the chores hut early.',
   'island.projectEndedConsequence': 'Confirming it as done leaves a brick; not doing it does not change the village early.',
   'island.bannerExtra': ', plus {count} more',
@@ -198,7 +198,7 @@ export const islandEn: Record<IslandMessageKey, string> = {
   'island.driftBottle': 'Drift bottle',
   'island.driftBody': 'This group of calendar events is not classified yet. Opening it starts classification; classification does not mark anything complete.',
 
-  'island.villagePeople': '{name} · {count} people',
+  'island.villagePeople': '{name} · {count} {count|person|people}',
   'island.liveUntil': '{title} until {time}',
   'island.startsSoon': '{title} starts soon',
   'island.laterCount': '{count} later',
