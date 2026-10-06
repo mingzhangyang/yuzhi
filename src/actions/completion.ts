@@ -25,7 +25,7 @@ export function islandRings(store: Store): number {
  */
 function completeProjectImpl(store: Store, id: string, resting: 'landmark' | 'archive'): 'landmark' | 'archive' {
   const p = store.project(id);
-  if (!p || p.status !== 'active') throw new ActionError('这个项目已经不在岛上了');
+  if (!p || p.status !== 'active') throw new ActionError('error.projectGone');
   const today = store.today();
   for (const t of store.tasks()) {
     if (t.projectId !== id || t.status !== 'open') continue;
@@ -64,7 +64,7 @@ function setRestingImpl(store: Store, id: string, resting: 'landmark' | 'archive
   const today = store.today();
   if (resting === 'landmark') {
     const k = freeLandmarkIndex(store, id);
-    if (k < 0) throw new ActionError('海岸上已经没有空地了');
+    if (k < 0) throw new ActionError('error.coastFull');
     store.put('projects', { ...p, resting, landmarkIndex: k });
     operation(store, {
       date: today,
