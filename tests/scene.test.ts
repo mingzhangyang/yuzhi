@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildScene } from '../src/ui/scene';
 import { makeStore } from './helpers';
-import { createProject, settleDay } from '../src/actions';
+import { createProject, createTask, settleDay } from '../src/actions';
 import { CHORES } from '../src/types';
 import { itemKey } from '../src/logic/days';
+import { getLocale, setLocale } from '../src/i18n';
 
 describe('scene time snapshot', () => {
   it('derives date, light and hour from one clock reading', () => {
@@ -35,6 +36,23 @@ describe('scene time snapshot', () => {
     expect(scene.date).toBe('2026-10-05');
     expect(scene.light).toBe('day');
     expect(scene.hour).toBe(6.25);
+  });
+});
+
+describe('scene localization projection', () => {
+  it('builds the dock label in the active locale with plural-aware boats', () => {
+    const { store } = makeStore('2026-10-04');
+    const original = getLocale();
+    setLocale('en', false);
+    try {
+      expect(buildScene(store, null, false, new Date(2026, 9, 4, 10)).dockLabel).toBe('Dock');
+      createTask(store, { title: 'One', scheduledFor: '2026-10-04' });
+      expect(buildScene(store, null, false, new Date(2026, 9, 4, 10)).dockLabel).toBe('Dock · 1 boat');
+      createTask(store, { title: 'Two', scheduledFor: '2026-10-04' });
+      expect(buildScene(store, null, false, new Date(2026, 9, 4, 10)).dockLabel).toBe('Dock · 2 boats');
+    } finally {
+      setLocale(original, false);
+    }
   });
 });
 
