@@ -125,7 +125,7 @@ describe('semantic history localization', () => {
     const project = createProject(h.store, '校验项目');
     createTask(h.store, { title: '校验任务', projectId: project.id });
 
-    const reject = (data: unknown, field: RegExp) => {
+    const reject = (data: object, field: RegExp) => {
       expect(() => parseBackup(JSON.stringify({
         format: BACKUP_FORMAT,
         version: 6,
