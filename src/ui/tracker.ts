@@ -3,7 +3,7 @@
  * 也承载码头、粮仓、杂务这些地图上能点的地方。
  */
 import type { Store } from '../store';
-import type { ISODate, LifeEntry, Project } from '../types';
+import type { ISODate, LifeEntry, Project, SkipReason } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 import { $, esc, setHTML, setText, toast } from './dom';
 import { closeModal, confirmModal, openModal } from './modal';
@@ -48,6 +48,8 @@ const timeOf = (iso: string) => {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
+
+const versionLabel = (count: number) => tr(count === 1 ? 'common.version' : 'common.versions', { count });
 
 function emblem(color: string, stage: number) {
   const roof = stage >= 2 ? '#9a9588' : color;
@@ -274,7 +276,7 @@ export class Tracker {
     const currentIds = new Set(entries.map((entry) => entry.id));
     const deletedIds = history.subjectIds('diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(tr('common.version', { count: history.diaryVersions(entry.id).length }))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteDiaryAria', { date: fmtDay(entry.date) }))}">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(versionLabel(history.diaryVersions(entry.id).length))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteDiaryAria', { date: fmtDay(entry.date) }))}">✕</button></div></div>`)
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
@@ -309,7 +311,7 @@ export class Tracker {
       .join('');
     const html = `
       ${this.back$(tr('tracker.diaries'))}
-      <div class="who"><div class="emblem" style="background:#9b78a822">✎</div><div><div class="fname">${esc(tr('tracker.diaryOf', { date: fmtDay(snapshot.date) }))}</div><div class="fmeta">${esc(tr(current ? 'tracker.diaryAlive' : 'tracker.diaryDeletedHistory'))} · ${esc(tr('common.versions', { count: versions.length }))}</div></div></div>
+      <div class="who"><div class="emblem" style="background:#9b78a822">✎</div><div><div class="fname">${esc(tr('tracker.diaryOf', { date: fmtDay(snapshot.date) }))}</div><div class="fmeta">${esc(tr(current ? 'tracker.diaryAlive' : 'tracker.diaryDeletedHistory'))} · ${esc(versionLabel(versions.length))}</div></div></div>
       <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentDiary' : 'tracker.deleted'))}</span><span class="chip">${esc(tr('tracker.historyCount', { count: life.length }))}</span></div>
       <div class="journal-body">${esc(snapshot.text).replace(/\n/g, '<br>')}</div>
       ${current ? `<div class="btnrow"><button class="btn small primary" data-act="edit-diary" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-diary" data-id="${esc(id)}">${esc(tr('tracker.deleteBody'))}</button></div>` : ''}
@@ -345,7 +347,7 @@ export class Tracker {
         const history = settled
           ? `<span class="chip">${esc(tr('tracker.keptInHistory'))}</span>`
           : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="${esc(tr('tracker.deleteSchedule'))}" aria-label="${esc(tr('tracker.deleteScheduleAria', { title: event.title }))}">✕</button>`;
-        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${esc(tr('common.version', { count: historyIndex.scheduleVersions(event.id).length }))}</span>${history}</div></div>`;
+        return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${esc(versionLabel(historyIndex.scheduleVersions(event.id).length))}</span>${history}</div></div>`;
       })
       .join('');
     const deletedRows = deletedIds
@@ -389,7 +391,7 @@ export class Tracker {
     const html = `
       ${this.back$(tr('tracker.localSchedules'))}
       <div class="who"><div class="emblem" style="background:#7397a722">◷</div><div><div class="fname">${esc(snapshot.title)}</div><div class="fmeta">${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)} · ${esc(where)}</div></div></div>
-      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentSchedule' : 'tracker.deleted'))}</span>${settled ? `<span class="chip">${esc(tr('tracker.settledFact'))}</span>` : ''}<span class="chip">${esc(tr('common.versions', { count: versions.length }))}</span></div>
+      <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentSchedule' : 'tracker.deleted'))}</span>${settled ? `<span class="chip">${esc(tr('tracker.settledFact'))}</span>` : ''}<span class="chip">${esc(versionLabel(versions.length))}</span></div>
       ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">${esc(tr('tracker.deleteSchedule'))}</button></div>` : ''}
       <div class="sect">${esc(tr('common.versionHistory'))} <small>${versions.length}</small></div>
       ${versionRows || `<p class="empty">${esc(tr('tracker.noVersionSnapshots'))}</p>`}
@@ -955,14 +957,13 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
     not_important: 'reason.notImportant',
     postponed: 'reason.postponed',
   } as const;
-  const counts = new Map<string, number>();
-  for (const r of reasons) {
-    const label = r.reason ? tr(reasonKeys[r.reason]) : '';
-    if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
+  const counts = new Map<SkipReason, number>();
+  for (const entry of reasons) {
+    if (entry.reason) counts.set(entry.reason, (counts.get(entry.reason) ?? 0) + 1);
   }
   const why = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([reason, count]) => tr('tracker.reasonCount', { reason, count }))
+    .map(([reason, count]) => tr('tracker.reasonCount', { reason: tr(reasonKeys[reason]), count }))
     .join(' · ');
   let chosen = false;
   openModal({
@@ -1007,7 +1008,7 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
             const ok = await confirmModal({ kick: tr('tracker.finalDecision'), title: tr('tracker.closeTitle', { name: p.name }), text: tr('tracker.closeConfirmText'), ok: tr('tracker.closeProject'), danger: true });
             if (!context.isCurrent()) return;
             if (ok) {
-              A.closeProject(store, p.id, why ? tr('tracker.longStallReason', { reason: why }) : tr('tracker.longStall'));
+              A.closeStalledProject(store, p.id, reasons.flatMap((entry) => entry.reason ? [entry.reason] : []));
               toast(tr('tracker.unfinishedToast', { name: p.name }));
             }
             onDone();
