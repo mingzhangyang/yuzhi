@@ -226,7 +226,7 @@ export class Tracker {
         const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
         const progressAt = lastProgressAt(s.data, p.id);
         const since = progressAt ? tr('tracker.progressSince', { days: diffDays(progressAt, today) }) : tr('tracker.noProgress', { days: diffDays(p.createdAt, today) });
-        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(tr('tracker.openTasks', { count: open.length }))} · ${esc(since)}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${esc(stageName(v.stage))}</span></button>`;
+        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(tr('tracker.openTasks', { count: open }))} · ${esc(since)}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${esc(stageName(v.stage))}</span></button>`;
       })
       .join('');
     const groups = unclassifiedGroups(s.data.events);
@@ -453,7 +453,7 @@ export class Tracker {
         ${p.status === 'done' && p.resting === 'landmark' ? `<button class="btn small" data-act="rest" data-to="archive" data-id="${esc(p.id)}">${esc(tr('tracker.moveArchive'))}</button>` : ''}
         ${p.status === 'done' && p.resting !== 'landmark' ? `<button class="btn small primary" data-act="rest" data-to="landmark" data-id="${esc(p.id)}">${esc(tr('tracker.makeLandmarkAgain'))}</button>` : ''}
       </div>`;
-    return [html, p.name, active ? stageName(stage) + ` · ${tr('tracker.openTasks', { count: open })}` : p.status === 'done' ? tr(p.resting === 'landmark' ? 'tracker.landmark' : 'tracker.archiveRecord') : tr('tracker.closed')];
+    return [html, p.name, active ? stageName(stage) + ` · ${tr('tracker.openTasks', { count: open.length })}` : p.status === 'done' ? tr(p.resting === 'landmark' ? 'tracker.landmark' : 'tracker.archiveRecord') : tr('tracker.closed')];
   }
 
   private task(t: TaskView): [string, string, string] {
