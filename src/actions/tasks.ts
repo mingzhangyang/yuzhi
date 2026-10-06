@@ -2,8 +2,8 @@
 import type { ISODate, Task } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
-import { fmtDay } from '../lib/date';
-import { ActionError, operation, putSettlementEntry, q } from './shared';
+import { historyEvent } from '../history-types';
+import { ActionError, operation, putSettlementEntry, semanticLife } from './shared';
 
 function createTaskImpl(store: Store, o: { title: string; projectId?: string; scheduledFor?: ISODate }): Task {
   const title = o.title.trim();
@@ -20,7 +20,7 @@ function createTaskImpl(store: Store, o: { title: string; projectId?: string; sc
     projectId,
     taskId: t.id,
     payload: { title, scheduledFor: t.scheduledFor },
-    life: projectId ? [{ kind: 'task', projectId, taskId: t.id, text: `新任务${q(title)}住进村落` }] : undefined,
+    life: projectId ? [semanticLife({ kind: 'task', projectId, taskId: t.id, event: historyEvent('history.life.taskCreated', { title }) })] : undefined,
   });
   return t;
 }
@@ -37,7 +37,14 @@ function arrangeTaskImpl(store: Store, taskId: string, projectId: string, date?:
     projectId,
     taskId,
     payload: { fromProjectId: t.projectId, toProjectId: projectId, scheduledFor: date },
-    life: [{ kind: 'task', projectId, taskId, text: `${q(t.title)}从码头上岸，住进村落${date ? `，排在${fmtDay(date)}` : ''}` }],
+    life: [semanticLife({
+      kind: 'task',
+      projectId,
+      taskId,
+      event: date
+        ? historyEvent('history.life.taskArrangedDate', { title: t.title, date })
+        : historyEvent('history.life.taskArranged', { title: t.title }),
+    })],
   });
 }
 
@@ -59,7 +66,14 @@ function rescheduleTaskImpl(store: Store, taskId: string, date: ISODate | undefi
     projectId: t.projectId,
     taskId,
     payload: { fromDate: t.scheduledFor, toDate: date },
-    life: t.projectId ? [{ kind: 'event', projectId: t.projectId, taskId, text: date ? `${q(t.title)}改到${fmtDay(date)}` : `${q(t.title)}暂不定日期` }] : undefined,
+    life: t.projectId ? [semanticLife({
+      kind: 'event',
+      projectId: t.projectId,
+      taskId,
+      event: date
+        ? historyEvent('history.life.taskRescheduledDate', { title: t.title, date })
+        : historyEvent('history.life.taskUnscheduled', { title: t.title }),
+    })] : undefined,
   });
 }
 
@@ -75,8 +89,8 @@ function moveTaskImpl(store: Store, taskId: string, projectId: string | undefine
     taskId,
     payload: { fromProjectId, toProjectId: projectId },
     life: [
-      ...(fromProjectId ? [{ kind: 'event' as const, projectId: fromProjectId, taskId, text: `${q(t.title)}搬去了别的村落` }] : []),
-      ...(projectId ? [{ kind: 'task' as const, projectId, taskId, text: `${q(t.title)}搬进村落` }] : []),
+      ...(fromProjectId ? [semanticLife({ kind: 'event' as const, projectId: fromProjectId, taskId, event: historyEvent('history.life.taskMovedOut', { title: t.title }) })] : []),
+      ...(projectId ? [semanticLife({ kind: 'task' as const, projectId, taskId, event: historyEvent('history.life.taskMovedIn', { title: t.title }) })] : []),
     ],
   });
 }
@@ -109,12 +123,12 @@ function renameTaskImpl(store: Store, taskId: string, title: string) {
     projectId: t.projectId,
     taskId,
     payload: { fromTitle: raw.title, toTitle: n },
-    life: [{
+    life: [semanticLife({
       projectId: t.projectId,
       taskId,
       kind: 'event',
-      text: `改名：${q(raw.title)} → ${q(n)}`,
-    }],
+      event: historyEvent('history.life.taskRenamed', { from: raw.title, to: n }),
+    })],
   });
   store.put('tasks', { ...raw, title: n });
 }
@@ -130,7 +144,13 @@ function dropTaskImpl(store: Store, taskId: string, note = '不重要了，移�
     projectId: t.projectId,
     taskId,
     payload: { source: 'manual', note },
-    life: t.projectId ? [{ kind: 'drop', projectId: t.projectId, taskId, text: `${q(t.title)}${note}`, reason: 'not_important' }] : undefined,
+    life: t.projectId ? [semanticLife({
+      kind: 'drop',
+      projectId: t.projectId,
+      taskId,
+      reason: 'not_important',
+      event: historyEvent(note === '缩小规模时放下' ? 'history.life.taskDroppedTrim' : 'history.life.taskDroppedNotImportant', { title: t.title }),
+    })] : undefined,
   });
 }
 

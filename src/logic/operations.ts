@@ -1,17 +1,31 @@
-import type { Data, LifeEntry, LifeKind, LifeSubjectType, OperationEvent, OperationLifeSnapshot, SkipReason } from '../types';
+import type { Data, LifeEntry, LifeKind, LifeSubjectType, OperationEvent, OperationLifeSnapshot, SettlementEntry, SkipReason } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
+import type { HistoryEventKey } from '../history-types';
+import { historyEvent, isHistoryEvent } from '../history-types';
+import { formatHistoryEvent } from '../history';
 
 const LIFE_KINDS = new Set<LifeKind>([
   'start', 'task', 'done', 'partial', 'skip', 'stage', 'close', 'restart', 'trim', 'drop', 'event', 'complete',
 ]);
 const REASONS = new Set<SkipReason>(['interrupted', 'no_energy', 'not_important', 'postponed']);
 
-const REASON_TEXT: Record<SkipReason, string> = {
-  interrupted: '被打断',
-  no_energy: '没精力',
-  not_important: '不重要了',
-  postponed: '推到明天',
+const SKIP_HISTORY: Record<SkipReason, HistoryEventKey> = {
+  interrupted: 'history.life.settlementSkippedInterrupted',
+  no_energy: 'history.life.settlementSkippedNoEnergy',
+  not_important: 'history.life.settlementSkippedNotImportant',
+  postponed: 'history.life.settlementSkippedPostponed',
 };
+
+function settlementHistoryEvent(entry: SettlementEntry) {
+  if (entry.outcome === 'done') {
+    return historyEvent(
+      entry.itemType === 'task' ? 'history.life.settlementTaskDone' : 'history.life.settlementEventDone',
+      { title: entry.title },
+    );
+  }
+  if (entry.outcome === 'partial') return historyEvent('history.life.settlementPartial', { title: entry.title });
+  return historyEvent(entry.reason ? SKIP_HISTORY[entry.reason] : 'history.life.settlementSkipped', { title: entry.title });
+}
 
 export function settlementLifeEntries(data: Data): LifeEntry[] {
   const localScheduleIds = new Set(
@@ -20,37 +34,11 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
       .map((event) => event.id),
   );
   return data.entries.map((entry) => {
-    const title = `「${entry.title}」`;
     const taskId = entry.itemType === 'task' ? entry.itemId : undefined;
     const localSchedule = entry.itemType === 'event' && localScheduleIds.has(entry.itemId);
     const subjectType: LifeSubjectType | undefined = taskId ? 'task' : localSchedule ? 'schedule' : undefined;
     const subjectId = subjectType ? entry.itemId : undefined;
-    if (entry.outcome === 'done') {
-      return {
-        id: `l|${entry.id}`,
-        date: entry.date,
-        factSeq: entry.seq,
-        projectId: entry.projectId === CHORES ? undefined : entry.projectId,
-        taskId,
-        subjectType,
-        subjectId,
-        kind: 'done' as const,
-        text: entry.itemType === 'task' ? `完成了${title}` : `${title}做了`,
-      };
-    }
-    if (entry.outcome === 'partial') {
-      return {
-        id: `l|${entry.id}`,
-        date: entry.date,
-        factSeq: entry.seq,
-        projectId: entry.projectId === CHORES ? undefined : entry.projectId,
-        taskId,
-        subjectType,
-        subjectId,
-        kind: 'partial' as const,
-        text: `${title}做了一部分`,
-      };
-    }
+    const event = settlementHistoryEvent(entry);
     return {
       id: `l|${entry.id}`,
       date: entry.date,
@@ -59,9 +47,10 @@ export function settlementLifeEntries(data: Data): LifeEntry[] {
       taskId,
       subjectType,
       subjectId,
-      kind: 'skip' as const,
-      reason: entry.reason,
-      text: `${title}没做${entry.reason ? `：${REASON_TEXT[entry.reason]}` : ''}`,
+      kind: entry.outcome === 'done' ? 'done' : entry.outcome === 'partial' ? 'partial' : 'skip',
+      reason: entry.outcome === 'skipped' ? entry.reason : undefined,
+      text: formatHistoryEvent(event, 'zh-CN'),
+      event,
     };
   });
 }
@@ -88,12 +77,14 @@ function snapshotsOf(event: OperationEvent): OperationLifeSnapshot[] {
     if (o.subjectId !== undefined && typeof o.subjectId !== 'string') continue;
     if ((o.subjectType === undefined) !== (o.subjectId === undefined)) continue;
     if (o.reason !== undefined && (typeof o.reason !== 'string' || !REASONS.has(o.reason as SkipReason))) continue;
+    if (o.event !== undefined && !isHistoryEvent(o.event)) continue;
     out.push({
       projectId: o.projectId as string | undefined,
       taskId: o.taskId as string | undefined,
       subjectType: o.subjectType as LifeSubjectType | undefined,
       subjectId: o.subjectId as string | undefined,
       text: o.text,
+      event: isHistoryEvent(o.event) ? o.event : undefined,
       kind: o.kind as LifeKind,
       reason: o.reason as SkipReason | undefined,
     });

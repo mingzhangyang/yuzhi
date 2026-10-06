@@ -2,6 +2,7 @@ import { uiEn, uiZh } from './i18n-ui';
 import { trackerEn, trackerZh } from './i18n-tracker';
 import { islandEn, islandZh } from './i18n-island';
 import { errorEn, errorZh } from './i18n-errors';
+import { historyEn, historyZh } from './i18n-history';
 
 export type Locale = 'zh-CN' | 'en';
 
@@ -104,6 +105,7 @@ const zh = {
   'stats.noSettlements': '还没有结算记录',
   'stats.conditionFoot': '近 7 天已结算条目里，做了和做了一部分的占比',
   'daily.archived': '{days}没有记录，已归档。不算做了，也不算没做。',
+  ...historyZh,
   ...uiZh,
   ...trackerZh,
   ...islandZh,
@@ -209,6 +211,7 @@ const en: Record<MessageKey, string> = {
   'stats.noSettlements': 'No review records yet',
   'stats.conditionFoot': 'Share of reviewed items done or partly done in the last 7 days',
   'daily.archived': 'Archived as unrecorded: {days}. These dates count as neither done nor not done.',
+  ...historyEn,
   ...uiEn,
   ...trackerEn,
   ...islandEn,

@@ -1,10 +1,13 @@
 /** Project-domain mutations. */
 import type { Project, SkipReason } from '../types';
+import type { HistoryEvent } from '../history-types';
+import { historyEvent } from '../history-types';
+import { formatHistoryEvent } from '../history';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { addDays } from '../lib/date';
 import { MAX_VILLAGES, PROMPT_SNOOZE_DAYS, TRIM_TO_NEGLECT } from '../logic/config';
-import { ActionError, REASON_TEXT, chronicle, operation, q } from './shared';
+import { ActionError, operation, semanticChronicle, semanticLife } from './shared';
 import { dropTask } from './tasks';
 
 function createProjectImpl(store: Store, name: string): Project {
@@ -22,9 +25,9 @@ function createProjectImpl(store: Store, name: string): Project {
     kind: 'project-created',
     projectId: p.id,
     payload: { name: n, islandSlot: slot },
-    life: [{ kind: 'start', projectId: p.id, text: `立项，村落${q(n)}在岛上落成` }],
+    life: [semanticLife({ kind: 'start', projectId: p.id, event: historyEvent('history.life.projectCreated', { name: n }) })],
   });
-  chronicle(store, today, `岛上立起了新村落${q(n)}。`, 'event');
+  semanticChronicle(store, today, [historyEvent('history.chron.projectCreated', { name: n })], 'event');
   return p;
 }
 
@@ -36,7 +39,7 @@ function renameProjectImpl(store: Store, id: string, name: string) {
     kind: 'project-renamed',
     projectId: id,
     payload: { fromName: p.name, toName: n },
-    life: [{ kind: 'event', projectId: id, text: `改名：${q(p.name)} → ${q(n)}` }],
+    life: [semanticLife({ kind: 'event', projectId: id, event: historyEvent('history.life.projectRenamed', { from: p.name, to: n }) })],
   });
   store.put('projects', { ...p, name: n });
 }
@@ -52,9 +55,9 @@ function restartProjectImpl(store: Store, id: string) {
     kind: 'project-restarted',
     projectId: id,
     payload: { source: 'manual' },
-    life: [{ kind: 'restart', projectId: id, text: '重新启动，村落重新热闹起来' }],
+    life: [semanticLife({ kind: 'restart', projectId: id, event: historyEvent('history.life.projectRestarted') })],
   });
-  chronicle(store, today, `${q(p.name)}重新启动了。`, 'recover');
+  semanticChronicle(store, today, [historyEvent('history.chron.projectRestarted', { name: p.name })], 'recover');
 }
 
 /** 搬离阶段的三个选择之一：缩小规模，放下一部分任务 */
@@ -69,41 +72,65 @@ function trimProjectImpl(store: Store, id: string, dropTaskIds: string[]) {
     kind: 'project-trimmed',
     projectId: id,
     payload: { droppedTaskIds: [...dropTaskIds] },
-    life: [{ kind: 'trim', projectId: id, text: dropTaskIds.length ? `缩小规模，放下了 ${dropTaskIds.length} 件事` : '缩小规模，轻装继续' }],
+    life: [semanticLife({
+      kind: 'trim',
+      projectId: id,
+      event: dropTaskIds.length
+        ? historyEvent('history.life.projectTrimmedDropped', { count: dropTaskIds.length })
+        : historyEvent('history.life.projectTrimmed'),
+    })],
   });
-  chronicle(store, today, `${q(p.name)}缩小了规模，轻装继续。`, 'recover');
+  semanticChronicle(store, today, [historyEvent('history.chron.projectTrimmed', { name: p.name })], 'recover');
 }
 
 /** 搬离阶段的三个选择之一：正式关闭（需要用户确认后调用） */
-function closeProjectImpl(store: Store, id: string, reason: string) {
+function stalledReasonEvent(reasons: readonly SkipReason[]): HistoryEvent {
+  const counts: Record<string, number> = {
+    interrupted: 0,
+    noEnergy: 0,
+    notImportant: 0,
+    postponed: 0,
+  };
+  for (const reason of reasons) {
+    if (reason === 'interrupted') counts.interrupted++;
+    else if (reason === 'no_energy') counts.noEnergy++;
+    else if (reason === 'not_important') counts.notImportant++;
+    else counts.postponed++;
+  }
+  return historyEvent('history.reason.stalled', counts);
+}
+
+function closeProjectImpl(store: Store, id: string, reason: string, reasonEvent?: HistoryEvent) {
   const p = store.project(id);
   if (!p || p.status !== 'active') return;
   const today = store.today();
   const droppedTaskIds = store.tasks().filter((t) => t.projectId === id && t.status === 'open').map((t) => t.id);
   const r = reason.trim();
-  store.put('projects', { ...p, status: 'closed', closedAt: today, closeReason: r || undefined });
+  const closeLifeEvent = reasonEvent
+    ? historyEvent('history.life.projectClosedStalled', reasonEvent.params)
+    : r
+      ? historyEvent('history.life.projectClosedReason', { reason: r })
+      : historyEvent('history.life.projectClosed');
+  store.put('projects', {
+    ...p,
+    status: 'closed',
+    closedAt: today,
+    closeReason: r || undefined,
+    closeReasonEvent: reasonEvent,
+  });
   operation(store, {
     date: today,
     kind: 'project-closed',
     projectId: id,
     payload: { reason: r || undefined, droppedTaskIds },
-    life: [{ kind: 'close', projectId: id, text: r ? `正式关闭：${r}` : '正式关闭' }],
+    life: [semanticLife({ kind: 'close', projectId: id, event: closeLifeEvent })],
   });
-  chronicle(store, today, `${q(p.name)}正式关闭，放进了「未竟之书」。`, 'quiet');
-}
-
-function stalledCloseReason(reasons: readonly SkipReason[]): string {
-  const counts = new Map<SkipReason, number>();
-  for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1);
-  const detail = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([reason, count]) => `${REASON_TEXT[reason]} ${count} 次`)
-    .join('、');
-  return detail ? `长期停滞（${detail}）` : '长期停滞';
+  semanticChronicle(store, today, [historyEvent('history.chron.projectClosed', { name: p.name })], 'quiet');
 }
 
 function closeStalledProjectImpl(store: Store, id: string, reasons: readonly SkipReason[]) {
-  return closeProjectImpl(store, id, stalledCloseReason(reasons));
+  const event = stalledReasonEvent(reasons);
+  return closeProjectImpl(store, id, formatHistoryEvent(event, 'zh-CN'), event);
 }
 
 /** 把关闭的项目重新立起来 */
@@ -121,9 +148,9 @@ function reopenProjectImpl(store: Store, id: string) {
     kind: 'project-restarted',
     projectId: id,
     payload: { source: 'reopen', islandSlot: slot },
-    life: [{ kind: 'restart', projectId: id, text: '从「未竟之书」里重新立起' }],
+    life: [semanticLife({ kind: 'restart', projectId: id, event: historyEvent('history.life.projectReopened') })],
   });
-  chronicle(store, today, `${q(p.name)}被重新立起。`, 'recover');
+  semanticChronicle(store, today, [historyEvent('history.chron.projectReopened', { name: p.name })], 'recover');
 }
 
 function snoozePromptImpl(store: Store, id: string) {

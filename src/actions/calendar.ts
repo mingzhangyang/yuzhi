@@ -3,8 +3,9 @@ import type { CalendarEvent, ISODate } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
-import { fmtDay, localDate, startOfLocalDay } from '../lib/date';
-import { ActionError, operation, q } from './shared';
+import { localDate, startOfLocalDay } from '../lib/date';
+import { historyEvent } from '../history-types';
+import { ActionError, operation, semanticLife } from './shared';
 import { entryId } from '../logic/days';
 import { applyRules, matchRule } from '../logic/classify';
 
@@ -39,12 +40,12 @@ function setEventProjectImpl(store: Store, eventId: string, projectId: string | 
       kind: 'schedule-edited',
       projectId: nextProjectId === CHORES ? undefined : nextProjectId,
       payload: { before, after: scheduleSnapshot(next), change: 'project' },
-      life: [{
+      life: [semanticLife({
         subjectType: 'schedule',
         subjectId: e.id,
         kind: 'event',
-        text: '修改了日程所属项目',
-      }],
+        event: historyEvent('history.life.scheduleProjectChanged'),
+      })],
     });
     store.put('events', next);
     return;
@@ -210,12 +211,17 @@ function createScheduleImpl(store: Store, input: LocalScheduleInput): CalendarEv
     kind: 'schedule-created',
     projectId: event.projectId === CHORES ? undefined : event.projectId,
     payload: { after: snapshot },
-    life: [{
+    life: [semanticLife({
       subjectType: 'schedule',
       subjectId: event.id,
       kind: 'start',
-      text: `创建日程${q(event.title)}，安排在 ${fmtDay(snapshot.date)} ${snapshot.start}–${snapshot.end}`,
-    }],
+      event: historyEvent('history.life.scheduleCreated', {
+        title: event.title,
+        date: snapshot.date,
+        start: snapshot.start,
+        end: snapshot.end,
+      }),
+    })],
   });
   return event;
 }
@@ -235,12 +241,12 @@ function editScheduleImpl(store: Store, eventId: string, input: LocalScheduleInp
     kind: 'schedule-edited',
     projectId: next.projectId === CHORES ? undefined : next.projectId,
     payload: { before, after },
-    life: [{
+    life: [semanticLife({
       subjectType: 'schedule',
       subjectId: event.id,
       kind: 'event',
-      text: `修改日程${q(event.title)}`,
-    }],
+      event: historyEvent('history.life.scheduleEdited', { title: event.title }),
+    })],
   });
   store.put('events', next);
   return next;
@@ -258,12 +264,12 @@ function deleteScheduleImpl(store: Store, eventId: string) {
     kind: 'schedule-deleted',
     projectId: event.projectId === CHORES ? undefined : event.projectId,
     payload: { before },
-    life: [{
+    life: [semanticLife({
       subjectType: 'schedule',
       subjectId: event.id,
       kind: 'close',
-      text: '删除了日程；一生之书仍然保留',
-    }],
+      event: historyEvent('history.life.scheduleDeleted'),
+    })],
   });
   store.del('events', eventId);
 }

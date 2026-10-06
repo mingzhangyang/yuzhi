@@ -5,6 +5,7 @@ import { compareLifeEntries, lifeEntries } from './operations';
 import { stageLifeEntries } from './decay';
 import { taskStates } from './read-model';
 import { t, type MessageKey } from '../i18n';
+import { formatLifeEntry } from '../history';
 
 export interface Blocker {
   text: string;
@@ -78,8 +79,8 @@ export function summarize(data: Data, p: Project, end: ISODate): ProjectSummary 
   const days = [...perDay.keys()].sort();
   if (days.length) turns.push({ date: days[0], text: t('summary.firstBrick') });
   for (const l of life) {
-    if (l.kind === 'restart' || l.kind === 'trim') turns.push({ date: l.date, text: l.text });
-    else if (l.kind === 'stage') turns.push({ date: l.date, text: l.text });
+    if (l.kind === 'restart' || l.kind === 'trim') turns.push({ date: l.date, text: formatLifeEntry(l) });
+    else if (l.kind === 'stage') turns.push({ date: l.date, text: formatLifeEntry(l) });
   }
   const busiest = [...perDay.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
   if (busiest && busiest[1] >= 2) turns.push({ date: busiest[0], text: t('summary.busiest', { count: busiest[1] }) });
