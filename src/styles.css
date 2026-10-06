@@ -37,7 +37,17 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .wrap { max-width: 1360px; margin: 0 auto; padding: 18px clamp(12px, 2.4vw, 28px) 36px; }
 header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
 h1 { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 700; font-size: clamp(21px, 2.8vw, 30px); margin: 0; letter-spacing: .02em; line-height: 1.25; }
+.brand { min-width: 0; }
+.brand-title { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 46px; height: 46px; border-radius: 12px; display: block; flex: none; box-shadow: 0 2px 9px rgba(20, 60, 54, .12); }
+.brand-name { min-width: 0; }
+.brand-name h1 { line-height: 1.05; }
+.brand-en { margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1; letter-spacing: .19em; text-transform: uppercase; }
 .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.brand .sub { margin-left: 56px; max-width: 760px; }
+@media (max-width: 720px) {
+  .brand .sub { margin-left: 0; margin-top: 7px; }
+}
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .date { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; padding-right: 4px; }
 .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; line-height: 1.4; position: relative; }
