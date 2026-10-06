@@ -151,7 +151,7 @@ export class SettleSheet {
     const o = dec?.outcome;
     const reasons =
       o === 'skipped'
-        ? `<div class="reasons">${REASONS.map((r) => `<button data-reason="${r}" class="${dec?.reason === r ? 'on' : ''}">${A.REASON_TEXT[r]}</button>`).join('')}</div>`
+        ? `<div class="reasons">${REASONS.map((r) => `<button data-reason="${r}" class="${dec?.reason === r ? 'on' : ''}">${esc(t(REASON_KEYS[r]))}</button>`).join('')}</div>`
         : '';
     return `<div class="sitem ${o ? 'o-' + o : ''}" data-key="${esc(it.key)}" data-project="${esc(p?.id ?? '')}">
       <div class="swipe"><div class="under"><span class="l">${esc(t('settle.done'))} ✓</span><span class="r">${esc(t('settle.skipped'))}</span></div>
