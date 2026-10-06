@@ -338,6 +338,7 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
    Keep touch-entry controls at their focused size from the start so opening the
    software keyboard does not rescale the surrounding UI. */
 @media (max-width: 720px), (hover: none) and (pointer: coarse) {
+  :root { --font-size-reading: 16px; }
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
   textarea,
   select,
