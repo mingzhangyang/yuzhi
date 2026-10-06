@@ -47,6 +47,12 @@ describe('i18n', () => {
     expect(message('en', 'ceremony.occurrences', { count: 2 })).toBe('2 occurrences');
     expect(message('en', 'common.version', { count: 1 })).toBe('1 version');
     expect(message('en', 'common.versions', { count: 2 })).toBe('2 versions');
+    expect(message('en', 'settle.progress', { count: 1, confirmed: 1 })).toBe('1 item · 1 confirmed');
+    expect(message('en', 'settle.progress', { count: 2, confirmed: 1 })).toBe('2 items · 1 confirmed');
+    expect(message('en', 'tracker.villagesCount', { count: 1 })).toBe('1 village');
+    expect(message('en', 'tracker.projectStarted', { date: 'Oct 1', days: 1, closed: '', done: '' })).toBe('Started Oct 1 · 1 day ago');
+    expect(message('en', 'island.villagePeople', { name: 'Alpha', count: 1 })).toBe('Alpha · 1 person');
+    expect(message('en', 'island.villagePeople', { name: 'Alpha', count: 2 })).toBe('Alpha · 2 people');
   });
 
   it('formats calendar labels in the active locale without changing stored dates', () => {
