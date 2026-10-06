@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { makeStore } from './helpers';
-import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, reopenProject, markTaskDone, dropTask } from '../src/actions';
+import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, closeStalledProject, reopenProject, markTaskDone, dropTask } from '../src/actions';
 import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
 import { lifeEntries } from '../src/logic/operations';
 import { emptyData, type Persistence } from '../src/db';
 import { Store } from '../src/store';
+import { getLocale, setLocale } from '../src/i18n';
 
 describe('阶段换算', () => {
   it('天数对应阶段', () => {
@@ -149,6 +150,24 @@ describe('衰败与恢复', () => {
     trimProject(h.store, p.id, [a.id]);
     expect(h.store.task(a.id)!.status).toBe('dropped');
     expect(h.store.villages().get(p.id)!.stage).toBe(1);
+  });
+});
+
+describe('自动关闭持久化边界', () => {
+  it('不把当前 locale 翻译写进长期停滞原因', () => {
+    const h = makeStore('2026-09-01', '2026-09-01');
+    const p = createProject(h.store, '稳定存档');
+    const original = getLocale();
+    setLocale('en', false);
+    try {
+      closeStalledProject(h.store, p.id, ['interrupted', 'interrupted', 'no_energy']);
+      expect(h.store.project(p.id)?.closeReason).toBe('长期停滞（被打断 2 次、没精力 1 次）');
+      const op = h.store.data.operations.find((entry) => entry.kind === 'project-closed' && entry.projectId === p.id);
+      expect(op?.payload?.reason).toBe('长期停滞（被打断 2 次、没精力 1 次）');
+      expect(op?.life?.[0]?.text).toBe('正式关闭：长期停滞（被打断 2 次、没精力 1 次）');
+    } finally {
+      setLocale(original, false);
+    }
   });
 });
 
