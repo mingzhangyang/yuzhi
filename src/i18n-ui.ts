@@ -238,6 +238,8 @@ export const uiZh = {
   'main.importOk': '替换',
   'main.importDone': '备份已导入',
 
+  'scene.dockLabel': '码头',
+  'scene.dockShipsLabel': '码头 · {count} 船',
   'scene.granaryLabel': '粮仓 {hours} 小时',
 } as const;
 
@@ -483,5 +485,7 @@ export const uiEn: Record<UiMessageKey, string> = {
   'main.importOk': 'Replace',
   'main.importDone': 'Backup imported',
 
+  'scene.dockLabel': 'Dock',
+  'scene.dockShipsLabel': 'Dock · {count} {count|boat|boats}',
   'scene.granaryLabel': 'Granary {hours} {hours|hour|hours}',
 };
