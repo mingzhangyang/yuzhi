@@ -1,4 +1,5 @@
 import type { ISODate } from '../types';
+import { formatCalendarDay, formatWeekday, t } from '../i18n';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -44,7 +45,6 @@ export function startOfLocalDay(d: ISODate): Date {
   return new Date(y, m - 1, day);
 }
 
-const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 export const SEASONS = ['春', '夏', '秋', '冬'] as const;
 
 /** 北半球季节：3–5 春，6–8 夏，9–11 秋，12–2 冬 */
@@ -57,23 +57,22 @@ export function seasonOf(d: ISODate): 0 | 1 | 2 | 3 {
 }
 
 export function weekday(d: ISODate): string {
-  return '周' + WEEK[startOfLocalDay(d).getDay()];
+  return formatWeekday(d);
 }
 
 /** 10月3日 */
 export function fmtDay(d: ISODate): string {
-  const [, m, day] = parts(d);
-  return `${m}月${day}日`;
+  return formatCalendarDay(d);
 }
 
 /** 相对今天的说法：今天、昨天、明天、10月3日 */
 export function relDay(d: ISODate, today: ISODate): string {
   const n = diffDays(today, d);
-  if (n === 0) return '今天';
-  if (n === -1) return '昨天';
-  if (n === 1) return '明天';
-  if (n === -2) return '前天';
-  if (n === 2) return '后天';
+  if (n === 0) return t('date.today');
+  if (n === -1) return t('date.yesterday');
+  if (n === 1) return t('date.tomorrow');
+  if (n === -2) return t('date.dayBeforeYesterday');
+  if (n === 2) return t('date.dayAfterTomorrow');
   return fmtDay(d);
 }
 

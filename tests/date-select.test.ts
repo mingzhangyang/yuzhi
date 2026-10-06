@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dateSelect, readDate } from '../src/ui/date-select';
+import { dateSelect, dateSelectRestorePlan, readDate } from '../src/ui/date-select';
 
 describe('shared date select', () => {
   const today = '2026-10-05';
@@ -23,6 +23,18 @@ describe('shared date select', () => {
     expect(diary).toContain('前天');
     expect(diary).not.toContain('明天');
     expect(diary).toContain('其他日期…');
+  });
+
+  it('recreates a custom drafted date after a locale-driven select rebuild', () => {
+    const rebuiltOptions = ['', today, '2026-10-06', '2026-10-07', '2026-10-12', 'other'];
+    expect(dateSelectRestorePlan(rebuiltOptions, '2026-12-24')).toEqual({
+      addOption: true,
+      committedValue: '2026-12-24',
+    });
+    expect(dateSelectRestorePlan([...rebuiltOptions, '2026-12-24'], '2026-12-24')).toEqual({
+      addOption: false,
+      committedValue: '2026-12-24',
+    });
   });
 
   it('treats the native picker sentinel as no committed date', () => {

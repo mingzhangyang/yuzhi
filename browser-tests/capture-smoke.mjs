@@ -111,6 +111,76 @@ try {
   assert(projectState.date === projectState.today && projectState.activeName === 'ptask',
     `project context did not inherit today/focus: ${JSON.stringify(projectState)}`);
 
+  // Locale-driven tracker redraws must preserve runtime custom-date options,
+  // the selected value, and the date picker's committed value used by cancel.
+  const customDateAcrossLocale = await page.evaluate(() => {
+    const form = document.querySelector('form[data-form="ptask"]');
+    const select = form?.querySelector('select[name="pdate"]');
+    if (!(select instanceof HTMLSelectElement)) throw new Error('project task date select missing');
+
+    const today = window.yuzhi.store.today();
+    const [year, month, day] = today.split('-').map(Number);
+    const customDate = new Date(Date.UTC(year, month - 1, day + 37)).toISOString().slice(0, 10);
+
+    select.value = 'other';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const firstPicker = form?.querySelector('input[type="date"][aria-label="选择日期"]');
+    if (!(firstPicker instanceof HTMLInputElement)) throw new Error('custom date picker missing');
+    firstPicker.value = customDate;
+    firstPicker.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const languageButton = document.getElementById('langBtn');
+    if (!(languageButton instanceof HTMLButtonElement)) throw new Error('language button missing');
+    languageButton.click();
+
+    const rebuilt = document.querySelector('form[data-form="ptask"] select[name="pdate"]');
+    if (!(rebuilt instanceof HTMLSelectElement)) throw new Error('rebuilt project task date select missing');
+    const restored = {
+      customDate,
+      value: rebuilt.value,
+      committed: rebuilt.dataset.committedDate,
+      hasOption: [...rebuilt.options].some((option) => option.value === customDate),
+    };
+
+    rebuilt.value = 'other';
+    rebuilt.dispatchEvent(new Event('change', { bubbles: true }));
+    const secondPicker = document.querySelector('form[data-form="ptask"] input[type="date"][aria-label="选择日期"]');
+    if (!(secondPicker instanceof HTMLInputElement)) throw new Error('second custom date picker missing');
+    secondPicker.value = '';
+    secondPicker.dispatchEvent(new Event('blur'));
+
+    const afterCancel = {
+      value: rebuilt.value,
+      committed: rebuilt.dataset.committedDate,
+      visible: !rebuilt.hidden,
+      nativeInputRemoved: !secondPicker.isConnected,
+    };
+
+    // Return to the rollout-default locale and reset the draft date so this
+    // regression remains isolated from the existing "project Todo = today"
+    // assertion below.
+    languageButton.click();
+    const resetSelect = document.querySelector('form[data-form="ptask"] select[name="pdate"]');
+    if (!(resetSelect instanceof HTMLSelectElement)) throw new Error('reset project task date select missing');
+    resetSelect.value = today;
+    resetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    return { restored, afterCancel };
+  });
+  assert(
+    customDateAcrossLocale.restored.value === customDateAcrossLocale.restored.customDate
+      && customDateAcrossLocale.restored.committed === customDateAcrossLocale.restored.customDate
+      && customDateAcrossLocale.restored.hasOption,
+    `locale redraw lost the custom project-task date: ${JSON.stringify(customDateAcrossLocale)}`,
+  );
+  assert(
+    customDateAcrossLocale.afterCancel.value === customDateAcrossLocale.restored.customDate
+      && customDateAcrossLocale.afterCancel.committed === customDateAcrossLocale.restored.customDate
+      && customDateAcrossLocale.afterCancel.visible
+      && customDateAcrossLocale.afterCancel.nativeInputRemoved,
+    `canceling the picker after locale restore lost the custom date: ${JSON.stringify(customDateAcrossLocale)}`,
+  );
+
   await page.locator('form[data-form="ptask"] input[name="ptask"]').fill('第一件具体的事');
   await page.locator('form[data-form="ptask"] button.primary').click();
   const contextualTask = await page.evaluate(() =>
