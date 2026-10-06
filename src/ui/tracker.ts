@@ -352,7 +352,7 @@ export class Tracker {
       .map((id) => {
         const snapshot = historyIndex.scheduleLatest(id);
         if (!snapshot) return '';
-        return `<div class="task history-record"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(id)}"><b>${esc(snapshot.title)}</b><span>${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)}</span></button><div class="acts"><span class="chip">已删除 · 历史保留</span></div></div>`;
+        return `<div class="task history-record"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(id)}"><b>${esc(snapshot.title)}</b><span>${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)}</span></button><div class="acts"><span class="chip">${esc(tr('tracker.deletedHistory'))}</span></div></div>`;
       })
       .join('');
     return [
@@ -391,8 +391,8 @@ export class Tracker {
       <div class="who"><div class="emblem" style="background:#7397a722">◷</div><div><div class="fname">${esc(snapshot.title)}</div><div class="fmeta">${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)} · ${esc(where)}</div></div></div>
       <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentSchedule' : 'tracker.deleted'))}</span>${settled ? `<span class="chip">${esc(tr('tracker.settledFact'))}</span>` : ''}<span class="chip">${esc(tr('common.versions', { count: versions.length }))}</span></div>
       ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">${esc(tr('tracker.deleteSchedule'))}</button></div>` : ''}
-      <div class="sect">版本历史 <small>${versions.length}</small></div>
-      ${versionRows || '<p class="empty">还没有版本快照。</p>'}
+      <div class="sect">${esc(tr('common.versionHistory'))} <small>${versions.length}</small></div>
+      ${versionRows || `<p class="empty">${esc(tr('tracker.noVersionSnapshots'))}</p>`}
       <div class="sect">${esc(tr('common.history'))} <small>${life.length}</small></div>
       ${lifeList(life, today)}`;
     return [html, snapshot.title, current ? tr('tracker.scheduleLifeBook') : tr('tracker.deletedHistory')];
@@ -473,7 +473,7 @@ export class Tracker {
       ${
         t.status === 'open'
           ? `<form class="add" data-form="tedit" data-id="${esc(t.id)}"><select name="tproj" aria-label="${esc(tr('tracker.projectVillageAria'))}"><option value="">${esc(tr('tracker.dockOption'))}</option>${projOpts}</select>${dateSelect('tdate', today, { current: t.scheduledFor, withNone: true, mode: 'task' })}<button class="btn small">${esc(tr('common.save'))}</button></form>
-             <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${esc(t.id)}">${esc(tr('tracker.doneToday'))}</button>` : ''}<button class="btn small" data-act="trename" data-id="${esc(t.id)}">改名</button><button class="btn small" data-act="drop" data-id="${esc(t.id)}">${esc(tr('tracker.notImportant'))}</button></div>`
+             <div class="btnrow">${p ? `<button class="btn small primary" data-act="done" data-id="${esc(t.id)}">${esc(tr('tracker.doneToday'))}</button>` : ''}<button class="btn small" data-act="trename" data-id="${esc(t.id)}">${esc(tr('tracker.rename'))}</button><button class="btn small" data-act="drop" data-id="${esc(t.id)}">${esc(tr('tracker.notImportant'))}</button></div>`
           : ''
       }
       <div class="sect">${esc(tr('common.history'))}</div>
@@ -698,7 +698,7 @@ export class Tracker {
         const ok = await confirmModal({
           title: tr('tracker.deleteScheduleTitle', { title: event.title }),
           text: tr('tracker.deleteScheduleText', { date: fmtDay(dateOfStamp(event.start)), start: timeOf(event.start), end: timeOf(event.end) }),
-          ok: '删除',
+          ok: tr('common.delete'),
           danger: true,
         });
         if (!ok || !context.isCurrent()) break;
@@ -949,18 +949,30 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
   const v = store.villages().get(p.id);
   const open = store.tasks().filter((t) => t.projectId === p.id && t.status === 'open');
   const reasons = lifeEntries(store.data, stageLifeEntries(store.data, store.today())).filter((l) => l.projectId === p.id && l.kind === 'skip' && l.reason);
+  const reasonKeys = {
+    interrupted: 'reason.interrupted',
+    no_energy: 'reason.noEnergy',
+    not_important: 'reason.notImportant',
+    postponed: 'reason.postponed',
+  } as const;
   const counts = new Map<string, number>();
-  for (const r of reasons) counts.set(A.REASON_TEXT[r.reason!], (counts.get(A.REASON_TEXT[r.reason!]) ?? 0) + 1);
-  const why = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n} 次`).join('、');
+  for (const r of reasons) {
+    const label = r.reason ? tr(reasonKeys[r.reason]) : '';
+    if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const why = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => tr('tracker.reasonCount', { reason, count }))
+    .join(' · ');
   let chosen = false;
   openModal({
-    kick: v?.stage === 3 ? '有居民开始搬离' : '村落需要你',
-    title: `「${p.name}」接下来怎么办？`,
-    body: `<p>${v ? `这个村落已经 ${v.daysSinceProgress} 天没有真实推进了。` : ''}${why ? `过去没做的原因：${esc(why)}。` : ''}项目不会自己消失，由你来决定。</p>
-      <button class="opt" data-c="restart"><b>重新启动</b><span>清空推迟记录，村落从「正常」重新开始。</span></button>
-      <button class="opt" data-c="trim"><b>缩小规模</b><span>放下一部分任务，村落回到「安静」，轻装继续。</span></button>
-      <button class="opt" data-c="close"><b>正式关闭</b><span>放进「未竟之书」，记下它为什么停下。以后还能重新立起。</span></button>
-      <button class="linkbtn" data-c="later">过几天再说</button>`,
+    kick: tr(v?.stage === 3 ? 'tracker.leavingKick' : 'tracker.needsYouKick'),
+    title: tr('tracker.nextTitle', { name: p.name }),
+    body: `<p>${v ? esc(tr('tracker.stalledDays', { days: v.daysSinceProgress })) : ''}${why ? esc(tr('tracker.pastReasons', { reasons: why })) : ''}${esc(tr('tracker.projectPersists'))}</p>
+      <button class="opt" data-c="restart"><b>${esc(tr('tracker.restart'))}</b><span>${esc(tr('tracker.restartDesc'))}</span></button>
+      <button class="opt" data-c="trim"><b>${esc(tr('tracker.trim'))}</b><span>${esc(tr('tracker.trimDesc'))}</span></button>
+      <button class="opt" data-c="close"><b>${esc(tr('tracker.closeProject'))}</b><span>${esc(tr('tracker.closeDesc'))}</span></button>
+      <button class="linkbtn" data-c="later">${esc(tr('tracker.later'))}</button>`,
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-c]').forEach((b) =>
         b.addEventListener('click', async () => {
@@ -969,7 +981,7 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
           if (c === 'restart') {
             A.restartProject(store, p.id);
             closeModal(false);
-            toast(`「${p.name}」重新启动了`);
+            toast(tr('tracker.restartToast', { name: p.name }));
             onDone();
           } else if (c === 'later') {
             A.snoozePrompt(store, p.id);
@@ -977,14 +989,14 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
             onDone();
           } else if (c === 'trim') {
             openModal({
-              title: `缩小「${p.name}」的规模`,
-              body: `<p>勾选的任务留下；取消勾选的任务会被放下（不算惩罚）。</p><div class="checklist">${open.map((t) => `<label><input type="checkbox" value="${esc(t.id)}" checked> ${esc(t.title)}</label>`).join('') || '<p class="empty">村里没有未完成的任务。</p>'}</div><div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>就这样</button></div>`,
+              title: tr('tracker.trimTitle', { name: p.name }),
+              body: `<p>${esc(tr('tracker.trimBody'))}</p><div class="checklist">${open.map((t) => `<label><input type="checkbox" value="${esc(t.id)}" checked> ${esc(t.title)}</label>`).join('') || `<p class="empty">${esc(tr('tracker.noOpenTasks'))}</p>`}</div><div class="actions"><button class="btn" data-close>${esc(tr('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(tr('tracker.justSo'))}</button></div>`,
               mount(b2) {
                 b2.querySelector('[data-ok]')!.addEventListener('click', () => {
                   const drop = [...b2.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].filter((x) => !x.checked).map((x) => x.value);
                   A.trimProject(store, p.id, drop);
                   closeModal(false);
-                  toast(`「${p.name}」轻装继续`);
+                  toast(tr('tracker.trimToast', { name: p.name }));
                   onDone();
                 });
               },
@@ -992,11 +1004,11 @@ export function abandonPrompt(store: Store, p: Project, onDone: () => void) {
             });
           } else if (c === 'close') {
             const context = store.captureWriteContext();
-            const ok = await confirmModal({ kick: '最后一步由你决定', title: `正式关闭「${p.name}」？`, text: '村落会腾空，项目放进「未竟之书」。以后可以重新立起。', ok: '正式关闭', danger: true });
+            const ok = await confirmModal({ kick: tr('tracker.finalDecision'), title: tr('tracker.closeTitle', { name: p.name }), text: tr('tracker.closeConfirmText'), ok: tr('tracker.closeProject'), danger: true });
             if (!context.isCurrent()) return;
             if (ok) {
-              A.closeProject(store, p.id, why ? `长期停滞（${why}）` : '长期停滞');
-              toast(`「${p.name}」放进了未竟之书`);
+              A.closeProject(store, p.id, why ? tr('tracker.longStallReason', { reason: why }) : tr('tracker.longStall'));
+              toast(tr('tracker.unfinishedToast', { name: p.name }));
             }
             onDone();
           }
