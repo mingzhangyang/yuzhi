@@ -255,7 +255,7 @@ export const uiEn: Record<UiMessageKey, string> = {
   'common.unclassified': 'Unclassified',
   'common.untitled': '(Untitled)',
   'common.closedProject': 'Closed project',
-  'common.version': '{count} versions',
+  'common.version': '{count} version',
   'common.versions': '{count} versions',
   'common.history': 'Life Book',
   'common.versionHistory': 'Version history',
