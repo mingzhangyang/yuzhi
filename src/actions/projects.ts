@@ -9,11 +9,11 @@ import { dropTask } from './tasks';
 
 function createProjectImpl(store: Store, name: string): Project {
   const n = name.trim();
-  if (!n) throw new ActionError('给村落起个名字吧');
+  if (!n) throw new ActionError('error.projectNameRequired');
   const used = new Set(store.activeProjects().map((p) => p.islandSlot));
   let slot = -1;
   for (let k = 0; k < MAX_VILLAGES; k++) if (!used.has(k)) { slot = k; break; }
-  if (slot < 0) throw new ActionError(`岛上暂时住不下更多村落了（最多 ${MAX_VILLAGES} 个）。先关闭一个吧。`);
+  if (slot < 0) throw new ActionError('error.villageLimit', { count: MAX_VILLAGES });
   const today = store.today();
   const p: Project = { id: uid('p'), name: n, createdAt: today, status: 'active', islandSlot: slot };
   store.put('projects', p);
@@ -99,7 +99,7 @@ function reopenProjectImpl(store: Store, id: string) {
   const used = new Set(store.activeProjects().map((x) => x.islandSlot));
   let slot = -1;
   for (let k = 0; k < MAX_VILLAGES; k++) if (!used.has(k)) { slot = k; break; }
-  if (slot < 0) throw new ActionError('岛上暂时没有空地了');
+  if (slot < 0) throw new ActionError('error.noVillageLand');
   const today = store.today();
   store.put('projects', { ...p, status: 'active', islandSlot: slot, closedAt: undefined, resets: [...(p.resets ?? []), { date: today, neglect: 0, kind: 'restart' }] });
   operation(store, {
