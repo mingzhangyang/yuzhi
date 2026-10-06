@@ -3,7 +3,7 @@ import { makeStore } from './helpers';
 import { createProject, createTask, settleDay, archiveOldDays, restartProject, trimProject, projectsNeedingPrompt, refreshStages, closeProject, closeStalledProject, reopenProject, markTaskDone, dropTask } from '../src/actions';
 import { recoverOne, stageLifeEntries, stageOfNeglect, stageTransitions } from '../src/logic/decay';
 import { itemKey } from '../src/logic/days';
-import { lifeEntries } from '../src/logic/operations';
+import { lifeEntries, operationLifeEntries } from '../src/logic/operations';
 import { emptyData, type Persistence } from '../src/db';
 import { Store } from '../src/store';
 import { getLocale, setLocale } from '../src/i18n';
@@ -164,7 +164,8 @@ describe('自动关闭持久化边界', () => {
       expect(h.store.project(p.id)?.closeReason).toBe('长期停滞（被打断 2 次、没精力 1 次）');
       const op = h.store.data.operations.find((entry) => entry.kind === 'project-closed' && entry.projectId === p.id);
       expect(op?.payload?.reason).toBe('长期停滞（被打断 2 次、没精力 1 次）');
-      expect(op?.life?.[0]?.text).toBe('正式关闭：长期停滞（被打断 2 次、没精力 1 次）');
+      expect(op).toBeDefined();
+      expect(operationLifeEntries(op!)[0]?.text).toBe('正式关闭：长期停滞（被打断 2 次、没精力 1 次）');
     } finally {
       setLocale(original, false);
     }
