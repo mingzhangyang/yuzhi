@@ -1,10 +1,10 @@
 /** Project-domain mutations. */
-import type { Project } from '../types';
+import type { Project, SkipReason } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { addDays } from '../lib/date';
 import { MAX_VILLAGES, PROMPT_SNOOZE_DAYS, TRIM_TO_NEGLECT } from '../logic/config';
-import { ActionError, chronicle, operation, q } from './shared';
+import { ActionError, REASON_TEXT, chronicle, operation, q } from './shared';
 import { dropTask } from './tasks';
 
 function createProjectImpl(store: Store, name: string): Project {
@@ -92,6 +92,20 @@ function closeProjectImpl(store: Store, id: string, reason: string) {
   chronicle(store, today, `${q(p.name)}正式关闭，放进了「未竟之书」。`, 'quiet');
 }
 
+function stalledCloseReason(reasons: readonly SkipReason[]): string {
+  const counts = new Map<SkipReason, number>();
+  for (const reason of reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  const detail = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => `${REASON_TEXT[reason]} ${count} 次`)
+    .join('、');
+  return detail ? `长期停滞（${detail}）` : '长期停滞';
+}
+
+function closeStalledProjectImpl(store: Store, id: string, reasons: readonly SkipReason[]) {
+  return closeProjectImpl(store, id, stalledCloseReason(reasons));
+}
+
 /** 把关闭的项目重新立起来 */
 function reopenProjectImpl(store: Store, id: string) {
   const p = store.project(id);
@@ -138,6 +152,9 @@ export const trimProject = (...args: Parameters<typeof trimProjectImpl>): Return
 
 export const closeProject = (...args: Parameters<typeof closeProjectImpl>): ReturnType<typeof closeProjectImpl> =>
   args[0].batch(() => closeProjectImpl(...args));
+
+export const closeStalledProject = (...args: Parameters<typeof closeStalledProjectImpl>): ReturnType<typeof closeStalledProjectImpl> =>
+  args[0].batch(() => closeStalledProjectImpl(...args));
 
 export const reopenProject = (...args: Parameters<typeof reopenProjectImpl>): ReturnType<typeof reopenProjectImpl> =>
   args[0].batch(() => reopenProjectImpl(...args));
