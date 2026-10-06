@@ -1,7 +1,8 @@
 import type { Store } from './store';
 import type { CalendarSource } from './types';
 import { fetchIcs, parseIcs } from './ics';
-import { mergeEvents } from './actions';
+import { ActionError, mergeEvents } from './actions';
+import { t } from './i18n';
 import { uid } from './lib/id';
 import { ICS_FUTURE_DAYS, ICS_PAST_DAYS } from './logic/config';
 
@@ -21,7 +22,7 @@ export function ingest(store: Store, src: CalendarSource, text: string): number 
 
 /** 刷新一个订阅链接 */
 export async function syncSource(store: Store, id: string, signal?: AbortSignal): Promise<number> {
-  if (store.isReadOnly) throw new Error('当前标签页是只读的，不能刷新日历');
+  if (store.isReadOnly) throw new ActionError('error.calendarReadOnlyRefresh');
   const context = store.captureWriteContext(signal);
   context.assertCurrent();
   const src = store.data.sources.find((s) => s.id === id);
@@ -49,17 +50,17 @@ export async function syncSource(store: Store, id: string, signal?: AbortSignal)
 }
 
 export async function addUrlSource(store: Store, name: string, url: string, signal?: AbortSignal): Promise<number> {
-  if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
+  if (store.isReadOnly) throw new ActionError('error.calendarReadOnlyAdd');
   const context = store.captureWriteContext(signal);
   context.assertCurrent();
   const u = url.trim();
-  if (!/^(https?|webcals?):\/\//i.test(u)) throw new Error('请粘贴以 https:// 或 webcal:// 开头的订阅链接');
+  if (!/^(https?|webcals?):\/\//i.test(u)) throw new ActionError('error.calendarUrlInvalid');
   const text = await fetchIcs(u);
   context.assertCurrent();
-  const src: CalendarSource = { id: uid('s'), name: name.trim() || '日历', icsUrl: u };
+  const src: CalendarSource = { id: uid('s'), name: name.trim() || t('forms.calendarTitle'), icsUrl: u };
   const { from, to } = windowNow(store.clock());
   const r = parseIcs(text, src.id, from, to);
-  src.name = name.trim() || r.calendarName || '日历';
+  src.name = name.trim() || r.calendarName || t('forms.calendarTitle');
   src.lastFetchedAt = new Date().toISOString();
   return store.batch(() => {
     store.put('sources', src);
@@ -69,13 +70,13 @@ export async function addUrlSource(store: Store, name: string, url: string, sign
 }
 
 export async function addFileSource(store: Store, file: File, signal?: AbortSignal): Promise<number> {
-  if (store.isReadOnly) throw new Error('当前标签页是只读的，不能添加日历');
+  if (store.isReadOnly) throw new ActionError('error.calendarReadOnlyAdd');
   const context = store.captureWriteContext(signal);
   context.assertCurrent();
   const text = await file.text();
   context.assertCurrent();
-  if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000))) throw new Error('这不是 .ics 日历文件');
-  const src: CalendarSource = { id: uid('s'), name: file.name.replace(/\.ics$/i, '') || '上传的日历', lastFetchedAt: new Date().toISOString() };
+  if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000))) throw new ActionError('error.calendarFileInvalid');
+  const src: CalendarSource = { id: uid('s'), name: file.name.replace(/\.ics$/i, '') || t('forms.uploadedCalendar'), lastFetchedAt: new Date().toISOString() };
   const { from, to } = windowNow(store.clock());
   const r = parseIcs(text, src.id, from, to);
   if (r.calendarName) src.name = r.calendarName;
