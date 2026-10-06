@@ -126,6 +126,7 @@ export function buildScene(
   const pending = pendingDays(store.data, today).length;
   const chores = choresOf(store, agenda, today);
   const seen = readSeenDrifts();
+  const dockShips = store.tasks().filter((task) => task.status === 'open' && !task.projectId).length;
   return {
     season: seasonOf(today),
     light: lightNow(now, dusk),
@@ -133,7 +134,8 @@ export function buildScene(
     hour: now.getHours() + now.getMinutes() / 60,
     now: now.getTime(),
     villages: views,
-    dockShips: store.tasks().filter((t) => t.status === 'open' && !t.projectId).length,
+    dockShips,
+    dockLabel: dockShips ? t('scene.dockShipsLabel', { count: dockShips }) : t('scene.dockLabel'),
     choresCount: chores.count,
     chores,
     cultivation: cultivationAreas(cultivationState(store.data, today)),
