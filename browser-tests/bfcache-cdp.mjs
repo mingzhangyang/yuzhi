@@ -123,13 +123,15 @@ async function runAttempt(attempt) {
   const client = await createClient();
   const { send, evaluate, on } = client;
   const notRestored = [];
+  let appPath = '/';
   on('Page.backForwardCacheNotUsed', (params) => notRestored.push(params));
 
+  const storageKey = (name) => 'yuzhi-bfcache:' + name + ':' + appPath;
   const diagnostics = async () => {
     const state = await evaluate(
-      "({ href: location.href, pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })",
+      "({ href: location.href, pagehidePersisted: sessionStorage.getItem(" + JSON.stringify(storageKey('pagehide')) + "), pageshowPersisted: sessionStorage.getItem(" + JSON.stringify(storageKey('pageshow')) + "), state: window.yuzhi?.session?.state ?? null, readOnly: window.yuzhi?.store?.isReadOnly ?? null, navigation: performance.getEntriesByType('navigation').map((entry) => ({ type: entry.type, notRestoredReasons: entry.notRestoredReasons ?? null })) })",
     );
-    return { state, cdpNotRestored: notRestored };
+    return { appPath, state, cdpNotRestored: notRestored };
   };
 
   try {
@@ -145,9 +147,10 @@ async function runAttempt(attempt) {
       () => evaluate("window.yuzhi.session.state === 'writer' && window.yuzhi.store.isReadOnly === false"),
       'app did not become writer before BFCache attempt',
     );
+    appPath = await evaluate("location.pathname");
 
     await evaluate(
-      "sessionStorage.removeItem('yuzhi-bfcache:pagehide:/'); sessionStorage.removeItem('yuzhi-bfcache:pageshow:/'); true",
+      "sessionStorage.removeItem(" + JSON.stringify(storageKey('pagehide')) + "); sessionStorage.removeItem(" + JSON.stringify(storageKey('pageshow')) + "); true",
     );
 
     const history = await send('Page.getNavigationHistory');
@@ -160,7 +163,9 @@ async function runAttempt(attempt) {
       'secondary navigation did not commit',
     );
 
-    const pagehidePersisted = await evaluate("sessionStorage.getItem('yuzhi-bfcache:pagehide:/')");
+    const pagehidePersisted = await evaluate(
+      "sessionStorage.getItem(" + JSON.stringify(storageKey('pagehide')) + ")",
+    );
     if (pagehidePersisted !== 'true') {
       throw new Error(
         'application did not enter BFCache on attempt ' + attempt + ': ' + JSON.stringify(await diagnostics()),
@@ -173,13 +178,15 @@ async function runAttempt(attempt) {
 
     await send('Page.navigateToHistoryEntry', { entryId: appEntry.id });
     await waitFor(
-      () => evaluate("location.pathname === '/' && Boolean(window.yuzhi?.session)"),
+      () => evaluate("location.pathname === " + JSON.stringify(appPath) + " && Boolean(window.yuzhi?.session)"),
       'back navigation did not return to the application',
     );
 
     try {
       await waitFor(
-        () => evaluate("sessionStorage.getItem('yuzhi-bfcache:pageshow:/') === 'true'"),
+        () => evaluate(
+          "sessionStorage.getItem(" + JSON.stringify(storageKey('pageshow')) + ") === 'true'",
+        ),
         'restored pageshow did not report persisted=true',
         6000,
       );
@@ -217,7 +224,7 @@ async function runAttempt(attempt) {
     }
 
     const evidence = await evaluate(
-      "({ pagehidePersisted: sessionStorage.getItem('yuzhi-bfcache:pagehide:/'), pageshowPersisted: sessionStorage.getItem('yuzhi-bfcache:pageshow:/'), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, durablePresent: window.yuzhi.store.data.chronicle.some((row) => row.id === " + JSON.stringify(durableId) + ") })",
+      "({ appPath: location.pathname, pagehidePersisted: sessionStorage.getItem(" + JSON.stringify(storageKey('pagehide')) + "), pageshowPersisted: sessionStorage.getItem(" + JSON.stringify(storageKey('pageshow')) + "), state: window.yuzhi.session.state, readOnly: window.yuzhi.store.isReadOnly, durablePresent: window.yuzhi.store.data.chronicle.some((row) => row.id === " + JSON.stringify(durableId) + ") })",
     );
 
     assert(evidence.pagehidePersisted === 'true', 'BFCache entry evidence was lost');
