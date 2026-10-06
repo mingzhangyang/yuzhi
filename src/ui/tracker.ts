@@ -226,13 +226,13 @@ export class Tracker {
         const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
         const progressAt = lastProgressAt(s.data, p.id);
         const since = progressAt ? tr('tracker.progressSince', { days: diffDays(progressAt, today) }) : tr('tracker.noProgress', { days: diffDays(p.createdAt, today) });
-        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(tr('tracker.openTasks', { count: open }))} · ${esc(since)}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${esc(stageName(v.stage))}</span></button>`;
+        return `<button class="row" data-act="project" data-id="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b><span>${esc(tr('tracker.openTasks', { count: open.length }))} · ${esc(since)}</span></span><span class="chip ${v.stage ? 'warn' : 'ok'}">${esc(stageName(v.stage))}</span></button>`;
       })
       .join('');
     const groups = unclassifiedGroups(s.data.events);
     const cultivated = cultivationAreas(cultivationState(s.data, today));
     const cultivationRows = cultivated
-      .map((area) => `<div class="row static"><span class="tx"><b>${esc(area.name)} · 长势 ${area.level}/4</b><span>${esc(area.summary)}</span></span></div>`)
+      .map((area) => `<div class="row static"><span class="tx"><b>${esc(area.name)} · ${esc(tr('tracker.growth', { level: area.level }))}</b><span>${esc(area.summary)}</span></span></div>`)
       .join('');
     const diaries = s.data.diaries
       .slice()
@@ -274,7 +274,7 @@ export class Tracker {
     const currentIds = new Set(entries.map((entry) => entry.id));
     const deletedIds = history.subjectIds('diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(tr('common.version', { count: history.diaryVersions(entry.id).length }))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteScheduleAria', { title: fmtDay(entry.date) }))}">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(tr('common.version', { count: history.diaryVersions(entry.id).length }))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteDiaryAria', { date: fmtDay(entry.date) }))}">✕</button></div></div>`)
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
