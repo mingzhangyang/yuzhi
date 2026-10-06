@@ -53,6 +53,9 @@ describe('i18n', () => {
     expect(message('en', 'tracker.projectStarted', { date: 'Oct 1', days: 1, closed: '', done: '' })).toBe('Started Oct 1 · 1 day ago');
     expect(message('en', 'island.villagePeople', { name: 'Alpha', count: 1 })).toBe('Alpha · 1 person');
     expect(message('en', 'island.villagePeople', { name: 'Alpha', count: 2 })).toBe('Alpha · 2 people');
+    expect(message('en', 'map.fogBody', { days: 'Yesterday' })).toBe('Pending review: Yesterday. Catch up to clear the fog; after three days they are archived as unrecorded.');
+    expect(message('en', 'daily.archived', { days: 'Oct 1, Oct 2' })).toBe('Archived as unrecorded: Oct 1, Oct 2. These dates count as neither done nor not done.');
+    expect(message('en', 'map.fogBody', { days: 'Yesterday' })).not.toContain('{days|');
   });
 
   it('formats calendar labels in the active locale without changing stored dates', () => {
