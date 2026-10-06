@@ -19,7 +19,7 @@ npm run build      # 类型检查 + 打包到 dist/
 
 ## 部署到 Cloudflare
 
-生产环境只使用 **Cloudflare Workers + Static Assets**。Wrangler 会把 `dist/` 作为 SPA 静态资源，并让 `/api/*` 优先进入 `worker/index.ts`；`.ics` 代理只转发、不保存，拒绝内网地址、限制 5MB、只放行日历内容。
+生产环境只使用 **Cloudflare Workers + Static Assets**。Wrangler 会把 `dist/` 作为 SPA 静态资源，并让 `/api/*`、`/en` 与 `/en/*` 优先进入 `worker/index.ts`；其中英文路由由 Worker 在返回 HTML 前写入英文 SEO / social metadata，`.ics` 代理只转发、不保存，拒绝内网地址、限制 5MB、只放行日历内容。
 
 目标生产域名是 `https://yuzhi.orangely.xyz`。仓库里的 `wrangler.toml` 已固定：
 
@@ -28,7 +28,7 @@ npm run build      # 类型检查 + 打包到 dist/
 - `workers.dev`：关闭
 - Version preview URLs：关闭
 - SPA fallback：开启
-- Worker-first API 路由：`/api/*`
+- Worker-first 路由：`/api/*`、`/en`、`/en/*`（英文 HTML 由 Worker 预先本地化 metadata）
 
 本地验证与手动部署：
 

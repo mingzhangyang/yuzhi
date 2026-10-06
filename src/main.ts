@@ -24,7 +24,7 @@ import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonNam
 import { formatChronicleLine } from './history';
 
 async function boot() {
-  initI18n();
+  initI18n({ detectBrowser: true });
   initModal();
   let settle!: SettleSheet;
   let ceremony!: Ceremony;
@@ -221,6 +221,7 @@ async function boot() {
     const button = $('langBtn');
     setText(button, t('language.switch'));
     button.setAttribute('aria-label', t('language.switchAria'));
+    button.hidden = false;
   };
   buildStats();
   renderLegend();

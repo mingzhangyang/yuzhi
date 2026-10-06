@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatCalendarDay, formatFullDate, getLocale, initI18n, message, resolveLocale, setLocale } from '../src/i18n';
+import { canonicalUrl, localeFromPath, localeMetadata, localePath } from '../shared/locale';
 import { ActionError } from '../src/actions/shared';
 import { fmtDay, relDay, weekday } from '../src/lib/date';
 
@@ -15,6 +16,23 @@ describe('i18n', () => {
     expect(resolveLocale(null, ['zh-TW'])).toBe('zh-CN');
     expect(resolveLocale(null, ['fr-FR', 'en-GB'])).toBe('en');
     expect(resolveLocale(null, ['fr-FR'])).toBe('zh-CN');
+  });
+
+  it('maps stable public locale URLs without making the root language-specific', () => {
+    expect(localeFromPath('/')).toBeNull();
+    expect(localeFromPath('/en')).toBe('en');
+    expect(localeFromPath('/en/')).toBe('en');
+    expect(localeFromPath('/en/archive')).toBe('en');
+    expect(localeFromPath('/english')).toBeNull();
+    expect(localePath('zh-CN')).toBe('/');
+    expect(localePath('en')).toBe('/en/');
+    expect(canonicalUrl('en')).toBe('https://yuzhi.orangely.xyz/en/');
+    expect(localeMetadata.en.ogLocale).toBe('en_US');
+  });
+
+  it('lets an explicit English route win over stored/browser rollout policy', () => {
+    expect(initI18n({ detectBrowser: false, pathname: '/en/', syncPath: false })).toBe('en');
+    expect(getLocale()).toBe('en');
   });
 
   it('treats locale persistence as optional when storage access itself throws', () => {
