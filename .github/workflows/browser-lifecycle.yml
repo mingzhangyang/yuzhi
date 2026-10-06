@@ -7,12 +7,18 @@ on:
       # runtime source change can affect startup, the public action surface, or
       # the writer/reader flow exercised below, so keep the trigger broad.
       - 'src/**'
+      - 'shared/**'
+      - 'worker/**'
       - 'index.html'
+      - 'wrangler.toml'
       - 'package.json'
       - 'package-lock.json'
       - 'vite.config.ts'
       - 'browser-tests/**'
       - 'public/browser-smoke-secondary.html'
+      - 'public/site.webmanifest'
+      - 'public/site-en.webmanifest'
+      - 'public/sitemap.xml'
       - '.github/workflows/browser-lifecycle.yml'
   workflow_dispatch:
 
@@ -45,6 +51,7 @@ jobs:
           set -eu
 
           preview_pid=
+          worker_pid=
           chrome_pid=
 
           cleanup() {
@@ -57,8 +64,14 @@ jobs:
               kill "$preview_pid" 2>/dev/null || true
               wait "$preview_pid" 2>/dev/null || true
             fi
+            if [ -n "$worker_pid" ]; then
+              kill "$worker_pid" 2>/dev/null || true
+              wait "$worker_pid" 2>/dev/null || true
+            fi
             echo "== preview log =="
             cat /tmp/yuzhi-preview.log 2>/dev/null || true
+            echo "== worker log =="
+            cat /tmp/yuzhi-worker.log 2>/dev/null || true
             echo "== cdp chrome log =="
             cat /tmp/yuzhi-cdp.log 2>/dev/null || true
             exit "$status"
@@ -66,6 +79,20 @@ jobs:
           trap cleanup EXIT INT TERM
 
           google-chrome --version
+
+          # Validate the production Worker + Static Assets routing contract,
+          # including pre-JavaScript English metadata rewriting.
+          npx wrangler dev --port 8787 > /tmp/yuzhi-worker.log 2>&1 &
+          worker_pid=$!
+
+          for i in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:8787/ > /dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:8787/ > /dev/null
+          WORKER_BASE_URL=http://127.0.0.1:8787 node browser-tests/worker-locale-smoke.mjs
 
           # Start Vite directly so the recorded PID owns the actual server
           # process instead of an npm wrapper that can leave a child behind.
