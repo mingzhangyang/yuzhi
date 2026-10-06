@@ -73,6 +73,7 @@ export interface Scene {
   now: number;
   villages: VillageView[];
   dockShips: number;
+  dockLabel: string;
   /** 兼容旧调用方；新 UI 从 chores.count 读取。 */
   choresCount: number;
   chores: ChoresView;
