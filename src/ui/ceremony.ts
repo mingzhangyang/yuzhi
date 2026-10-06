@@ -16,7 +16,7 @@ const fullDate = (d: string) => formatFullDate(d);
 /** 一生之书小结（落成仪式与已完成项目页共用） */
 export function summaryHTML(s: ProjectSummary, compact = false): string {
   const blockers = s.blockers.length
-    ? `<ul class="sum-list">${s.blockers.map((b) => `<li><span>${esc(b.text)}</span><b>${b.count}</b></li>`).join('')}</ul>`
+    ? `<ul class="sum-list">${s.blockers.map((b) => `<li><span>${esc(b.text)}</span><b>${esc(tr(b.count === 1 ? 'ceremony.occurrence' : 'ceremony.occurrences', { count: b.count }))}</b></li>`).join('')}</ul>`
     : `<p class="empty">${esc(tr('ceremony.smoothBlockers'))}</p>`;
   const turns = s.turns.length
     ? `<ol class="sum-turns">${s.turns.map((t) => `<li><time>${esc(fmtDay(t.date))}</time><span>${esc(t.text)}</span></li>`).join('')}</ol>`
