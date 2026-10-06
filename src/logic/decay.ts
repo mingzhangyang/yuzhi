@@ -1,6 +1,6 @@
 import type { Data, ISODate, LifeEntry, OperationEvent, Project, SettlementEntry } from '../types';
 import { addDays } from '../lib/date';
-import { POSTPONE_PENALTY_AT, STAGE_NAMES, STAGE_START, TRIM_TO_NEGLECT, type Stage } from './config';
+import { POSTPONE_PENALTY_AT, STAGE_START, TRIM_TO_NEGLECT, type Stage } from './config';
 import { dayStatusFn, type DayStatus } from './days';
 import { taskStates, taskStatesAtCuts } from './read-model';
 import { historyEvent } from '../history-types';
