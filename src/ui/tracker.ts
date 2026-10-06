@@ -603,7 +603,7 @@ export class Tracker {
           const title = String(fd.get('quick') ?? '');
           const pid = String(fd.get('qproj') ?? '');
           const t = A.createTask(s, { title, projectId: pid || undefined });
-          toast(t.projectId ? `「${t.title}」住进了「${s.project(t.projectId)?.name}」` : `「${t.title}」乘船停在了码头`);
+          toast(t.projectId ? tr('forms.taskVillageToast', { task: t.title, project: s.project(t.projectId)?.name ?? '' }) : tr('forms.taskDockToast', { task: t.title }));
           break;
         }
         case 'ptask': {
@@ -617,7 +617,7 @@ export class Tracker {
           const sel = f.querySelector<HTMLSelectElement>('select[name=adate]')!;
           const t = s.task(f.dataset.id);
           A.arrangeTask(s, f.dataset.id!, pid, readDate(sel));
-          toast(`「${t?.title}」上岸，住进了「${s.project(pid)?.name}」`);
+          toast(tr('forms.taskVillageToast', { task: t?.title ?? '', project: s.project(pid)?.name ?? '' }));
           break;
         }
         case 'tedit': {
@@ -625,7 +625,7 @@ export class Tracker {
           const pid = String(fd.get('tproj') ?? '') || undefined;
           const sel = f.querySelector<HTMLSelectElement>('select[name=tdate]')!;
           A.editTaskPlan(s, id, pid, readDate(sel));
-          toast('已保存');
+          toast(tr('tracker.saved'));
           break;
         }
       }
@@ -677,34 +677,34 @@ export class Tracker {
         if (!entry) break;
         const context = s.captureWriteContext();
         const ok = await confirmModal({
-          title: '删除这篇日记？',
-          text: `${fmtDay(entry.date)} · ${entry.text.length > 80 ? entry.text.slice(0, 79) + '…' : entry.text}\n\n正文会从花园记录中移除，但版本历史和一生之书仍会保留。`,
-          ok: '删除',
+          title: tr('tracker.deleteDiaryTitle'),
+          text: tr('tracker.deleteDiaryText', { preview: `${fmtDay(entry.date)} · ${entry.text.length > 80 ? entry.text.slice(0, 79) + '…' : entry.text}` }),
+          ok: tr('common.delete'),
           danger: true,
         });
         if (!ok || !context.isCurrent()) break;
         A.deleteDiary(s, id);
-        toast('日记已删除');
+        toast(tr('tracker.diaryDeleted'));
         break;
       }
       case 'delete-schedule': {
         const event = s.data.events.find((item) => item.id === id && item.sourceId === LOCAL_CALENDAR_SOURCE_ID);
         if (!event) break;
         if (s.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === id)) {
-          toast('这个日程已经留下结算记录，不能直接删除', true);
+          toast(tr('tracker.scheduleSettledDeleteError'), true);
           break;
         }
         const context = s.captureWriteContext();
         const ok = await confirmModal({
-          title: `删除日程「${event.title}」？`,
-          text: `${fmtDay(dateOfStamp(event.start))} ${timeOf(event.start)}–${timeOf(event.end)}。删除后，它会从日程层移除，也不会进入后续结算；一生之书仍会保留。`,
+          title: tr('tracker.deleteScheduleTitle', { title: event.title }),
+          text: tr('tracker.deleteScheduleText', { date: fmtDay(dateOfStamp(event.start)), start: timeOf(event.start), end: timeOf(event.end) }),
           ok: '删除',
           danger: true,
         });
         if (!ok || !context.isCurrent()) break;
         try {
           A.deleteSchedule(s, id);
-          toast('日程已删除');
+          toast(tr('tracker.scheduleDeleted'));
         } catch (err) {
           if (err instanceof A.ActionError) toast(err.message, true);
           else throw err;
@@ -729,19 +729,19 @@ export class Tracker {
       case 'done': {
         const t = s.task(id);
         A.markTaskDone(s, id);
-        if (t) toast(`「${t.title}」做完了，一块砖飞进了村落`);
+        if (t) toast(tr('tracker.taskDoneToast', { title: t.title }));
         break;
       }
       case 'drop': {
         const t = s.task(id);
         A.dropTask(s, id);
-        if (t) toast(`放下了「${t.title}」。这是好的取舍。`);
+        if (t) toast(tr('tracker.taskDroppedToast', { title: t.title }));
         break;
       }
       case 'decline': {
         const t = s.task(id);
         A.declineTask(s, id);
-        if (t) toast(`婉拒了「${t.title}」，船开走了`);
+        if (t) toast(tr('tracker.taskDeclinedToast', { title: t.title }));
         break;
       }
       case 'to-today':
@@ -752,12 +752,12 @@ export class Tracker {
         break;
       case 'rename': {
         const p = s.project(id);
-        if (p) this.renameDialog('给村落改个名字', p.name, (n) => A.renameProject(s, id, n));
+        if (p) this.renameDialog(tr('tracker.renameVillageTitle'), p.name, (n) => A.renameProject(s, id, n));
         break;
       }
       case 'trename': {
         const t = s.task(id);
-        if (t) this.renameDialog('改一下这件事的说法', t.title, (n) => A.renameTask(s, id, n));
+        if (t) this.renameDialog(tr('tracker.renameTaskTitle'), t.title, (n) => A.renameTask(s, id, n));
         break;
       }
       case 'prompt': {
@@ -779,7 +779,7 @@ export class Tracker {
       case 'rest':
         try {
           A.setResting(s, id, el.dataset.to as 'landmark' | 'archive');
-          toast(el.dataset.to === 'landmark' ? '重新立在了海岸上' : '收进了山顶的灯塔');
+          toast(tr(el.dataset.to === 'landmark' ? 'tracker.landmarkAgainToast' : 'tracker.archiveToast'));
         } catch (err) {
           if (err instanceof A.ActionError) toast(err.message, true);
         }
@@ -787,7 +787,7 @@ export class Tracker {
       case 'reopen':
         try {
           A.reopenProject(s, id);
-          toast('村落重新立起来了');
+          toast(tr('tracker.reopenToast'));
         } catch (err) {
           if (err instanceof A.ActionError) toast(err.message, true);
         }
@@ -818,8 +818,8 @@ export class Tracker {
     if (!entry) return;
     const today = s.today();
     openModal({
-      title: '编辑日记',
-      body: `<form data-f="edit-diary"><label class="field">记录日期${dateSelect('date', today, { current: entry.date, withNone: false, mode: 'diary' })}</label><label class="field">正文<textarea name="text" class="history-editor" autofocus>${esc(entry.text)}</textarea></label><p class="hint">保存后会产生一个新版本，旧版本不会被覆盖。</p><div class="actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">保存新版本</button></div></form>`,
+      title: tr('tracker.editDiary'),
+      body: `<form data-f="edit-diary"><label class="field">${esc(tr('tracker.recordDate'))}${dateSelect('date', today, { current: entry.date, withNone: false, mode: 'diary' })}</label><label class="field">${esc(tr('tracker.body'))}<textarea name="text" class="history-editor" autofocus>${esc(entry.text)}</textarea></label><p class="hint">${esc(tr('tracker.newVersionHint'))}</p><div class="actions"><button type="button" class="btn" data-close>${esc(tr('common.cancel'))}</button><button class="btn primary">${esc(tr('tracker.saveNewVersion'))}</button></div></form>`,
       mount(box) {
         bindDateSelects(box, today);
         box.querySelector<HTMLFormElement>('form')!.addEventListener('submit', (event) => {
@@ -830,7 +830,7 @@ export class Tracker {
           try {
             A.editDiary(s, id, { date, text: String(fd.get('text') ?? '') });
             closeModal(false);
-            toast('日记已保存为新版本');
+            toast(tr('tracker.diaryNewVersionToast'));
           } catch (err) {
             if (err instanceof A.ActionError) toast(err.message, true);
             else throw err;
@@ -852,11 +852,11 @@ export class Tracker {
       ? [currentProject, ...activeProjects]
       : activeProjects;
     const projectOptions = projects
-      .map((project) => `<option value="${esc(project.id)}"${project.id === event.projectId ? ' selected' : ''}>${esc(project.name)}${project.status === 'active' ? '' : '（已关闭）'}</option>`)
+      .map((project) => `<option value="${esc(project.id)}"${project.id === event.projectId ? ' selected' : ''}>${esc(project.name)}${project.status === 'active' ? '' : tr('tracker.closedSuffix')}</option>`)
       .join('');
     openModal({
-      title: '编辑日程',
-      body: `<form data-f="edit-schedule"><label class="field">日程标题<input name="title" value="${esc(event.title)}" autocomplete="off" autofocus></label><label class="field">日期${dateSelect('date', today, { current: date, withNone: false, mode: 'schedule' })}</label><div class="capture-time-grid"><label class="field">开始<input name="start" type="time" value="${timeOf(event.start)}"></label><label class="field">结束<input name="end" type="time" value="${timeOf(event.end)}"></label></div><label class="field">所属项目<select name="proj"><option value="${CHORES}"${event.projectId === CHORES ? ' selected' : ''}>杂务 / 生活</option>${projectOptions}</select></label><p class="hint">保存后会产生一个新版本；已有结算事实的日程不能再修改。</p><div class="actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">保存新版本</button></div></form>`,
+      title: tr('tracker.editSchedule'),
+      body: `<form data-f="edit-schedule"><label class="field">${esc(tr('tracker.scheduleTitle'))}<input name="title" value="${esc(event.title)}" autocomplete="off" autofocus></label><label class="field">${esc(tr('tracker.date'))}${dateSelect('date', today, { current: date, withNone: false, mode: 'schedule' })}</label><div class="capture-time-grid"><label class="field">${esc(tr('tracker.start'))}<input name="start" type="time" value="${timeOf(event.start)}"></label><label class="field">${esc(tr('tracker.end'))}<input name="end" type="time" value="${timeOf(event.end)}"></label></div><label class="field">${esc(tr('tracker.project'))}<select name="proj"><option value="${CHORES}"${event.projectId === CHORES ? ' selected' : ''}>${esc(tr('common.choresLife'))}</option>${projectOptions}</select></label><p class="hint">${esc(tr('tracker.scheduleVersionHint'))}</p><div class="actions"><button type="button" class="btn" data-close>${esc(tr('common.cancel'))}</button><button class="btn primary">${esc(tr('tracker.saveNewVersion'))}</button></div></form>`,
       mount(box) {
         bindDateSelects(box, today);
         box.querySelector<HTMLFormElement>('form')!.addEventListener('submit', (submitEvent) => {
@@ -873,7 +873,7 @@ export class Tracker {
               projectId: String(fd.get('proj') ?? CHORES),
             });
             closeModal(false);
-            toast('日程已保存为新版本');
+            toast(tr('tracker.scheduleNewVersionToast'));
           } catch (err) {
             if (err instanceof A.ActionError) toast(err.message, true);
             else throw err;
@@ -886,7 +886,7 @@ export class Tracker {
   private renameDialog(title: string, cur: string, save: (n: string) => void) {
     openModal({
       title,
-      body: `<form data-f><label class="field">名字<input name="n" value="${esc(cur)}" autofocus autocomplete="off"></label><div class="actions"><button type="button" class="btn" data-close>算了</button><button class="btn primary">保存</button></div></form>`,
+      body: `<form data-f><label class="field">${esc(tr('tracker.renameName'))}<input name="n" value="${esc(cur)}" autofocus autocomplete="off"></label><div class="actions"><button type="button" class="btn" data-close>${esc(tr('forms.nevermind'))}</button><button class="btn primary">${esc(tr('common.save'))}</button></div></form>`,
       mount(box) {
         box.querySelector('form')!.addEventListener('submit', (e) => {
           e.preventDefault();
@@ -903,15 +903,15 @@ export class Tracker {
     if (!t) return;
     const today = s.today();
     const quick: [string, string][] = [
-      [today, '今天'],
-      [addDays(today, 1), '明天'],
-      [addDays(today, 2), '后天'],
-      [addDays(today, 7), '一周后'],
-      ['', '不定日期'],
+      [today, tr('date.today')],
+      [addDays(today, 1), tr('date.tomorrow')],
+      [addDays(today, 2), tr('date.dayAfterTomorrow')],
+      [addDays(today, 7), tr('dateSelect.weekLater')],
+      ['', tr('dateSelect.none')],
     ];
     openModal({
-      title: `「${t.title}」改到哪天？`,
-      body: `<p class="hint">手动改期不算「推迟」，不会让村落加重。</p><div class="btnrow">${quick.map(([d, l]) => `<button class="btn small" data-d="${d}">${l}</button>`).join('')}</div><label class="field">或者选一天<input type="date" name="d" min="${addDays(today, -30)}" value="${t.scheduledFor ?? ''}"></label><div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>好</button></div>`,
+      title: tr('tracker.rescheduleTitle', { title: t.title }),
+      body: `<p class="hint">${esc(tr('tracker.rescheduleHint'))}</p><div class="btnrow">${quick.map(([d, l]) => `<button class="btn small" data-d="${d}">${l}</button>`).join('')}</div><label class="field">${esc(tr('dateSelect.orPick'))}<input type="date" name="d" min="${addDays(today, -30)}" value="${t.scheduledFor ?? ''}"></label><div class="actions"><button class="btn" data-close>${esc(tr('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(tr('tracker.ok'))}</button></div>`,
       mount(box) {
         const go = (d: string) => {
           A.rescheduleTask(s, id, d || undefined);
@@ -929,14 +929,14 @@ export class Tracker {
     if (!p) return;
     const open = s.tasks().filter((t) => t.projectId === id && t.status === 'open').length;
     openModal({
-      kick: '最后一步由你决定',
-      title: `正式关闭「${p.name}」？`,
-      body: `<p>关闭后村落会腾空，项目放进「未竟之书」，记下它为什么停下。${open ? `村里还有 ${open} 件没做完的事，会一起放下。` : ''}以后可以重新立起。</p><label class="field">为什么停下（可不填）<textarea name="r" placeholder="例如：方向变了 / 已经不需要了"></textarea></label><div class="actions"><button class="btn" data-close>先不关</button><button class="btn danger" data-ok>正式关闭</button></div>`,
+      kick: tr('tracker.finalDecision'),
+      title: tr('tracker.closeTitle', { name: p.name }),
+      body: `<p>${esc(tr('tracker.closeBody', { open: open ? tr('tracker.closeOpenTasks', { count: open }) : '' }))}</p><label class="field">${esc(tr('tracker.closeReasonLabel'))}<textarea name="r" placeholder="${esc(tr('tracker.closeReasonPlaceholder'))}"></textarea></label><div class="actions"><button class="btn" data-close>${esc(tr('tracker.keepOpen'))}</button><button class="btn danger" data-ok>${esc(tr('tracker.closeProject'))}</button></div>`,
       mount: (box) => {
         box.querySelector('[data-ok]')!.addEventListener('click', () => {
           A.closeProject(s, id, box.querySelector<HTMLTextAreaElement>('textarea')!.value);
           closeModal(false);
-          toast(`「${p.name}」放进了未竟之书`);
+          toast(tr('tracker.unfinishedToast', { name: p.name }));
           this.open({ kind: 'overview' });
         });
       },
