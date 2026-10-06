@@ -32,7 +32,7 @@ async function boot() {
     const started = await AppSession.start();
     session = started.session;
     if (started.fallback) {
-      setTimeout(() => toast('这个浏览器不允许本地存储，这次的记录不会被保存', true), 500);
+      setTimeout(() => toast(t('main.storageBlocked'), true), 500);
     }
   } catch (error) {
     console.error('无法打开屿志本地数据', error);
@@ -42,9 +42,9 @@ async function boot() {
       setHTML(
         wrap,
         `<section class="card panel" role="alert" style="max-width:760px;margin:48px auto">
-          <h2>无法打开已有数据</h2>
+          <h2>${esc(t('main.openDataTitle'))}</h2>
           <p>${esc(message)}</p>
-          <p>为了保护原有记录，屿志没有切换到空白临时数据，也没有覆盖本地数据。请先刷新页面；如果提示数据来自更新版本，请先更新屿志。不要清除浏览器站点数据。</p>
+          <p>${esc(t('main.openDataBody'))}</p>
         </section>`,
       );
     }
@@ -93,13 +93,13 @@ async function boot() {
     if (!mutating) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    toast('此页当前只读。请先接管写权限，再修改小岛。', true);
+    toast(t('forms.readOnly'), true);
   };
   for (const type of ['click', 'submit', 'change', 'pointerdown']) {
     document.addEventListener(type, guardReadOnlyMutation, true);
   }
 
-  store.onError = (e) => toast('保存失败：' + (e instanceof Error ? e.message : String(e)), true);
+  store.onError = (e) => toast(t('main.saveFailed', { error: e instanceof Error ? e.message : String(e) }), true);
 
   const tabNotice = document.querySelector<HTMLElement>('#tabNotice');
   const takeOver = document.querySelector<HTMLButtonElement>('#tabTakeover');
@@ -184,20 +184,20 @@ async function boot() {
 
   const requestTakeover = async (notify = true): Promise<boolean> => {
     if (!session.supportsWriterLock) {
-      if (notify) toast('当前浏览器不支持安全的写权限协调，此页保持只读', true);
+      if (notify) toast(t('main.coordUnsupported'), true);
       return false;
     }
     try {
       const acquired = await session.requestTakeover();
       if (!acquired) {
-        if (notify) toast('另一个标签页仍在写入，请稍后再试', true);
+        if (notify) toast(t('main.writerBusy'), true);
         return false;
       }
-      if (notify) toast('已接管写权限');
+      if (notify) toast(t('main.takeoverOk'));
       return true;
     } catch (error) {
       console.error('接管写权限失败', error);
-      if (notify) toast('接管写权限失败：' + (error instanceof Error ? error.message : String(error)), true);
+      if (notify) toast(t('main.takeoverFailed', { error: error instanceof Error ? error.message : String(error) }), true);
       return false;
     }
   };
@@ -590,20 +590,20 @@ async function boot() {
         const diaryCount = warnedData.diaries.length;
         const backup = exportBackup(warnedData);
         const ok = await confirmModal({
-          title: '导出完整备份？',
+          title: t('main.exportTitle'),
           text: diaryCount
-            ? `这份未加密的 JSON 备份会包含 ${diaryCount} 篇日记全文，以及任务、日程等个人记录。请只保存在你信任的位置。`
-            : '这份未加密的 JSON 备份会包含任务、日程等个人记录。请只保存在你信任的位置。',
-          ok: '导出备份',
+            ? t('main.exportDiaryBody', { count: diaryCount })
+            : t('main.exportBody'),
+          ok: t('main.exportOk'),
           readOnlySafe: true,
         });
         if (!ok) return;
         if (store.data !== warnedData) {
-          toast('数据刚刚已更新，请确认最新备份内容', true);
+          toast(t('main.exportChanged'), true);
           continue;
         }
         download(`yuzhi-backup-${store.today()}.json`, backup);
-        toast('完整备份已导出，请妥善保存');
+        toast(t('main.exportDone'));
         break;
       }
     } else if (m === 'import') {
@@ -614,14 +614,14 @@ async function boot() {
       try {
         const d = parseBackup(await f.text());
         if (!context.isCurrent()) return;
-        const ok = await confirmModal({ title: '用备份替换现在的小岛？', text: `备份里有 ${d.projects.length} 个项目、${d.tasks.length} 件任务、${d.entries.length} 条结算记录。现在这座岛上的数据会被替换。`, ok: '替换', danger: true });
+        const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
         if (!ok || !context.isCurrent()) return;
         await store.replaceAll(d);
         if (session.revision !== revision || store.isReadOnly) return;
         tracker.open({ kind: 'overview' }, false);
         applyTheme();
         daily();
-        toast('备份已导入');
+        toast(t('main.importDone'));
       } catch (err) {
         if (session.revision !== revision || store.isReadOnly) return;
         toast(err instanceof Error ? err.message : String(err), true);
