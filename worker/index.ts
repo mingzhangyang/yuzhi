@@ -1,5 +1,6 @@
 import { handleIcsRequest } from '../shared/icsProxy';
 import {
+  DEFAULT_LOCALE,
   canonicalUrl,
   localeFromPath,
   localeMetadata,
@@ -27,7 +28,7 @@ function localizedHtml(response: Response, locale: Locale): Response {
     },
   });
 
-  return new HTMLRewriter()
+  const rewritten = new HTMLRewriter()
     .on('html', {
       element(element) {
         element.setAttribute('lang', meta.htmlLang);
@@ -61,10 +62,19 @@ function localizedHtml(response: Response, locale: Locale): Response {
       },
     })
     .transform(response);
+
+  const headers = new Headers(rewritten.headers);
+  headers.set('x-yuzhi-locale-metadata', meta.htmlLang);
+  return new Response(rewritten.body, {
+    status: rewritten.status,
+    statusText: rewritten.statusText,
+    headers,
+  });
 }
 
-// Cloudflare Worker (with Static Assets): APIs run here; the English route also
-// runs Worker-first so crawlers/social previews receive localized head metadata.
+// Cloudflare Worker (with Static Assets): APIs run here; both public locale
+// entry routes run Worker-first so raw crawler/social metadata comes from the
+// shared locale policy rather than the static HTML fallback.
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -74,8 +84,9 @@ export default {
     }
 
     const asset = await env.ASSETS.fetch(request);
-    const requestedLocale = localeFromPath(url.pathname);
-    if (requestedLocale !== 'en' || !asset.headers.get('content-type')?.includes('text/html')) return asset;
+    const requestedLocale = localeFromPath(url.pathname)
+      ?? (url.pathname === '/' ? DEFAULT_LOCALE : null);
+    if (!requestedLocale || !asset.headers.get('content-type')?.includes('text/html')) return asset;
     return localizedHtml(asset, requestedLocale);
   },
 } satisfies ExportedHandler<Env>;

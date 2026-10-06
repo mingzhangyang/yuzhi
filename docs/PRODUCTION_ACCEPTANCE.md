@@ -9,10 +9,15 @@ does not prove that the public origin is serving the reviewed release.
 
 1. Merge the release PR to `main` and wait for the Cloudflare production build
    to finish.
-2. Run the **Production acceptance** workflow manually from GitHub Actions.
-3. Treat that workflow run as the authoritative evidence for the deployment.
-4. Do not call the release closed while any production-acceptance assertion is
-   failing.
+2. Dispatch the **Production acceptance** workflow from the `main` branch.
+   Dispatching another ref is rejected.
+3. The workflow requests the revision-addressed build marker for its exact
+   `github.sha`. Cloudflare Workers Builds injects `WORKERS_CI_COMMIT_SHA`
+   and `WORKERS_CI_BRANCH` during the build, and `npm run build` emits those
+   values into `dist/__yuzhi-build/`. A stale deployment therefore cannot pass
+   acceptance merely because its behavior still looks compatible.
+4. Treat that workflow run as the authoritative evidence for that exact
+   deployment. Do not call the release closed while any assertion is failing.
 
 The workflow verifies raw pre-JavaScript HTML for both locale URLs, canonical and
 `hreflang` links, manifests, sitemap/robots, Open Graph/Twitter metadata,
@@ -39,9 +44,12 @@ carries language-specific meaning.
 | Web manifest icons | Shared | Manifest name/description/start URL can localize; the icon identity does not. |
 
 The locale metadata table in `shared/locale.ts` owns social-image selection.
-Worker-rendered head metadata, runtime language changes, Twitter/Open Graph and
-JSON-LD derive the image URL from that same policy. Do not add independent
-hard-coded locale image choices elsewhere.
+Both `/` and `/en/` run through the same Worker HTML rewriter before they
+reach crawlers, while runtime language changes use the same policy in the
+browser. Twitter/Open Graph and JSON-LD therefore derive the production image
+URL from one policy even though `index.html` retains Chinese fallback values
+for non-Worker development/static contexts. Do not add another production
+metadata path outside this policy.
 
 Chinese/default sharing keeps `/brand/yuzhi-og.jpg`. English uses
 `/brand/yuzhi-og-en.png`. Other language-neutral brand assets remain shared.

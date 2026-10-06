@@ -10,9 +10,14 @@ import { chromium } from 'playwright';
 
 const baseURL = (process.env.BASE_URL ?? 'https://yuzhi.orangely.xyz').replace(/\/+$/, '');
 const expectedOrigin = process.env.EXPECTED_ORIGIN ?? 'https://yuzhi.orangely.xyz';
+const expectedRevision = process.env.EXPECTED_REVISION?.trim().toLowerCase();
 const channel = process.env.PW_CHANNEL ?? 'chrome';
 const shotDir = process.env.SHOT_DIR;
 const timeout = 20_000;
+
+if (!expectedRevision || !/^[0-9a-f]{40}$/.test(expectedRevision)) {
+  throw new Error('EXPECTED_REVISION must be the immutable 40-character main commit SHA');
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -21,11 +26,33 @@ function has(text, fragment, label) {
   assert(text.includes(fragment), `missing ${label}: ${fragment}`);
 }
 async function getText(path, accept = 'text/html') {
-  const response = await fetch(baseURL + path, { headers: { accept }, redirect: 'error' });
+  const response = await fetch(baseURL + path, {
+    headers: { accept, 'cache-control': 'no-cache' },
+    redirect: 'error',
+    cache: 'no-store',
+  });
   const text = await response.text();
   assert(response.ok, `${path} returned ${response.status}: ${text.slice(0, 240)}`);
   return text;
 }
+async function verifyDeployedRevision() {
+  const path = `/__yuzhi-build/${expectedRevision}.json?expected=${expectedRevision}`;
+  const response = await fetch(baseURL + path, {
+    headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+    redirect: 'error',
+    cache: 'no-store',
+  });
+  assert(
+    response.ok,
+    `production is not serving expected main revision ${expectedRevision}: ${path} returned ${response.status}`,
+  );
+  const metadata = await response.json();
+  assert(
+    metadata.revision === expectedRevision && metadata.branch === 'main',
+    `deployed revision marker mismatch: ${JSON.stringify({ expectedRevision, metadata })}`,
+  );
+}
+
 async function checkImage(path, mediaType, minBytes) {
   const response = await fetch(baseURL + path, { redirect: 'error' });
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -44,6 +71,8 @@ async function shot(page, name) {
   mkdirSync(shotDir, { recursive: true });
   await page.screenshot({ path: join(shotDir, name), fullPage: true });
 }
+
+await verifyDeployedRevision();
 
 const [zh, en, robots, sitemap, zhManifestResponse, enManifestResponse] = await Promise.all([
   getText('/'),

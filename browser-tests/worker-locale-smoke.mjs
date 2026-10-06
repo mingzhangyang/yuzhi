@@ -27,6 +27,10 @@ function has(html, fragment, label) {
 }
 
 const english = await fetchText('/en/');
+assert(
+  english.response.headers.get('x-yuzhi-locale-metadata') === 'en',
+  'English HTML did not pass through the shared locale metadata rewriter',
+);
 has(english.text, '<html lang="en">', 'English document language');
 has(english.text, '<title>Yuzhi | Grow an island from your real life</title>', 'English title');
 has(
@@ -46,6 +50,10 @@ has(english.text, '"inLanguage":"en"', 'English structured data');
 has(english.text, '"url":"https://yuzhi.orangely.xyz/en/"', 'English structured-data URL');
 
 const chinese = await fetchText('/');
+assert(
+  chinese.response.headers.get('x-yuzhi-locale-metadata') === 'zh-CN',
+  'Chinese root HTML bypassed the shared locale metadata rewriter',
+);
 has(chinese.text, '<html lang="zh-CN">', 'Chinese document language');
 has(chinese.text, '<link rel="canonical" href="https://yuzhi.orangely.xyz/">', 'Chinese canonical');
 has(chinese.text, '<link rel="manifest" href="/site.webmanifest">', 'Chinese manifest');
@@ -54,13 +62,20 @@ has(chinese.text, '<meta property="og:image:type" content="image/jpeg">', 'Chine
 has(chinese.text, '<meta name="twitter:image" content="https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg">', 'Chinese Twitter image');
 assert(!chinese.text.includes('<meta property="og:locale" content="en_US">'), 'root HTML was unexpectedly rewritten as English');
 
-const [zhManifestResponse, enManifestResponse, zhImageResponse, enImageResponse] = await Promise.all([
+const [zhManifestResponse, enManifestResponse, zhImageResponse, enImageResponse, revisionResponse] = await Promise.all([
   fetch(baseURL + '/site.webmanifest'),
   fetch(baseURL + '/site-en.webmanifest'),
   fetch(baseURL + '/brand/yuzhi-og.jpg'),
   fetch(baseURL + '/brand/yuzhi-og-en.png'),
+  fetch(baseURL + '/__yuzhi-build/revision.json'),
 ]);
 assert(zhManifestResponse.ok && enManifestResponse.ok, 'locale manifests must both be served');
+assert(revisionResponse.ok, 'build revision marker must be served with static assets');
+const revisionMetadata = await revisionResponse.json();
+assert(
+  /^[0-9a-f]{40}$/.test(revisionMetadata.revision),
+  `invalid build revision marker: ${JSON.stringify(revisionMetadata)}`,
+);
 assert(
   zhImageResponse.ok
     && enImageResponse.ok
