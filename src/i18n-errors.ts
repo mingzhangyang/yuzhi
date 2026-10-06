@@ -16,6 +16,11 @@ export const errorZh = {
   'error.villageLimit': '岛上暂时住不下更多村落了（最多 {count} 个）。先关闭一个吧。',
   'error.noVillageLand': '岛上暂时没有空地了',
   'error.taskRequired': '写一句要做的事吧',
+  'error.calendarReadOnlyRefresh': '当前标签页是只读的，不能刷新日历',
+  'error.calendarReadOnlyAdd': '当前标签页是只读的，不能添加日历',
+  'error.calendarUrlInvalid': '请粘贴以 https:// 或 webcal:// 开头的订阅链接',
+  'error.calendarFileInvalid': '这不是 .ics 日历文件',
+  'error.calendarFetchFailed': '获取失败（{status}）',
 } as const;
 
 export type ErrorMessageKey = keyof typeof errorZh;
@@ -38,4 +43,9 @@ export const errorEn: Record<ErrorMessageKey, string> = {
   'error.villageLimit': 'The island cannot hold more villages yet (maximum {count}). Close one first.',
   'error.noVillageLand': 'There is no open village site on the island right now',
   'error.taskRequired': 'Write down something to do',
+  'error.calendarReadOnlyRefresh': 'This tab is read-only and cannot refresh the calendar',
+  'error.calendarReadOnlyAdd': 'This tab is read-only and cannot add a calendar',
+  'error.calendarUrlInvalid': 'Paste a subscription URL beginning with https:// or webcal://',
+  'error.calendarFileInvalid': 'This is not an .ics calendar file',
+  'error.calendarFetchFailed': 'Calendar fetch failed ({status})',
 };
