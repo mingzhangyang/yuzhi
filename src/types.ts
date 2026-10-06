@@ -1,3 +1,5 @@
+import type { ChronicleHistoryEvent, LifeHistoryEvent, StalledReasonHistoryEvent } from './history-types';
+
 /** 本地日期，格式 YYYY-MM-DD，按用户本地时区计算 */
 export type ISODate = string;
 
@@ -12,6 +14,8 @@ export interface Project {
   islandSlot: number;
   closedAt?: ISODate;
   closeReason?: string;
+  /** 系统生成的关闭原因语义；旧记录仍只使用 closeReason 文本。 */
+  closeReasonEvent?: StalledReasonHistoryEvent;
   /** 用户做出「重新启动 / 缩小规模」时写入，衰败从这里重新起算 */
   resets?: { date: ISODate; neglect: number; kind: 'restart' | 'trim' }[];
   /** 「搬离」询问被暂缓到这一天 */
@@ -110,8 +114,10 @@ export type ChronicleKind = 'day' | 'event' | 'quiet' | 'recover' | 'landmark';
 export interface ChronicleLine {
   id: string;
   date: ISODate;
-  /** 由规则生成，例如「今天推进了 3 件事，团队村落恢复了热闹」 */
+  /** 兼容旧版本和降级客户端的中文 fallback。 */
   text: string;
+  /** 新记录的可本地化语义；旧记录没有时回退到 text。 */
+  events?: ChronicleHistoryEvent[];
   kind: ChronicleKind;
 }
 
@@ -147,7 +153,10 @@ export interface OperationLifeSnapshot {
   /** Generic identity for the first-class record whose own Life Book receives this row. */
   subjectType?: LifeSubjectType;
   subjectId?: string;
+  /** 兼容旧版本和降级客户端的中文 fallback。 */
   text: string;
+  /** 新记录的可本地化语义；旧记录没有时回退到 text。 */
+  event?: LifeHistoryEvent;
   kind: LifeKind;
   reason?: SkipReason;
 }
@@ -185,7 +194,10 @@ export interface LifeEntry {
   /** Primary item whose own 一生之书 this row belongs to. */
   subjectType?: LifeSubjectType;
   subjectId?: string;
+  /** 兼容旧版本和降级客户端的中文 fallback。 */
   text: string;
+  /** 由事实或 operation 生成的可本地化语义。 */
+  event?: LifeHistoryEvent;
   kind: LifeKind;
   reason?: SkipReason;
 }

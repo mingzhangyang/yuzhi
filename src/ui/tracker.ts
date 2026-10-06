@@ -10,6 +10,7 @@ import { closeModal, confirmModal, openModal } from './modal';
 import { roofOf, houseCount } from './scene';
 import * as A from '../actions';
 import { t as tr } from '../i18n';
+import { formatHistoryEvent, formatLifeEntry } from '../history';
 import { addDays, dateOfStamp, diffDays, fmtDay, relDay } from '../lib/date';
 import { backlog, granary } from '../logic/metrics';
 import { unclassifiedGroups } from '../logic/classify';
@@ -58,6 +59,7 @@ function emblem(color: string, stage: number) {
 
 const STAGE_KEYS = ['stage.normal', 'stage.quiet', 'stage.dusty', 'stage.leaving'] as const;
 const stageName = (stage: number) => tr(STAGE_KEYS[stage] ?? STAGE_KEYS[0]);
+const projectCloseReason = (project: Project) => project.closeReasonEvent ? formatHistoryEvent(project.closeReasonEvent) : project.closeReason;
 
 function lifeList(entries: readonly LifeEntry[], today: ISODate, limit = 60) {
   if (!entries.length) return `<p class="empty">${esc(tr('tracker.noRecords'))}</p>`;
@@ -65,7 +67,7 @@ function lifeList(entries: readonly LifeEntry[], today: ISODate, limit = 60) {
     .slice()
     .sort((a, b) => compareLifeEntries(b, a))
     .slice(0, limit)
-    .map((e) => `<li class="k-${e.kind}"><time>${e.baseline ? esc(tr('tracker.legacyRecord')) : esc(relDay(e.date, today))}</time><span>${esc(e.text)}</span></li>`)
+    .map((e) => `<li class="k-${e.kind}"><time>${e.baseline ? esc(tr('tracker.legacyRecord')) : esc(relDay(e.date, today))}</time><span>${esc(formatLifeEntry(e))}</span></li>`)
     .join('');
   return `<ol class="life">${rows}</ol>`;
 }
@@ -438,7 +440,7 @@ export class Tracker {
           ? `<div class="sect">${esc(tr('tracker.lifeSummary'))}</div>${summaryHTML(summarize(s.data, p, p.doneAt ?? today), true)}`
           : `<div class="nums"><div><b>${open.length}</b><span>${esc(tr('tracker.incomplete'))}</span></div><div><b>${done.length}</b><span>${esc(tr('tracker.completed'))}</span></div><div><b>${since ?? '—'}</b><span>${esc(tr('tracker.sinceProgressDays'))}</span></div></div>`
       }
-      ${p.closeReason ? `<p class="hint">${esc(tr('tracker.stopReason', { reason: p.closeReason }))}</p>` : ''}
+      ${projectCloseReason(p) ? `<p class="hint">${esc(tr('tracker.stopReason', { reason: projectCloseReason(p)! }))}</p>` : ''}
       ${active && !open.length && done.length ? `<div class="ready"><span>${esc(tr('tracker.readyCeremony'))}</span><button class="btn small primary" data-act="complete" data-id="${esc(p.id)}">${esc(tr('tracker.ceremony'))}</button></div>` : ''}
       ${p.status === 'done' ? '' : `<div class="sect">${esc(tr('tracker.tasksHere'))} <small>${open.length}</small></div>`}
       ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="${esc(tr('tracker.addTaskPlaceholder'))}" autocomplete="off" aria-label="${esc(tr('tracker.newTaskAria'))}">${dateSelect('pdate', today, { current: today, withNone: true, mode: 'task' })}<button class="btn primary">${esc(tr('common.add'))}</button></form>` : ''}
@@ -575,7 +577,7 @@ export class Tracker {
       <div class="sect">${esc(tr('tracker.completedBooks'))} <small>${books.length}</small></div>
       ${byYear(books, (p) => p.doneAt, (p) => span(p, p.doneAt)) || `<p class="empty">${esc(tr('tracker.emptyShelf'))}</p>`}
       <div class="sect">${esc(tr('tracker.unfinishedBooks'))} <small>${closed.length}</small></div>
-      ${byYear(closed, (p) => p.closedAt, (p) => span(p, p.closedAt) + (p.closeReason ? ' · ' + p.closeReason : '')) || `<p class="empty">${esc(tr('tracker.noUnfinished'))}</p>`}`;
+      ${byYear(closed, (p) => p.closedAt, (p) => span(p, p.closedAt) + (projectCloseReason(p) ? ' · ' + projectCloseReason(p) : '')) || `<p class="empty">${esc(tr('tracker.noUnfinished'))}</p>`}`;
     return [html, tr('tracker.archive'), tr('tracker.archiveSub', { marks: marks.length, books: books.length + closed.length })];
   }
 

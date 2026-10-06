@@ -18,6 +18,8 @@ import { uid } from '../lib/id';
 import { entryId, type SettleItem } from '../logic/days';
 import { nextFactSeq } from '../logic/operations';
 import { t, type MessageKey, type MessageVars } from '../i18n';
+import type { ChronicleHistoryEvent, LifeHistoryEvent } from '../history-types';
+import { formatChronicleEvents, formatHistoryEvent } from '../history';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
   interrupted: '被打断',
@@ -40,6 +42,26 @@ export const q = (s: string) => `「${s}」`;
 
 export function chronicle(store: Store, date: ISODate, text: string, kind: ChronicleKind, id = uid('c')) {
   store.put('chronicle', { id, date, text, kind });
+}
+
+/** Persist semantic Chronicle data while retaining deterministic Chinese fallback text. */
+export function semanticChronicle(
+  store: Store,
+  date: ISODate,
+  events: ChronicleHistoryEvent[],
+  kind: ChronicleKind,
+  id = uid('c'),
+): string {
+  const text = formatChronicleEvents(events, 'zh-CN');
+  store.put('chronicle', { id, date, text, events, kind });
+  return formatChronicleEvents(events);
+}
+
+/** Persist a semantic Life Book snapshot with Chinese fallback text for old clients/backups. */
+export function semanticLife(
+  snapshot: Omit<OperationLifeSnapshot, 'text'> & { event: LifeHistoryEvent },
+): OperationLifeSnapshot {
+  return { ...snapshot, text: formatHistoryEvent(snapshot.event, 'zh-CN') };
 }
 
 export function operation(

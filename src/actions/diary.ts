@@ -2,8 +2,8 @@
 import type { DiaryEntry, ISODate } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
-import { fmtDay } from '../lib/date';
-import { ActionError, operation } from './shared';
+import { historyEvent } from '../history-types';
+import { ActionError, operation, semanticLife } from './shared';
 
 function validDiaryDate(store: Store, date: ISODate | undefined): ISODate {
   const today = store.today();
@@ -28,12 +28,14 @@ function createDiaryImpl(store: Store, input: { text: string; date?: ISODate }):
     date: store.today(),
     kind: 'diary-created',
     payload: { after: { date: entry.date, text: entry.text } },
-    life: [{
+    life: [semanticLife({
       subjectType: 'diary',
       subjectId: entry.id,
       kind: 'start',
-      text: entry.date === store.today() ? '写下这篇日记' : `补写了 ${fmtDay(entry.date)} 的日记`,
-    }],
+      event: entry.date === store.today()
+        ? historyEvent('history.life.diaryWritten')
+        : historyEvent('history.life.diaryBackfilled', { date: entry.date }),
+    })],
   });
   return entry;
 }
@@ -54,12 +56,14 @@ function editDiaryImpl(store: Store, id: string, input: { text: string; date?: I
       before: { date: entry.date, text: entry.text },
       after: { date: next.date, text: next.text },
     },
-    life: [{
+    life: [semanticLife({
       subjectType: 'diary',
       subjectId: id,
       kind: 'event',
-      text: date === entry.date ? '修改了这篇日记' : `修改日记，并把记录日期改为 ${fmtDay(date)}`,
-    }],
+      event: date === entry.date
+        ? historyEvent('history.life.diaryEdited')
+        : historyEvent('history.life.diaryDateChanged', { date }),
+    })],
   });
   store.put('diaries', next);
   return next;
@@ -72,12 +76,12 @@ function deleteDiaryImpl(store: Store, id: string) {
     date: store.today(),
     kind: 'diary-deleted',
     payload: { before: { date: entry.date, text: entry.text } },
-    life: [{
+    life: [semanticLife({
       subjectType: 'diary',
       subjectId: id,
       kind: 'close',
-      text: '删除了日记；一生之书仍然保留',
-    }],
+      event: historyEvent('history.life.diaryDeleted'),
+    })],
   });
   store.del('diaries', id);
 }

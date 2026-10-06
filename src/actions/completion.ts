@@ -1,7 +1,8 @@
 /** Completion ceremony and landmark mutations. */
 import type { Store } from '../store';
 import { ringOfLandmark, totalLandmarkCapacity } from '../island/map';
-import { ActionError, chronicle, operation, q } from './shared';
+import { historyEvent } from '../history-types';
+import { ActionError, operation, semanticChronicle, semanticLife } from './shared';
 
 /** 最小的空闲地标位 */
 export function freeLandmarkIndex(store: Store, except?: string): number {
@@ -35,7 +36,7 @@ function completeProjectImpl(store: Store, id: string, resting: 'landmark' | 'ar
       projectId: id,
       taskId: t.id,
       payload: { source: 'project-completed' },
-      life: [{ kind: 'drop', projectId: id, taskId: t.id, text: `${q(t.title)}随项目完成一起放下` }],
+      life: [semanticLife({ kind: 'drop', projectId: id, taskId: t.id, event: historyEvent('history.life.taskDroppedWithProject', { title: t.title }) })],
     });
   }
   let where = resting;
@@ -51,9 +52,18 @@ function completeProjectImpl(store: Store, id: string, resting: 'landmark' | 'ar
     kind: 'project-completed',
     projectId: id,
     payload: { resting: where, landmarkIndex: idx },
-    life: [{ kind: 'complete', projectId: id, text: where === 'landmark' ? '落成，立为海岸上的地标' : '完成，收进山顶灯塔里的档案馆' }],
+    life: [semanticLife({
+      kind: 'complete',
+      projectId: id,
+      event: historyEvent(where === 'landmark' ? 'history.life.projectCompletedLandmark' : 'history.life.projectCompletedArchive'),
+    })],
   });
-  chronicle(store, today, where === 'landmark' ? `${q(p.name)}落成了，村落合成一座地标，立在海岸上。` : `${q(p.name)}完成了，收进了山顶的灯塔。`, 'landmark');
+  semanticChronicle(
+    store,
+    today,
+    [historyEvent(where === 'landmark' ? 'history.chron.projectCompletedLandmark' : 'history.chron.projectCompletedArchive', { name: p.name })],
+    'landmark',
+  );
   return where;
 }
 
@@ -71,9 +81,9 @@ function setRestingImpl(store: Store, id: string, resting: 'landmark' | 'archive
       kind: 'project-resting-changed',
       projectId: id,
       payload: { from: p.resting, to: resting, landmarkIndex: k },
-      life: [{ kind: 'event', projectId: id, text: '从档案馆里取出，重新立为地标' }],
+      life: [semanticLife({ kind: 'event', projectId: id, event: historyEvent('history.life.projectRestoredLandmark') })],
     });
-    chronicle(store, today, `${q(p.name)}重新立在了海岸上。`, 'landmark');
+    semanticChronicle(store, today, [historyEvent('history.chron.projectRestoredLandmark', { name: p.name })], 'landmark');
   } else {
     store.put('projects', { ...p, resting, landmarkIndex: undefined });
     operation(store, {
@@ -81,9 +91,9 @@ function setRestingImpl(store: Store, id: string, resting: 'landmark' | 'archive
       kind: 'project-resting-changed',
       projectId: id,
       payload: { from: p.resting, to: resting },
-      life: [{ kind: 'event', projectId: id, text: '地标收进了山顶的档案馆' }],
+      life: [semanticLife({ kind: 'event', projectId: id, event: historyEvent('history.life.projectArchivedLandmark') })],
     });
-    chronicle(store, today, `${q(p.name)}的地标收进了山顶的灯塔。`, 'quiet');
+    semanticChronicle(store, today, [historyEvent('history.chron.projectArchivedLandmark', { name: p.name })], 'quiet');
   }
 }
 

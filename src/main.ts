@@ -21,6 +21,7 @@ import type { WriterState } from './single-writer';
 import { syncThemeDataset } from './ui/theme';
 import { markDriftSeen } from './ui/drift';
 import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonName, t, toggleLocale, weatherName } from './i18n';
+import { formatChronicleLine } from './history';
 
 async function boot() {
   initI18n();
@@ -466,9 +467,8 @@ async function boot() {
     const ps = store.activeProjects().length;
     setText($('mapDesc'), ps ? t('map.descActive', { count: ps }) : t('map.descEmpty'));
 
-    // 编年史的历史正文仍按原语言保存；PR 2 会把系统叙述迁成语义事件。
     const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
-    setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(c.text)}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
+    setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(formatChronicleLine(c))}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
     setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
     scheduleAgendaRefresh(agenda, now);
   }

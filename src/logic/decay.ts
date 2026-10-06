@@ -1,8 +1,10 @@
 import type { Data, ISODate, LifeEntry, OperationEvent, Project, SettlementEntry } from '../types';
 import { addDays } from '../lib/date';
-import { POSTPONE_PENALTY_AT, STAGE_NAMES, STAGE_START, TRIM_TO_NEGLECT, type Stage } from './config';
+import { POSTPONE_PENALTY_AT, STAGE_START, TRIM_TO_NEGLECT, type Stage } from './config';
 import { dayStatusFn, type DayStatus } from './days';
 import { taskStates, taskStatesAtCuts } from './read-model';
+import { historyEvent } from '../history-types';
+import { formatHistoryEvent } from '../history';
 
 export interface VillageState {
   neglect: number;
@@ -564,12 +566,22 @@ export function stageTransitions(data: Data, today: ISODate): StageTransition[] 
 }
 
 export function stageLifeEntries(data: Data, today: ISODate): LifeEntry[] {
-  return stageTransitions(data, today).map((transition) => ({
-    id: transition.id,
-    date: transition.date,
-    projectId: transition.projectId,
-    factSeq: transition.source === 'facts' ? transition.factSeq : undefined,
-    kind: 'stage',
-    text: `村落进入「${STAGE_NAMES[transition.to]}」阶段`,
-  }));
+  const keys = [
+    'history.life.stageNormal',
+    'history.life.stageQuiet',
+    'history.life.stageDusty',
+    'history.life.stageLeaving',
+  ] as const;
+  return stageTransitions(data, today).map((transition) => {
+    const event = historyEvent(keys[transition.to]);
+    return {
+      id: transition.id,
+      date: transition.date,
+      projectId: transition.projectId,
+      factSeq: transition.source === 'facts' ? transition.factSeq : undefined,
+      kind: 'stage',
+      text: formatHistoryEvent(event, 'zh-CN'),
+      event,
+    };
+  });
 }

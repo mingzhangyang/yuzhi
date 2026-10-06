@@ -8,13 +8,13 @@ import type {
   SkipReason,
 } from '../types';
 import type { Store } from '../store';
-import { fmtDay } from '../lib/date';
 import { type Stage } from '../logic/config';
 import { daysToArchive, itemsForDay, type SettleItem } from '../logic/days';
-import { dayLine, stageChangeText, type StageChange } from '../logic/chronicle';
+import { dayEvents, stageChangeEvent, type StageChange } from '../logic/chronicle';
+import { historyEvent } from '../history-types';
 import { backlog } from '../logic/metrics';
 import { computeAllVillages, stageTransitions } from '../logic/decay';
-import { chronicle, putSettlementEntry } from './shared';
+import { putSettlementEntry, semanticChronicle } from './shared';
 
 export interface Decision {
   outcome: Outcome;
@@ -62,10 +62,9 @@ function settleDayImpl(store: Store, date: ISODate, decisions: Map<string, Decis
   }
   const projects = new Map(store.data.projects.map((project) => [project.id, project] as const));
   const dayEntries = store.data.entries.filter((entry) => entry.date === date);
-  const text = dayLine(dayEntries, projects, changes);
+  const events = dayEvents(dayEntries, projects, changes);
   const kind: ChronicleKind = changes.some((change) => change.to < change.from) ? 'recover' : changes.some((change) => change.to > change.from) ? 'quiet' : 'day';
-  chronicle(store, date, text, kind, `day|${date}`);
-  return text;
+  return semanticChronicle(store, date, events, kind, `day|${date}`);
 }
 
 /** 超过 3 天仍未结算的日子，自动归档为「未记录」：不算做了，也不算没做 */
@@ -73,7 +72,7 @@ function archiveOldDaysImpl(store: Store): ISODate[] {
   const days = daysToArchive(store.data, store.today());
   for (const d of days) {
     store.put('days', { date: d, status: 'unrecorded' });
-    chronicle(store, d, `${fmtDay(d)}没有记录，海雾在第四天散去了。`, 'quiet', `day|${d}`);
+    semanticChronicle(store, d, [historyEvent('history.chron.dayArchived', { date: d })], 'quiet', `day|${d}`);
   }
   return days;
 }
@@ -98,10 +97,10 @@ function refreshStagesImpl(store: Store): StageChange[] {
     if (!project) continue;
     const change: StageChange = { project, from: transition.from, to: transition.to };
     changes.push(change);
-    chronicle(
+    semanticChronicle(
       store,
       transition.date,
-      stageChangeText(change) + '。',
+      [stageChangeEvent(change)],
       transition.to < transition.from ? 'recover' : 'quiet',
       id,
     );
