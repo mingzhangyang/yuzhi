@@ -617,7 +617,7 @@ export abstract class IslandInteraction extends IslandViewport {
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
-      add({ kind: 'agenda', target: '__lighthouse__', targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
+      add({ kind: 'agenda', target: '__lighthouse__', targetName: tr('island.lighthouse'), phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
     }
     for (let k = 0; k < s.drifting.length; k++) {
       const [x, y] = this.driftBottleAnchor(k);
