@@ -55,6 +55,7 @@ export const trackerZh = {
   'tracker.deleted': '已删除',
   'tracker.historyCount': '{count} 条历史',
   'tracker.deleteBody': '删除正文',
+  'tracker.deleteDiaryAria': '删除 {date} 的日记',
   'tracker.noVersionSnapshots': '还没有版本快照。',
   'tracker.diaryLifeBook': '日记的一生之书',
 
@@ -304,6 +305,7 @@ export const trackerEn: Record<TrackerMessageKey, string> = {
   'tracker.deleted': 'Deleted',
   'tracker.historyCount': '{count} history entries',
   'tracker.deleteBody': 'Delete current text',
+  'tracker.deleteDiaryAria': 'Delete journal entry for {date}',
   'tracker.noVersionSnapshots': 'No version snapshots yet.',
   'tracker.diaryLifeBook': 'Journal Life Book',
 
