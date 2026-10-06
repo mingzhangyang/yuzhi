@@ -8,7 +8,7 @@ import { $, esc, toast } from './dom';
 import * as A from '../actions';
 import { summarize, type ProjectSummary } from '../logic/summary';
 import { fmtDay } from '../lib/date';
-import { formatFullDate, t } from '../i18n';
+import { formatFullDate, t as tr } from '../i18n';
 
 const fmtN = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 const fullDate = (d: string) => formatFullDate(d);
@@ -17,20 +17,20 @@ const fullDate = (d: string) => formatFullDate(d);
 export function summaryHTML(s: ProjectSummary, compact = false): string {
   const blockers = s.blockers.length
     ? `<ul class="sum-list">${s.blockers.map((b) => `<li><span>${esc(b.text)}</span><b>${b.count}</b></li>`).join('')}</ul>`
-    : `<p class="empty">${esc(t('ceremony.smoothBlockers'))}</p>`;
+    : `<p class="empty">${esc(tr('ceremony.smoothBlockers'))}</p>`;
   const turns = s.turns.length
     ? `<ol class="sum-turns">${s.turns.map((t) => `<li><time>${esc(fmtDay(t.date))}</time><span>${esc(t.text)}</span></li>`).join('')}</ol>`
-    : `<p class="empty">${esc(t('ceremony.smoothTurns'))}</p>`;
+    : `<p class="empty">${esc(tr('ceremony.smoothTurns'))}</p>`;
   return `
     <div class="sum-nums">
-      <div><b>${s.days}</b><span>${esc(t('ceremony.days'))}</span></div>
-      <div><b>${s.tasksDone}</b><span>${esc(t('ceremony.tasksDone'))}</span></div>
-      <div><b>${fmtN(s.bricks)}</b><span>${esc(t('ceremony.bricks'))}</span></div>
-      <div><b>${s.postpones}</b><span>${esc(t('ceremony.postpones'))}</span></div>
+      <div><b>${s.days}</b><span>${esc(tr('ceremony.days'))}</span></div>
+      <div><b>${s.tasksDone}</b><span>${esc(tr('ceremony.tasksDone'))}</span></div>
+      <div><b>${fmtN(s.bricks)}</b><span>${esc(tr('ceremony.bricks'))}</span></div>
+      <div><b>${s.postpones}</b><span>${esc(tr('ceremony.postpones'))}</span></div>
     </div>
-    <p class="hint">${esc(t('ceremony.span', { start: fullDate(s.start), end: s.end !== s.start ? t('ceremony.toDate', { date: fullDate(s.end) }) : '', active: s.activeDays }))}</p>
-    <div class="sect">${esc(t('ceremony.blockers'))}</div>${blockers}
-    ${compact && !s.turns.length ? '' : `<div class="sect">${esc(t('ceremony.turns'))}</div>${turns}`}`;
+    <p class="hint">${esc(tr('ceremony.span', { start: fullDate(s.start), end: s.end !== s.start ? tr('ceremony.toDate', { date: fullDate(s.end) }) : '', active: s.activeDays }))}</p>
+    <div class="sect">${esc(tr('ceremony.blockers'))}</div>${blockers}
+    ${compact && !s.turns.length ? '' : `<div class="sect">${esc(tr('ceremony.turns'))}</div>${turns}`}`;
 }
 
 export interface CeremonyHooks {
@@ -68,19 +68,19 @@ export class Ceremony {
     const open = s.tasks().filter((t) => t.projectId === p.id && t.status === 'open').length;
     this.box.innerHTML = `
       <div class="chead">
-        <div class="kick"><span>${esc(t('ceremony.kick'))}</span><button class="x" data-act="close" aria-label="${esc(t('ceremony.deferAria'))}">×</button></div>
+        <div class="kick"><span>${esc(tr('ceremony.kick'))}</span><button class="x" data-act="close" aria-label="${esc(tr('ceremony.deferAria'))}">×</button></div>
         <h2 id="ceremonyT">「${esc(p.name)}」</h2>
-        <p class="csub">${esc(t('ceremony.subtitle'))}</p>
+        <p class="csub">${esc(tr('ceremony.subtitle'))}</p>
       </div>
       <div class="cbody">
         ${summaryHTML(sum)}
-        ${open ? `<p class="hint cnote">${esc(t('ceremony.openTasks', { count: open }))}</p>` : ''}
-        <div class="sect">${esc(t('ceremony.destination'))}</div>
-        <button class="opt" data-go="landmark"><b>${esc(t('ceremony.landmarkTitle'))}</b><span>${esc(t('ceremony.landmarkBody'))}</span></button>
-        <button class="opt" data-go="archive"><b>${esc(t('ceremony.archiveTitle'))}</b><span>${esc(t('ceremony.archiveBody'))}</span></button>
-        <p class="hint">${esc(t('ceremony.reversible'))}</p>
+        ${open ? `<p class="hint cnote">${esc(tr('ceremony.openTasks', { count: open }))}</p>` : ''}
+        <div class="sect">${esc(tr('ceremony.destination'))}</div>
+        <button class="opt" data-go="landmark"><b>${esc(tr('ceremony.landmarkTitle'))}</b><span>${esc(tr('ceremony.landmarkBody'))}</span></button>
+        <button class="opt" data-go="archive"><b>${esc(tr('ceremony.archiveTitle'))}</b><span>${esc(tr('ceremony.archiveBody'))}</span></button>
+        <p class="hint">${esc(tr('ceremony.reversible'))}</p>
       </div>
-      <div class="cfoot"><button class="linkbtn" data-act="close">${esc(t('ceremony.notDone'))}</button></div>`;
+      <div class="cfoot"><button class="linkbtn" data-act="close">${esc(tr('ceremony.notDone'))}</button></div>`;
     this.root.hidden = false;
     document.body.style.overflow = 'hidden';
     this.hooks.pause(true);
@@ -106,8 +106,8 @@ export class Ceremony {
       const where = A.completeProject(this.store, this.id, go);
       const p = this.store.project(this.id)!;
       this.close();
-      if (go === 'landmark' && where === 'archive') toast(t('ceremony.noCoast'), true);
-      else toast(where === 'landmark' ? t('ceremony.landmarkToast', { name: p.name }) : t('ceremony.archiveToast', { name: p.name }));
+      if (go === 'landmark' && where === 'archive') toast(tr('ceremony.noCoast'), true);
+      else toast(where === 'landmark' ? tr('ceremony.landmarkToast', { name: p.name }) : tr('ceremony.archiveToast', { name: p.name }));
       this.hooks.done(p, where);
     } catch (err) {
       if (err instanceof A.ActionError) toast(err.message, true);
