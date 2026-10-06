@@ -1,6 +1,6 @@
 /** Project-domain mutations. */
 import type { Project, SkipReason } from '../types';
-import type { HistoryEvent } from '../history-types';
+import type { StalledReasonHistoryEvent } from '../history-types';
 import { historyEvent } from '../history-types';
 import { formatHistoryEvent } from '../history';
 import type { Store } from '../store';
@@ -84,7 +84,7 @@ function trimProjectImpl(store: Store, id: string, dropTaskIds: string[]) {
 }
 
 /** 搬离阶段的三个选择之一：正式关闭（需要用户确认后调用） */
-function stalledReasonEvent(reasons: readonly SkipReason[]): HistoryEvent {
+function stalledReasonEvent(reasons: readonly SkipReason[]): StalledReasonHistoryEvent {
   const counts: Record<string, number> = {
     interrupted: 0,
     noEnergy: 0,
@@ -100,7 +100,12 @@ function stalledReasonEvent(reasons: readonly SkipReason[]): HistoryEvent {
   return historyEvent('history.reason.stalled', counts);
 }
 
-function closeProjectImpl(store: Store, id: string, reason: string, reasonEvent?: HistoryEvent) {
+function closeProjectWithReasonImpl(
+  store: Store,
+  id: string,
+  reason: string,
+  reasonEvent?: StalledReasonHistoryEvent,
+) {
   const p = store.project(id);
   if (!p || p.status !== 'active') return;
   const today = store.today();
@@ -128,9 +133,13 @@ function closeProjectImpl(store: Store, id: string, reason: string, reasonEvent?
   semanticChronicle(store, today, [historyEvent('history.chron.projectClosed', { name: p.name })], 'quiet');
 }
 
+function closeProjectImpl(store: Store, id: string, reason: string) {
+  return closeProjectWithReasonImpl(store, id, reason);
+}
+
 function closeStalledProjectImpl(store: Store, id: string, reasons: readonly SkipReason[]) {
   const event = stalledReasonEvent(reasons);
-  return closeProjectImpl(store, id, formatHistoryEvent(event, 'zh-CN'), event);
+  return closeProjectWithReasonImpl(store, id, formatHistoryEvent(event, 'zh-CN'), event);
 }
 
 /** 把关闭的项目重新立起来 */

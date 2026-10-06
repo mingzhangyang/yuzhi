@@ -4,7 +4,7 @@ import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from './types';
 import { localDate } from './lib/date';
 import { MAX_VILLAGES } from './logic/config';
 import { runMigrationSteps, type MigrationStep } from './migrations';
-import { isHistoryEvent } from './history-types';
+import { isChronicleHistoryEvent, isLifeHistoryEvent, isStalledReasonHistoryEvent } from './history-types';
 
 /** 数据集合名 → 主键字段 */
 export const COLLECTIONS = {
@@ -1069,8 +1069,9 @@ const isBool: Check = (v) => typeof v === 'boolean';
 const intIn = (min: number, max = Infinity): Check => (v) => Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
 const oneOf = (...xs: string[]): Check => (v) => typeof v === 'string' && xs.includes(v);
 const arrayOf = (shape: Shape): Check => (v) => Array.isArray(v) && v.every((x) => badField(x, shape) === null);
-const HISTORY_EVENT: Check = (v) => isHistoryEvent(v);
-const HISTORY_EVENTS: Check = (v) => Array.isArray(v) && v.every((item) => isHistoryEvent(item));
+const LIFE_HISTORY_EVENT: Check = (v) => isLifeHistoryEvent(v);
+const CHRONICLE_HISTORY_EVENTS: Check = (v) => Array.isArray(v) && v.every((item) => isChronicleHistoryEvent(item));
+const STALLED_REASON_HISTORY_EVENT: Check = (v) => isStalledReasonHistoryEvent(v);
 
 /** 字段名 → 检查；名字以 ? 结尾的字段可以没有 */
 type Shape = Record<string, Check>;
@@ -1089,7 +1090,7 @@ const LIFE_KIND = oneOf('start', 'task', 'done', 'partial', 'skip', 'stage', 'cl
 const OPERATION_LIFE = arrayOf({
   'projectId?': isText, 'taskId?': isText,
   'subjectType?': oneOf('project', 'task', 'diary', 'schedule'), 'subjectId?': isText,
-  text: isStr, 'event?': HISTORY_EVENT, kind: LIFE_KIND, 'reason?': REASON,
+  text: isStr, 'event?': LIFE_HISTORY_EVENT, kind: LIFE_KIND, 'reason?': REASON,
 });
 const OPERATION_PAYLOAD: Check = (v) => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
@@ -1110,7 +1111,7 @@ const OPERATION_PAYLOAD: Check = (v) => {
 const SHAPES: Record<Coll, Shape> = {
   projects: {
     id: isText, name: isText, createdAt: isDate, status: oneOf('active', 'closed', 'done'),
-    islandSlot: intIn(0, MAX_VILLAGES - 1), 'closedAt?': isDate, 'closeReason?': isStr, 'closeReasonEvent?': HISTORY_EVENT,
+    islandSlot: intIn(0, MAX_VILLAGES - 1), 'closedAt?': isDate, 'closeReason?': isStr, 'closeReasonEvent?': STALLED_REASON_HISTORY_EVENT,
     'resets?': arrayOf({ date: isDate, neglect: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0, kind: oneOf('restart', 'trim') }),
     'promptSnoozeUntil?': isDate, 'doneAt?': isDate,
     'resting?': oneOf('landmark', 'archive'), 'landmarkIndex?': intIn(0),
@@ -1135,7 +1136,7 @@ const SHAPES: Record<Coll, Shape> = {
     id: isText, seq: intIn(1), date: isDate, kind: OPERATION_KIND,
     'projectId?': isText, 'taskId?': isText, 'payload?': OPERATION_PAYLOAD,
   },
-  chronicle: { id: isText, date: isDate, text: isStr, 'events?': HISTORY_EVENTS, kind: oneOf('day', 'event', 'quiet', 'recover', 'landmark') },
+  chronicle: { id: isText, date: isDate, text: isStr, 'events?': CHRONICLE_HISTORY_EVENTS, kind: oneOf('day', 'event', 'quiet', 'recover', 'landmark') },
   snapshots: { date: isDate, backlog: intIn(0) },
 };
 

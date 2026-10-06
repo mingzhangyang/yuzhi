@@ -120,6 +120,61 @@ describe('semantic history localization', () => {
     }))).toThrow(/events/);
   });
 
+  it('rejects impossible dates, invalid counts, and cross-container semantic keys', () => {
+    const h = makeStore('2026-10-06');
+    const project = createProject(h.store, '校验项目');
+    createTask(h.store, { title: '校验任务', projectId: project.id });
+
+    const reject = (data: typeof h.store.data, field: RegExp) => {
+      expect(() => parseBackup(JSON.stringify({
+        format: BACKUP_FORMAT,
+        version: 6,
+        exportedAt: '2026-10-06T00:00:00.000Z',
+        ...data,
+      }))).toThrow(field);
+    };
+
+    const impossibleDate = structuredClone(h.store.data);
+    impossibleDate.chronicle[0] = {
+      ...impossibleDate.chronicle[0],
+      events: [{ key: 'history.chron.dayArchived', params: { date: '2026-02-31' } }],
+    };
+    reject(impossibleDate, /events/);
+
+    const negativeCount = structuredClone(h.store.data);
+    negativeCount.chronicle[0] = {
+      ...negativeCount.chronicle[0],
+      events: [{ key: 'history.chron.dayDone', params: { count: -1 } }],
+    };
+    reject(negativeCount, /events/);
+
+    const fractionalCount = structuredClone(h.store.data);
+    fractionalCount.chronicle[0] = {
+      ...fractionalCount.chronicle[0],
+      events: [{ key: 'history.chron.dayDone', params: { count: 1.5 } }],
+    };
+    reject(fractionalCount, /events/);
+
+    const lifeInChronicle = structuredClone(h.store.data) as unknown as typeof h.store.data & {
+      chronicle: Array<Record<string, unknown>>;
+    };
+    lifeInChronicle.chronicle[0] = {
+      ...lifeInChronicle.chronicle[0],
+      events: [{ key: 'history.life.taskCreated', params: { title: '错位' } }],
+    };
+    reject(lifeInChronicle as typeof h.store.data, /events/);
+
+    const wrongCloseReason = structuredClone(h.store.data) as unknown as typeof h.store.data & {
+      projects: Array<Record<string, unknown>>;
+    };
+    wrongCloseReason.projects[0] = {
+      ...wrongCloseReason.projects[0],
+      closeReason: '错误语义',
+      closeReasonEvent: { key: 'history.reason.interrupted' },
+    };
+    reject(wrongCloseReason as typeof h.store.data, /closeReasonEvent/);
+  });
+
   it('accepts semantic fields in current-version backups and keeps the fallback text', () => {
     const h = makeStore('2026-10-06');
     createProject(h.store, '备份项目');

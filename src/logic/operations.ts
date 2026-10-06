@@ -1,7 +1,7 @@
 import type { Data, LifeEntry, LifeKind, LifeSubjectType, OperationEvent, OperationLifeSnapshot, SettlementEntry, SkipReason } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
-import type { HistoryEventKey } from '../history-types';
-import { historyEvent, isHistoryEvent } from '../history-types';
+import type { LifeHistoryEventKey } from '../history-types';
+import { historyEvent, isLifeHistoryEvent } from '../history-types';
 import { formatHistoryEvent } from '../history';
 
 const LIFE_KINDS = new Set<LifeKind>([
@@ -9,7 +9,7 @@ const LIFE_KINDS = new Set<LifeKind>([
 ]);
 const REASONS = new Set<SkipReason>(['interrupted', 'no_energy', 'not_important', 'postponed']);
 
-const SKIP_HISTORY: Record<SkipReason, HistoryEventKey> = {
+const SKIP_HISTORY: Record<SkipReason, LifeHistoryEventKey> = {
   interrupted: 'history.life.settlementSkippedInterrupted',
   no_energy: 'history.life.settlementSkippedNoEnergy',
   not_important: 'history.life.settlementSkippedNotImportant',
@@ -77,14 +77,14 @@ function snapshotsOf(event: OperationEvent): OperationLifeSnapshot[] {
     if (o.subjectId !== undefined && typeof o.subjectId !== 'string') continue;
     if ((o.subjectType === undefined) !== (o.subjectId === undefined)) continue;
     if (o.reason !== undefined && (typeof o.reason !== 'string' || !REASONS.has(o.reason as SkipReason))) continue;
-    if (o.event !== undefined && !isHistoryEvent(o.event)) continue;
+    if (o.event !== undefined && !isLifeHistoryEvent(o.event)) continue;
     out.push({
       projectId: o.projectId as string | undefined,
       taskId: o.taskId as string | undefined,
       subjectType: o.subjectType as LifeSubjectType | undefined,
       subjectId: o.subjectId as string | undefined,
       text: o.text,
-      event: isHistoryEvent(o.event) ? o.event : undefined,
+      event: isLifeHistoryEvent(o.event) ? o.event : undefined,
       kind: o.kind as LifeKind,
       reason: o.reason as SkipReason | undefined,
     });

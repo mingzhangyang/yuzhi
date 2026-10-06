@@ -18,7 +18,7 @@ import { uid } from '../lib/id';
 import { entryId, type SettleItem } from '../logic/days';
 import { nextFactSeq } from '../logic/operations';
 import { t, type MessageKey, type MessageVars } from '../i18n';
-import type { HistoryEvent } from '../history-types';
+import type { ChronicleHistoryEvent, LifeHistoryEvent } from '../history-types';
 import { formatChronicleEvents, formatHistoryEvent } from '../history';
 
 export const REASON_TEXT: Record<SkipReason, string> = {
@@ -48,7 +48,7 @@ export function chronicle(store: Store, date: ISODate, text: string, kind: Chron
 export function semanticChronicle(
   store: Store,
   date: ISODate,
-  events: HistoryEvent[],
+  events: ChronicleHistoryEvent[],
   kind: ChronicleKind,
   id = uid('c'),
 ): string {
@@ -59,7 +59,7 @@ export function semanticChronicle(
 
 /** Persist a semantic Life Book snapshot with Chinese fallback text for old clients/backups. */
 export function semanticLife(
-  snapshot: Omit<OperationLifeSnapshot, 'text'> & { event: HistoryEvent },
+  snapshot: Omit<OperationLifeSnapshot, 'text'> & { event: LifeHistoryEvent },
 ): OperationLifeSnapshot {
   return { ...snapshot, text: formatHistoryEvent(snapshot.event, 'zh-CN') };
 }

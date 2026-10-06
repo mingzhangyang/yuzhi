@@ -79,14 +79,22 @@ export const HISTORY_EVENT_KEYS = [
 ] as const;
 
 export type HistoryEventKey = typeof HISTORY_EVENT_KEYS[number];
+export type ChronicleHistoryEventKey = Extract<HistoryEventKey, `history.chron.${string}`>;
+export type LifeHistoryEventKey = Extract<HistoryEventKey, `history.life.${string}`>;
+export type ReasonHistoryEventKey = Extract<HistoryEventKey, `history.reason.${string}`>;
+
 export type HistoryParams = Record<string, string | number>;
 
-export interface HistoryEvent {
-  key: HistoryEventKey;
+export interface HistoryEvent<K extends HistoryEventKey = HistoryEventKey> {
+  key: K;
   params?: HistoryParams;
 }
 
-type ParamKind = 'string' | 'number' | 'date' | 'time';
+export type ChronicleHistoryEvent = HistoryEvent<ChronicleHistoryEventKey>;
+export type LifeHistoryEvent = HistoryEvent<LifeHistoryEventKey>;
+export type StalledReasonHistoryEvent = HistoryEvent<'history.reason.stalled'>;
+
+type ParamKind = 'string' | 'count' | 'date' | 'time';
 
 interface HistoryEventContract {
   required?: Readonly<Record<string, ParamKind>>;
@@ -96,27 +104,26 @@ interface HistoryEventContract {
 const NONE: HistoryEventContract = {};
 const NAME = { required: { name: 'string' } } as const;
 const TITLE = { required: { title: 'string' } } as const;
-const COUNT = { required: { count: 'number' } } as const;
+const COUNT = { required: { count: 'count' } } as const;
 const STALLED = {
   optional: {
-    interrupted: 'number',
-    noEnergy: 'number',
-    notImportant: 'number',
-    postponed: 'number',
+    interrupted: 'count',
+    noEnergy: 'count',
+    notImportant: 'count',
+    postponed: 'count',
   },
 } as const;
 
 /**
- * Persisted history is an external-data boundary (backup/import), so every
- * semantic key declares exactly which parameters are accepted. This prevents a
- * syntactically valid but incomplete event from rendering empty placeholders.
+ * Persisted history is an external-data boundary. Every semantic key declares
+ * exactly which parameters are accepted and how their values are validated.
  */
 const HISTORY_EVENT_CONTRACTS = {
   'history.reason.interrupted': NONE,
   'history.reason.noEnergy': NONE,
   'history.reason.notImportant': NONE,
   'history.reason.postponed': NONE,
-  'history.reason.count': { required: { reason: 'string', count: 'number' } },
+  'history.reason.count': { required: { reason: 'string', count: 'count' } },
   'history.reason.stalled': STALLED,
   'history.chron.projectCreated': NAME,
   'history.chron.projectRestarted': NAME,
@@ -194,18 +201,29 @@ const HISTORY_EVENT_CONTRACTS = {
 } as const satisfies Record<HistoryEventKey, HistoryEventContract>;
 
 const HISTORY_EVENT_KEY_SET = new Set<string>(HISTORY_EVENT_KEYS);
-const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const ISO_DATE = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+function validCalendarDate(value: string): boolean {
+  const match = ISO_DATE.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= monthDays[month - 1];
+}
+
 function validParam(value: unknown, kind: ParamKind): boolean {
-  if (kind === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (kind === 'count') return Number.isInteger(value) && (value as number) >= 0;
   if (typeof value !== 'string' || value.trim() === '') return false;
-  if (kind === 'date') return ISO_DATE.test(value);
+  if (kind === 'date') return validCalendarDate(value);
   if (kind === 'time') return HM.test(value);
   return true;
 }
 
-export function historyEvent(key: HistoryEventKey, params?: HistoryParams): HistoryEvent {
+export function historyEvent<K extends HistoryEventKey>(key: K, params?: HistoryParams): HistoryEvent<K> {
   return params && Object.keys(params).length ? { key, params } : { key };
 }
 
@@ -232,4 +250,16 @@ export function isHistoryEvent(value: unknown): value is HistoryEvent {
     if (params[name] !== undefined && !validParam(params[name], kind)) return false;
   }
   return true;
+}
+
+export function isChronicleHistoryEvent(value: unknown): value is ChronicleHistoryEvent {
+  return isHistoryEvent(value) && value.key.startsWith('history.chron.');
+}
+
+export function isLifeHistoryEvent(value: unknown): value is LifeHistoryEvent {
+  return isHistoryEvent(value) && value.key.startsWith('history.life.');
+}
+
+export function isStalledReasonHistoryEvent(value: unknown): value is StalledReasonHistoryEvent {
+  return isHistoryEvent(value) && value.key === 'history.reason.stalled';
 }

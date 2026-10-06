@@ -1,6 +1,6 @@
 import type { Project, SettlementEntry } from '../types';
 import { CHORES } from '../types';
-import type { HistoryEvent } from '../history-types';
+import type { ChronicleHistoryEvent } from '../history-types';
 import { historyEvent } from '../history-types';
 import { formatChronicleEvents, formatHistoryEvent } from '../history';
 import { type Locale } from '../i18n';
@@ -12,7 +12,7 @@ export interface StageChange {
   to: Stage;
 }
 
-export function stageChangeEvent(c: StageChange): HistoryEvent {
+export function stageChangeEvent(c: StageChange): ChronicleHistoryEvent {
   if (c.to < c.from) {
     return c.to === 0
       ? historyEvent('history.chron.stageRecovered', { name: c.project.name })
@@ -33,11 +33,11 @@ export function dayEvents(
   entries: SettlementEntry[],
   projects: Map<string, Project>,
   changes: StageChange[],
-): HistoryEvent[] {
+): ChronicleHistoryEvent[] {
   const done = entries.filter((e) => e.outcome === 'done').length;
   const partial = entries.filter((e) => e.outcome === 'partial').length;
   const skipped = entries.filter((e) => e.outcome === 'skipped');
-  const events: HistoryEvent[] = [];
+  const events: ChronicleHistoryEvent[] = [];
 
   if (done + partial === 0) {
     events.push(historyEvent(entries.length ? 'history.chron.dayNoProgress' : 'history.chron.dayQuiet'));
