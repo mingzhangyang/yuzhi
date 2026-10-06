@@ -197,7 +197,7 @@ export interface LifeEntry {
   /** 兼容旧版本和降级客户端的中文 fallback。 */
   text: string;
   /** 由事实或 operation 生成的可本地化语义。 */
-  event?: HistoryEvent;
+  event?: LifeHistoryEvent;
   kind: LifeKind;
   reason?: SkipReason;
 }

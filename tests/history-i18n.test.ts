@@ -125,7 +125,7 @@ describe('semantic history localization', () => {
     const project = createProject(h.store, '校验项目');
     createTask(h.store, { title: '校验任务', projectId: project.id });
 
-    const reject = (data: typeof h.store.data, field: RegExp) => {
+    const reject = (data: unknown, field: RegExp) => {
       expect(() => parseBackup(JSON.stringify({
         format: BACKUP_FORMAT,
         version: 6,
@@ -155,24 +155,22 @@ describe('semantic history localization', () => {
     };
     reject(fractionalCount, /events/);
 
-    const lifeInChronicle = structuredClone(h.store.data) as unknown as typeof h.store.data & {
-      chronicle: Array<Record<string, unknown>>;
-    };
-    lifeInChronicle.chronicle[0] = {
-      ...lifeInChronicle.chronicle[0],
+    const lifeInChronicle = structuredClone(h.store.data) as unknown as Record<string, unknown>;
+    const chronicleRows = lifeInChronicle.chronicle as Record<string, unknown>[];
+    chronicleRows[0] = {
+      ...chronicleRows[0],
       events: [{ key: 'history.life.taskCreated', params: { title: '错位' } }],
     };
-    reject(lifeInChronicle as typeof h.store.data, /events/);
+    reject(lifeInChronicle, /events/);
 
-    const wrongCloseReason = structuredClone(h.store.data) as unknown as typeof h.store.data & {
-      projects: Array<Record<string, unknown>>;
-    };
-    wrongCloseReason.projects[0] = {
-      ...wrongCloseReason.projects[0],
+    const wrongCloseReason = structuredClone(h.store.data) as unknown as Record<string, unknown>;
+    const projectRows = wrongCloseReason.projects as Record<string, unknown>[];
+    projectRows[0] = {
+      ...projectRows[0],
       closeReason: '错误语义',
       closeReasonEvent: { key: 'history.reason.interrupted' },
     };
-    reject(wrongCloseReason as typeof h.store.data, /closeReasonEvent/);
+    reject(wrongCloseReason, /closeReasonEvent/);
   });
 
   it('accepts semantic fields in current-version backups and keeps the fallback text', () => {
