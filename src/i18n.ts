@@ -1,5 +1,6 @@
 import { uiEn, uiZh } from './i18n-ui';
 import { trackerEn, trackerZh } from './i18n-tracker';
+import { islandEn, islandZh } from './i18n-island';
 
 export type Locale = 'zh-CN' | 'en';
 
@@ -104,6 +105,7 @@ const zh = {
   'daily.archived': '{days}没有记录，已归档。不算做了，也不算没做。',
   ...uiZh,
   ...trackerZh,
+  ...islandZh,
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -207,6 +209,7 @@ const en: Record<MessageKey, string> = {
   'daily.archived': '{days} had no record and were archived. They count as neither done nor not done.',
   ...uiEn,
   ...trackerEn,
+  ...islandEn,
 };
 
 const catalog: Record<Locale, Record<MessageKey, string>> = { 'zh-CN': zh, en };
