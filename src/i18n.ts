@@ -1,4 +1,5 @@
 import { uiEn, uiZh } from './i18n-ui';
+import { trackerEn, trackerZh } from './i18n-tracker';
 
 export type Locale = 'zh-CN' | 'en';
 
@@ -102,6 +103,7 @@ const zh = {
   'stats.conditionFoot': '近 7 天已结算条目里，做了和做了一部分的占比',
   'daily.archived': '{days}没有记录，已归档。不算做了，也不算没做。',
   ...uiZh,
+  ...trackerZh,
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -204,6 +206,7 @@ const en: Record<MessageKey, string> = {
   'stats.conditionFoot': 'Share of reviewed items done or partly done in the last 7 days',
   'daily.archived': '{days} had no record and were archived. They count as neither done nor not done.',
   ...uiEn,
+  ...trackerEn,
 };
 
 const catalog: Record<Locale, Record<MessageKey, string>> = { 'zh-CN': zh, en };
