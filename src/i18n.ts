@@ -182,7 +182,7 @@ const en: Record<MessageKey, string> = {
   'map.weather': '{season} · {light} · {weather}{festival}{fog}',
   'map.fogSuffix': ' · Sea fog {count}d',
   'map.fogTitle': 'Sea fog covers the island',
-  'map.fogBody': '{days} {days|day|days} still {days|needs|need} review. Catch up to clear the fog; after three days they are archived as unrecorded.',
+  'map.fogBody': 'Pending review: {days}. Catch up to clear the fog; after three days they are archived as unrecorded.',
   'map.descActive': '{count} {count|village|villages}. Todos, schedules, journals, and daily reviews cultivate the island’s four shared areas.',
   'map.descEmpty': 'Projects become villages; real-life todos, schedules, journals, and reviews keep cultivating the island.',
   'map.driftReadOnly': 'Cannot classify in a read-only tab',
@@ -208,7 +208,7 @@ const en: Record<MessageKey, string> = {
   'stats.settled': '{good} / {settled} {settled|item|items}',
   'stats.noSettlements': 'No review records yet',
   'stats.conditionFoot': 'Share of reviewed items done or partly done in the last 7 days',
-  'daily.archived': '{days} {days|day had|days had} no record and {days|was|were} archived. {days|It|They} {days|counts|count} as neither done nor not done.',
+  'daily.archived': 'Archived as unrecorded: {days}. These dates count as neither done nor not done.',
   ...uiEn,
   ...trackerEn,
   ...islandEn,
@@ -220,15 +220,21 @@ const STORAGE_KEY = 'yuzhi.locale';
 let locale: Locale = 'zh-CN';
 const listeners = new Set<() => void>();
 
+const pluralRules: Record<Locale, Intl.PluralRules> = {
+  'zh-CN': new Intl.PluralRules('zh-CN'),
+  en: new Intl.PluralRules('en'),
+};
+
 function interpolate(template: string, vars: MessageVars = {}, target: Locale = 'zh-CN'): string {
-  const rules = new Intl.PluralRules(target);
-  const pluralized = template.replace(
-    /\{([A-Za-z0-9_]+)\|([^{}|]*)\|([^{}|]*)\}/g,
-    (whole, name: string, one: string, other: string) => {
-      const value = Number(vars[name]);
-      return Number.isFinite(value) ? (rules.select(value) === 'one' ? one : other) : whole;
-    },
-  );
+  const pluralized = template.includes('|')
+    ? template.replace(
+        /\{([A-Za-z0-9_]+)\|([^{}|]*)\|([^{}|]*)\}/g,
+        (whole, name: string, one: string, other: string) => {
+          const value = Number(vars[name]);
+          return Number.isFinite(value) ? (pluralRules[target].select(value) === 'one' ? one : other) : whole;
+        },
+      )
+    : template;
   return pluralized.replace(/\{([A-Za-z0-9_]+)\}/g, (_whole, name: string) => String(vars[name] ?? ''));
 }
 
