@@ -8,13 +8,13 @@ import { ActionError, operation } from './shared';
 function validDiaryDate(store: Store, date: ISODate | undefined): ISODate {
   const today = store.today();
   const value = date ?? today;
-  if (value > today) throw new ActionError('日记只能记录今天或过去发生的事');
+  if (value > today) throw new ActionError('error.diaryFuture');
   return value;
 }
 
 function createDiaryImpl(store: Store, input: { text: string; date?: ISODate }): DiaryEntry {
   const text = input.text.trim();
-  if (!text) throw new ActionError('写下一点今天发生的事吧');
+  if (!text) throw new ActionError('error.diaryRequired');
 
   const date = validDiaryDate(store, input.date);
   const entry: DiaryEntry = {
@@ -42,7 +42,7 @@ function editDiaryImpl(store: Store, id: string, input: { text: string; date?: I
   const entry = store.data.diaries.find((item) => item.id === id);
   if (!entry) return undefined;
   const text = input.text.trim();
-  if (!text) throw new ActionError('日记内容不能为空');
+  if (!text) throw new ActionError('error.diaryEmpty');
   const date = validDiaryDate(store, input.date ?? entry.date);
   if (text === entry.text && date === entry.date) return entry;
 

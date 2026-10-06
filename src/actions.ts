@@ -9,6 +9,7 @@ export { ActionError, REASON_TEXT } from './actions/shared';
 
 export {
   closeProject,
+  closeStalledProject,
   createProject,
   projectsNeedingPrompt,
   reopenProject,

@@ -1,3 +1,8 @@
+import { uiEn, uiZh } from './i18n-ui';
+import { trackerEn, trackerZh } from './i18n-tracker';
+import { islandEn, islandZh } from './i18n-island';
+import { errorEn, errorZh } from './i18n-errors';
+
 export type Locale = 'zh-CN' | 'en';
 
 export type MessageVars = Record<string, string | number>;
@@ -99,6 +104,10 @@ const zh = {
   'stats.noSettlements': '还没有结算记录',
   'stats.conditionFoot': '近 7 天已结算条目里，做了和做了一部分的占比',
   'daily.archived': '{days}没有记录，已归档。不算做了，也不算没做。',
+  ...uiZh,
+  ...trackerZh,
+  ...islandZh,
+  ...errorZh,
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -173,14 +182,14 @@ const en: Record<MessageKey, string> = {
   'map.weather': '{season} · {light} · {weather}{festival}{fog}',
   'map.fogSuffix': ' · Sea fog {count}d',
   'map.fogTitle': 'Sea fog covers the island',
-  'map.fogBody': '{days} still need review. Catch up to clear the fog; after three days they are archived as unrecorded.',
-  'map.descActive': '{count} villages. Todos, schedules, journals, and daily reviews cultivate the island’s four shared areas.',
+  'map.fogBody': 'Pending review: {days}. Catch up to clear the fog; after three days they are archived as unrecorded.',
+  'map.descActive': '{count} {count|village|villages}. Todos, schedules, journals, and daily reviews cultivate the island’s four shared areas.',
   'map.descEmpty': 'Projects become villages; real-life todos, schedules, journals, and reviews keep cultivating the island.',
   'map.driftReadOnly': 'Cannot classify in a read-only tab',
   'map.driftClassify': 'Pick up & classify',
   'common.close': 'Close',
   'chron.empty': 'A new line appears here after each daily review.',
-  'chron.count': '{count} entries',
+  'chron.count': '{count} {count|entry|entries}',
   'stats.granary': 'Granary',
   'stats.progress': 'Progress',
   'stats.backlog': 'Backlog',
@@ -189,17 +198,21 @@ const en: Record<MessageKey, string> = {
   'stats.items7d': 'items / 7d',
   'stats.items': 'items',
   'stats.workHours': 'Work hours {start}–{end}',
-  'stats.scheduledTired': '{scheduled} hours scheduled; low energy {count} times in 7 days, so plan less',
-  'stats.scheduled': '{scheduled} hours scheduled ({events} events), {hours} work hours total',
+  'stats.scheduledTired': '{scheduled} {scheduled|hour|hours} scheduled; low energy {count} {count|time|times} in 7 days, so plan less',
+  'stats.scheduled': '{scheduled} {scheduled|hour|hours} scheduled ({events} {events|event|events}), {hours} work {hours|hour|hours} total',
   'stats.today': 'Today {value}',
   'stats.progressFoot': 'Confirmed progress in the last 7 days; partial completion counts as half',
   'stats.backlogRight': 'Dock {dock}　Overdue {overdue}',
   'stats.backlogFoot': 'Unscheduled dock items + dated tasks still unfinished',
   'stats.backlogEmpty': 'Dock clear, nothing overdue',
-  'stats.settled': '{good} / {settled} items',
+  'stats.settled': '{good} / {settled} {settled|item|items}',
   'stats.noSettlements': 'No review records yet',
   'stats.conditionFoot': 'Share of reviewed items done or partly done in the last 7 days',
-  'daily.archived': '{days} had no record and were archived. They count as neither done nor not done.',
+  'daily.archived': 'Archived as unrecorded: {days}. These dates count as neither done nor not done.',
+  ...uiEn,
+  ...trackerEn,
+  ...islandEn,
+  ...errorEn,
 };
 
 const catalog: Record<Locale, Record<MessageKey, string>> = { 'zh-CN': zh, en };
@@ -207,8 +220,22 @@ const STORAGE_KEY = 'yuzhi.locale';
 let locale: Locale = 'zh-CN';
 const listeners = new Set<() => void>();
 
-function interpolate(template: string, vars: MessageVars = {}): string {
-  return template.replace(/\{([A-Za-z0-9_]+)\}/g, (_whole, name: string) => String(vars[name] ?? ''));
+const pluralRules: Record<Locale, Intl.PluralRules> = {
+  'zh-CN': new Intl.PluralRules('zh-CN'),
+  en: new Intl.PluralRules('en'),
+};
+
+function interpolate(template: string, vars: MessageVars = {}, target: Locale = 'zh-CN'): string {
+  const pluralized = template.includes('|')
+    ? template.replace(
+        /\{([A-Za-z0-9_]+)\|([^{}|]*)\|([^{}|]*)\}/g,
+        (whole, name: string, one: string, other: string) => {
+          const value = Number(vars[name]);
+          return Number.isFinite(value) ? (pluralRules[target].select(value) === 'one' ? one : other) : whole;
+        },
+      )
+    : template;
+  return pluralized.replace(/\{([A-Za-z0-9_]+)\}/g, (_whole, name: string) => String(vars[name] ?? ''));
 }
 
 export function resolveLocale(preferred?: string | null, languages: readonly string[] = []): Locale {
@@ -247,7 +274,7 @@ export function getLocale(): Locale {
 }
 
 export function message(target: Locale, key: MessageKey, vars?: MessageVars): string {
-  return interpolate(catalog[target][key], vars);
+  return interpolate(catalog[target][key], vars, target);
 }
 
 export function t(key: MessageKey, vars?: MessageVars): string {
@@ -302,6 +329,13 @@ export function formatCalendarDay(date: string, target: Locale = locale): string
   if (target === 'zh-CN') return String(month) + '月' + String(day) + '日';
   const dt = new Date(Date.UTC(2000, month - 1, day));
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(dt);
+}
+
+export function formatFullDate(date: string, target: Locale = locale): string {
+  const [year, month, day] = dateParts(date);
+  if (target === 'zh-CN') return String(year) + '年' + String(month) + '月' + String(day) + '日';
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(dt);
 }
 
 export function formatWeekday(date: string, target: Locale = locale): string {

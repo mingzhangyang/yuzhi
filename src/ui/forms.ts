@@ -13,6 +13,7 @@ import { addDays, dateOfStamp, fmtDay, relDay } from '../lib/date';
 import { roofOf } from './scene';
 import { bindDateSelects, dateSelect, readDate } from './date-select';
 import { MAX_VILLAGES } from '../logic/config';
+import { getLocale, t } from '../i18n';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -26,10 +27,10 @@ export function openNew(
   const ps = store.activeProjects();
   const projectOptions = ps.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   const titles = {
-    task: '新建 Todo',
-    schedule: '新建日程',
-    diary: '写日记',
-    project: '新建项目',
+    task: t('forms.newTask'),
+    schedule: t('forms.newSchedule'),
+    diary: t('forms.newDiary'),
+    project: t('forms.newProject'),
   } as const;
   const diaryDraftKey = 'yuzhi:capture:diary-draft';
 
@@ -45,54 +46,54 @@ export function openNew(
   const diaryText = diaryDraft?.text ?? '';
   const body = `
     <div class="capture">
-      <div class="seg capture-tabs" role="group" aria-label="新建类型">
-        <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}" aria-pressed="${kind === 'task'}">Todo</button>
-        <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}" aria-pressed="${kind === 'schedule'}">日程</button>
-        <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}" aria-pressed="${kind === 'diary'}">日记</button>
-        <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}" aria-pressed="${kind === 'project'}">项目</button>
+      <div class="seg capture-tabs" role="group" aria-label="${esc(t('forms.newTypeAria'))}">
+        <button type="button" data-k="task" class="${kind === 'task' ? 'on' : ''}" aria-pressed="${kind === 'task'}">${esc(t('forms.taskTab'))}</button>
+        <button type="button" data-k="schedule" class="${kind === 'schedule' ? 'on' : ''}" aria-pressed="${kind === 'schedule'}">${esc(t('forms.scheduleTab'))}</button>
+        <button type="button" data-k="diary" class="${kind === 'diary' ? 'on' : ''}" aria-pressed="${kind === 'diary'}">${esc(t('forms.diaryTab'))}</button>
+        <button type="button" data-k="project" class="${kind === 'project' ? 'on' : ''}" aria-pressed="${kind === 'project'}">${esc(t('forms.projectTab'))}</button>
       </div>
 
       <form class="capture-form" data-f="task" ${kind === 'task' ? '' : 'hidden'}>
         <div class="capture-fields">
-          <label class="field capture-primary">要做的事<input name="title" placeholder="例如：写完周报" autocomplete="off" ${kind === 'task' ? 'autofocus' : ''}></label>
+          <label class="field capture-primary">${esc(t('forms.taskLabel'))}<input name="title" placeholder="${esc(t('forms.taskPlaceholder'))}" autocomplete="off" ${kind === 'task' ? 'autofocus' : ''}></label>
           <div class="capture-meta">
-            <label class="field">所属项目<select name="proj"><option value="">未指定 · 先停在码头</option>${projectOptions}</select></label>
-            <label class="field">日期${dateSelect('date', today, { withNone: true, mode: 'task' })}</label>
+            <label class="field">${esc(t('forms.projectLabel'))}<select name="proj"><option value="">${esc(t('forms.projectNone'))}</option>${projectOptions}</select></label>
+            <label class="field">${esc(t('forms.dateLabel'))}${dateSelect('date', today, { withNone: true, mode: 'task' })}</label>
           </div>
-          <p class="hint">先记下来就好。未指定项目的 Todo 会乘船停在码头；真实推进并结算后，农田才会生长。</p>
+          <p class="hint">${esc(t('forms.taskHint'))}</p>
         </div>
-        <div class="actions capture-actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">添加 Todo</button></div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>${esc(t('common.cancel'))}</button><button class="btn primary">${esc(t('forms.addTask'))}</button></div>
       </form>
 
       <form class="capture-form" data-f="schedule" ${kind === 'schedule' ? '' : 'hidden'}>
         <div class="capture-fields">
-          <label class="field capture-primary">日程标题<input name="title" placeholder="例如：和设计对齐" autocomplete="off" ${kind === 'schedule' ? 'autofocus' : ''}></label>
-          <label class="field">日期${dateSelect('date', today, { current: today, withNone: false, mode: 'schedule' })}</label>
+          <label class="field capture-primary">${esc(t('forms.scheduleTitle'))}<input name="title" placeholder="${esc(t('forms.schedulePlaceholder'))}" autocomplete="off" ${kind === 'schedule' ? 'autofocus' : ''}></label>
+          <label class="field">${esc(t('forms.dateLabel'))}${dateSelect('date', today, { current: today, withNone: false, mode: 'schedule' })}</label>
           <div class="capture-time-grid">
-            <label class="field">开始<input name="start" type="time" value="09:00"></label>
-            <label class="field">结束<input name="end" type="time" value="10:00"></label>
+            <label class="field">${esc(t('forms.start'))}<input name="start" type="time" value="09:00"></label>
+            <label class="field">${esc(t('forms.end'))}<input name="end" type="time" value="10:00"></label>
           </div>
-          <label class="field">所属项目<select name="proj"><option value="${CHORES}">杂务 / 生活</option>${projectOptions}</select></label>
-          <p class="hint">计划本身不会让果园生长；日程真正经过现实并结算后，才会成为培育事实。</p>
+          <label class="field">${esc(t('forms.projectLabel'))}<select name="proj"><option value="${CHORES}">${esc(t('common.choresLife'))}</option>${projectOptions}</select></label>
+          <p class="hint">${esc(t('forms.scheduleHint'))}</p>
         </div>
-        <div class="actions capture-actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">创建日程</button></div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>${esc(t('common.cancel'))}</button><button class="btn primary">${esc(t('forms.createSchedule'))}</button></div>
       </form>
 
       <form class="capture-form diary-form" data-f="diary" ${kind === 'diary' ? '' : 'hidden'}>
         <div class="capture-fields">
-          <label class="diary-date-row"><span>记录日期</span>${dateSelect('date', today, { current: diaryDate, withNone: false, mode: 'diary' })}</label>
-          <label class="field diary-writing"><span class="sr-only">日记内容</span><textarea name="text" placeholder="发生了什么、想到什么、想记住什么……" ${kind === 'diary' ? 'autofocus' : ''}>${esc(diaryText)}</textarea></label>
-          <p class="hint" data-diary-note>${diaryText ? '已恢复上次没有写完的内容。' : '日记不需要结算；写过日记的日子会让花园慢慢繁盛。'}</p>
+          <label class="diary-date-row"><span>${esc(t('forms.diaryDate'))}</span>${dateSelect('date', today, { current: diaryDate, withNone: false, mode: 'diary' })}</label>
+          <label class="field diary-writing"><span class="sr-only">${esc(t('forms.diaryContent'))}</span><textarea name="text" placeholder="${esc(t('forms.diaryPlaceholder'))}" ${kind === 'diary' ? 'autofocus' : ''}>${esc(diaryText)}</textarea></label>
+          <p class="hint" data-diary-note>${esc(t(diaryText ? 'forms.diaryRestored' : 'forms.diaryHint'))}</p>
         </div>
-        <div class="actions capture-actions"><button type="button" class="btn" data-close>关闭</button><button class="btn primary">写下日记</button></div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>${esc(t('common.close'))}</button><button class="btn primary">${esc(t('forms.writeDiary'))}</button></div>
       </form>
 
       <form class="capture-form" data-f="project" ${kind === 'project' ? '' : 'hidden'}>
         <div class="capture-fields">
-          <label class="field capture-primary">项目名<input name="name" placeholder="例如：团队、写书、搬家" autocomplete="off" ${kind === 'project' ? 'autofocus' : ''}></label>
-          <p class="hint">项目会成为岛上的一座村落。立项后直接添加第一件要做的事，不需要额外经营村落。</p>
+          <label class="field capture-primary">${esc(t('forms.projectName'))}<input name="name" placeholder="${esc(t('forms.projectPlaceholder'))}" autocomplete="off" ${kind === 'project' ? 'autofocus' : ''}></label>
+          <p class="hint">${esc(t('forms.projectHint'))}</p>
         </div>
-        <div class="actions capture-actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary">立项并进入</button></div>
+        <div class="actions capture-actions"><button type="button" class="btn" data-close>${esc(t('common.cancel'))}</button><button class="btn primary">${esc(t('forms.createProject'))}</button></div>
       </form>
     </div>`;
 
@@ -148,7 +149,7 @@ export function openNew(
                 projectId: pid || undefined,
                 scheduledFor: date,
               });
-              toast(task.projectId ? `「${task.title}」住进了「${store.project(task.projectId)?.name}」` : `「${task.title}」乘船停在了码头`);
+              toast(task.projectId ? t('forms.taskVillageToast', { task: task.title, project: store.project(task.projectId)?.name ?? '' }) : t('forms.taskDockToast', { task: task.title }));
             } else if (form.dataset.f === 'schedule') {
               const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
               const event = A.createSchedule(store, {
@@ -158,7 +159,7 @@ export function openNew(
                 end: String(fd.get('end') ?? ''),
                 projectId: String(fd.get('proj') ?? CHORES),
               });
-              toast(`日程「${event.title}」已经放进小岛的时间里`);
+              toast(t('forms.scheduleToast', { title: event.title }));
             } else if (form.dataset.f === 'diary') {
               const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
               const entry = A.createDiary(store, {
@@ -170,10 +171,10 @@ export function openNew(
               } catch {
                 // Ignore storage cleanup failures after a successful save.
               }
-              toast(`${fmtDay(entry.date)}的日记写下来了，花园会记住它`);
+              toast(t('forms.diaryToast', { date: fmtDay(entry.date) }));
             } else {
               const project = A.createProject(store, String(fd.get('name') ?? ''));
-              toast(`岛上立起了新村落「${project.name}」`);
+              toast(t('forms.projectToast', { name: project.name }));
               closeModal(false);
               onProject?.(project.id);
               return;
@@ -192,7 +193,7 @@ export function openNew(
 export function openCalendar(store: Store, onImported: () => void) {
   // 日历对话框里的每个操作都会写入；只读标签页不打开半绑定的对话框
   if (store.isReadOnly) {
-    toast('此页当前只读。请先接管写权限，再修改小岛。', true);
+    toast(t('forms.readOnly'), true);
     return;
   }
   const render = () => {
@@ -201,29 +202,29 @@ export function openCalendar(store: Store, onImported: () => void) {
     const srcRows = srcs
       .map((s) => {
         const n = store.data.events.filter((e) => e.sourceId === s.id).length;
-        const when = s.lastFetchedAt ? new Date(s.lastFetchedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-        return `<div class="row static"><span class="tx"><b>${esc(s.name)}</b><span>${s.icsUrl ? '订阅链接' : '上传的文件'} · ${n} 个事件 · 更新于 ${when}</span>${s.lastError ? `<span class="err">${esc(s.lastError)}</span>` : ''}</span>${s.icsUrl ? `<button class="btn small" data-sync="${esc(s.id)}">刷新</button>` : ''}<button class="btn small danger" data-rm="${esc(s.id)}">移除</button></div>`;
+        const when = s.lastFetchedAt ? new Date(s.lastFetchedAt).toLocaleString(getLocale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+        return `<div class="row static"><span class="tx"><b>${esc(s.name)}</b><span>${esc(t('forms.calendarSourceMeta', { kind: t(s.icsUrl ? 'forms.calendarLink' : 'forms.calendarFile'), count: n, when }))}</span>${s.lastError ? `<span class="err">${esc(s.lastError)}</span>` : ''}</span>${s.icsUrl ? `<button class="btn small" data-sync="${esc(s.id)}">${esc(t('forms.refresh'))}</button>` : ''}<button class="btn small danger" data-rm="${esc(s.id)}">${esc(t('forms.remove'))}</button></div>`;
       })
       .join('');
     const ruleRows = rules
       .map((r) => {
-        const p = r.projectId === CHORES ? '杂务' : store.project(r.projectId)?.name ?? '已关闭的项目';
-        return `<div class="task"><div class="tt"><b>标题包含「${esc(r.contains)}」→ ${esc(p)}</b></div><div class="acts"><button class="iconbtn" data-rule="${esc(r.id)}" aria-label="删除规则">✕</button></div></div>`;
+        const p = r.projectId === CHORES ? t('common.chores') : store.project(r.projectId)?.name ?? t('common.closedProject');
+        return `<div class="task"><div class="tt"><b>${esc(t('forms.rule', { contains: r.contains, project: p }))}</b></div><div class="acts"><button class="iconbtn" data-rule="${esc(r.id)}" aria-label="${esc(t('forms.deleteRuleAria'))}">✕</button></div></div>`;
       })
       .join('');
     const groups = unclassifiedGroups(store.data.events);
     return `
-      <p>日历告诉小岛时间花在了哪里，决定村落热闹还是冷清。Apple、Google、Outlook 都能导出 .ics 订阅链接。只读，不会改动你的日历。</p>
-      <div class="srcs rows">${srcRows || '<p class="empty">还没有接入日历。</p>'}</div>
+      <p>${esc(t('forms.calendarIntro'))}</p>
+      <div class="srcs rows">${srcRows || `<p class="empty">${esc(t('forms.calendarEmpty'))}</p>`}</div>
       <form data-f="url">
-        <label class="field">订阅链接（.ics / webcal://）<input name="url" type="url" inputmode="url" placeholder="https://…/basic.ics" autocomplete="off"></label>
-        <label class="field">名字（可不填）<input name="name" placeholder="例如：工作日历" autocomplete="off"></label>
-        <div class="actions" style="justify-content:space-between"><button type="button" class="btn" data-file>上传 .ics 文件</button><button class="btn primary">订阅</button></div>
+        <label class="field">${esc(t('forms.calendarUrl'))}<input name="url" type="url" inputmode="url" placeholder="https://…/basic.ics" autocomplete="off"></label>
+        <label class="field">${esc(t('forms.calendarName'))}<input name="name" placeholder="${esc(t('forms.calendarNamePlaceholder'))}" autocomplete="off"></label>
+        <div class="actions" style="justify-content:space-between"><button type="button" class="btn" data-file>${esc(t('forms.uploadIcs'))}</button><button class="btn primary">${esc(t('forms.subscribe'))}</button></div>
       </form>
-      <p class="hint">浏览器不能直接读取别人的 .ics 链接，小岛会通过一个只做转发的 Cloudflare Worker 去取，Worker 不保存任何数据。</p>
-      ${groups.length ? `<div class="btnrow"><button class="btn small" data-classify>${groups.length} 类事件待归类 ›</button></div>` : ''}
-      <div class="sect">归类规则 <small>${rules.length} 条</small></div>
-      ${ruleRows || '<p class="empty">第一次遇到一类事件时，你指定一次归属，这里就会多一条规则。</p>'}`;
+      <p class="hint">${esc(t('forms.calendarProxyHint'))}</p>
+      ${groups.length ? `<div class="btnrow"><button class="btn small" data-classify>${esc(t('forms.unclassifiedCount', { count: groups.length }))}</button></div>` : ''}
+      <div class="sect">${esc(t('forms.rules'))} <small>${esc(t('forms.rulesCount', { count: rules.length }))}</small></div>
+      ${ruleRows || `<p class="empty">${esc(t('forms.rulesEmpty'))}</p>`}`;
   };
   const mount = (box: HTMLElement, signal: AbortSignal) => {
     const context = store.captureWriteContext(signal);
@@ -243,18 +244,18 @@ export function openCalendar(store: Store, onImported: () => void) {
         const fd = new FormData(form);
         const btn = form.querySelector<HTMLButtonElement>('button.primary')!;
         btn.disabled = true;
-        btn.textContent = '正在读取…';
+        btn.textContent = t('forms.reading');
         try {
           const n = await addUrlSource(store, String(fd.get('name') ?? ''), String(fd.get('url') ?? ''), signal);
           if (!context.isCurrent()) return;
-          toast(`接入成功，读到 ${n} 个事件`);
+          toast(t('forms.connectSuccess', { count: n }));
           rerender();
           onImported();
         } catch (err) {
           if (!context.isCurrent()) return;
           toast(errMsg(err), true);
           btn.disabled = false;
-          btn.textContent = '订阅';
+          btn.textContent = t('forms.subscribe');
         }
       });
       box.querySelector('[data-file]')!.addEventListener('click', async () => {
@@ -264,7 +265,7 @@ export function openCalendar(store: Store, onImported: () => void) {
         try {
           const n = await addFileSource(store, f, signal);
           if (!context.isCurrent()) return;
-          toast(`导入了 ${n} 个事件`);
+          toast(t('forms.importSuccess', { count: n }));
           rerender();
           onImported();
         } catch (err) {
@@ -279,7 +280,7 @@ export function openCalendar(store: Store, onImported: () => void) {
           try {
             const n = await syncSource(store, b.dataset.sync!, signal);
             if (!context.isCurrent()) return;
-            toast(`刷新完成，${n} 个事件`);
+            toast(t('forms.refreshSuccess', { count: n }));
             onImported();
           } catch (err) {
             if (!context.isCurrent()) return;
@@ -304,7 +305,7 @@ export function openCalendar(store: Store, onImported: () => void) {
     };
     bind();
   };
-  openModal({ title: '日历', body: `<div data-cal>${render()}</div>`, mount });
+  openModal({ title: t('forms.calendarTitle'), body: `<div data-cal>${render()}</div>`, mount });
 }
 
 /** 事件归类：一次问一类，记下规则，以后同类自动归位 */
@@ -313,7 +314,7 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
   const groups = unclassifiedGroups(store.data.events).filter((g) => !skipped.has(g.title));
   if (!groups.length) {
     closeModal(false);
-    toast('日历事件都归好类了');
+    toast(t('forms.classified'));
     return;
   }
   const preferredIndex = preferredTitle !== undefined ? groups.findIndex((group) => group.title === preferredTitle) : -1;
@@ -325,14 +326,14 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
   const ps = store.activeProjects();
   const kw = suggestKeyword(g.title);
   openModal({
-    kick: `日历事件归类 · 还有 ${groups.length} 类`,
-    title: `「${g.title}」属于哪里？`,
-    body: `<p class="hint">${g.events.length} 次 · ${next ? `${dateOfStamp(next.start) >= today ? '下一次' : '最近一次'}在${relDay(dateOfStamp(next.start), today)}` : ''}</p>
-      <div class="rows" style="margin-top:8px">${ps.map((p) => `<button class="row" data-p="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b></span></button>`).join('')}<button class="row" data-p=""><i class="sw" style="background:#8a8578"></i><span class="tx"><b>杂务</b><span>不属于任何项目</span></span></button></div>
-      <label class="field inline"><input type="checkbox" name="rem" checked> 以后标题包含</label>
-      <label class="field" style="margin-top:4px"><input name="kw" value="${esc(kw)}" autocomplete="off" aria-label="规则关键词"></label>
-      <p class="hint">的事件都自动归到这里。</p>
-      <div class="actions"><button class="btn" data-skip>先跳过</button></div>`,
+    kick: t('forms.classifyKick', { count: groups.length }),
+    title: t('forms.classifyTitle', { title: g.title }),
+    body: `<p class="hint">${esc(t('forms.classifyMeta', { count: g.events.length, when: next ? `${t(dateOfStamp(next.start) >= today ? 'forms.nextTime' : 'forms.recentTime')} ${relDay(dateOfStamp(next.start), today)}` : '' }))}</p>
+      <div class="rows" style="margin-top:8px">${ps.map((p) => `<button class="row" data-p="${esc(p.id)}"><i class="sw" style="background:${roofOf(p.islandSlot)}"></i><span class="tx"><b>${esc(p.name)}</b></span></button>`).join('')}<button class="row" data-p=""><i class="sw" style="background:#8a8578"></i><span class="tx"><b>${esc(t('common.chores'))}</b><span>${esc(t('forms.choresDesc'))}</span></span></button></div>
+      <label class="field inline"><input type="checkbox" name="rem" checked> ${esc(t('forms.rulePrefix'))}</label>
+      <label class="field" style="margin-top:4px"><input name="kw" value="${esc(kw)}" autocomplete="off" aria-label="${esc(t('forms.ruleKeywordAria'))}"></label>
+      <p class="hint">${esc(t('forms.ruleSuffix'))}</p>
+      <div class="actions"><button class="btn" data-skip>${esc(t('forms.skip'))}</button></div>`,
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-p]').forEach((b) =>
         b.addEventListener('click', () => {
@@ -354,17 +355,17 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
 export function openSettings(store: Store, applyTheme: () => void) {
   const s = store.data.settings;
   openModal({
-    title: '工作时段与外观',
-    body: `<p class="hint">粮仓 = 工作时段 − 日历上已排的时间。</p>
-      <div style="display:flex;gap:10px"><label class="field" style="flex:1">开始<input type="time" name="ws" value="${esc(s.workStart)}"></label><label class="field" style="flex:1">结束<input type="time" name="we" value="${esc(s.workEnd)}"></label></div>
-      <label class="field">外观<select name="theme"><option value="auto"${s.theme === 'auto' ? ' selected' : ''}>跟随系统</option><option value="light"${s.theme === 'light' ? ' selected' : ''}>亮色</option><option value="dark"${s.theme === 'dark' ? ' selected' : ''}>暗色</option></select></label>
-      <div class="actions"><button class="btn" data-close>算了</button><button class="btn primary" data-ok>保存</button></div>`,
+    title: t('forms.settingsTitle'),
+    body: `<p class="hint">${esc(t('forms.granaryEquation'))}</p>
+      <div style="display:flex;gap:10px"><label class="field" style="flex:1">${esc(t('forms.start'))}<input type="time" name="ws" value="${esc(s.workStart)}"></label><label class="field" style="flex:1">${esc(t('forms.end'))}<input type="time" name="we" value="${esc(s.workEnd)}"></label></div>
+      <label class="field">${esc(t('forms.appearance'))}<select name="theme"><option value="auto"${s.theme === 'auto' ? ' selected' : ''}>${esc(t('forms.themeAuto'))}</option><option value="light"${s.theme === 'light' ? ' selected' : ''}>${esc(t('forms.themeLight'))}</option><option value="dark"${s.theme === 'dark' ? ' selected' : ''}>${esc(t('forms.themeDark'))}</option></select></label>
+      <div class="actions"><button class="btn" data-close>${esc(t('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(t('common.save'))}</button></div>`,
     mount(box) {
       box.querySelector('[data-ok]')!.addEventListener('click', () => {
         const ws = box.querySelector<HTMLInputElement>('input[name=ws]')!.value || '09:00';
         const we = box.querySelector<HTMLInputElement>('input[name=we]')!.value || '18:00';
         if (we <= ws) {
-          toast('结束时间要晚于开始时间', true);
+          toast(t('forms.invalidHours'), true);
           return;
         }
         store.saveSettings({ workStart: ws, workEnd: we, theme: box.querySelector<HTMLSelectElement>('select[name=theme]')!.value as 'auto' | 'light' | 'dark' });
@@ -378,13 +379,13 @@ export function openSettings(store: Store, applyTheme: () => void) {
 /** 第一次打开 */
 export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void }) {
   openModal({
-    kick: '欢迎',
-    title: '这是一座由你的日子长成的岛',
-    body: `<p>每个项目是一座村落；Todo、日程、日记和真实结算会继续长成岛上的村落、农田、果园、鱼塘和花园。</p>
-      <p class="hint">你不需要浇水、喂鱼或施肥。只记录本来就在发生的生活，小岛负责把它映射成生长。</p>
-      <button class="opt" data-w="project"><b>建第一座村落</b><span>从一个正在做的项目开始</span></button>
-      <button class="opt" data-w="calendar"><b>接入日历</b><span>粘贴 .ics 订阅链接，或上传 .ics 文件</span></button>
-      <button class="opt" data-w="demo"><b>先看看示例</b><span>放几个示例村落，感受一下衰败和恢复（之后可以关闭它们）</span></button>`,
+    kick: t('forms.welcomeKick'),
+    title: t('forms.welcomeTitle'),
+    body: `<p>${esc(t('forms.welcomeBody'))}</p>
+      <p class="hint">${esc(t('forms.welcomeHint'))}</p>
+      <button class="opt" data-w="project"><b>${esc(t('forms.welcomeProject'))}</b><span>${esc(t('forms.welcomeProjectDesc'))}</span></button>
+      <button class="opt" data-w="calendar"><b>${esc(t('forms.welcomeCalendar'))}</b><span>${esc(t('forms.welcomeCalendarDesc'))}</span></button>
+      <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>`,
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) =>
         b.addEventListener('click', () => {
@@ -402,7 +403,7 @@ export function seedDemo(store: Store) {
   // 四座活跃村落，加上一座随后落成为地标的，同时最多占 5 个位置
   const free = MAX_VILLAGES - store.activeProjects().length;
   if (free < 5) {
-    toast(`放示例需要 5 个空位，岛上现在只空着 ${Math.max(0, free)} 个。先关闭几个村落吧。`, true);
+    toast(t('forms.demoNoSpace', { count: Math.max(0, free) }), true);
     return;
   }
   try {
@@ -422,13 +423,13 @@ export function seedDemo(store: Store) {
         return t;
       };
 
-      const write = A.createProject(store, '写一本小书');
+      const write = A.createProject(store, t('forms.demoBook'));
       back(write.id, 24);
-      const team = A.createProject(store, '团队');
+      const team = A.createProject(store, t('forms.demoTeam'));
       back(team.id, 12);
-      const move = A.createProject(store, '搬家');
+      const move = A.createProject(store, t('forms.demoMove'));
       back(move.id, 34);
-      const gym = A.createProject(store, '健身');
+      const gym = A.createProject(store, t('forms.demoFitness'));
       back(gym.id, 10);
 
       const settled = new Map<ISODate, Map<string, A.Decision>>();
@@ -437,41 +438,41 @@ export function seedDemo(store: Store) {
         settled.get(date)!.set(`task|${id}`, d);
       };
       // 写书：荒了两周多，最近四天认真推进
-      for (let k = 4; k >= 1; k--) mark(addDays(today, -k), doneOn(write.id, `第 ${5 - k} 章初稿`, addDays(today, -k)).id, { outcome: k === 2 ? 'partial' : 'done' });
+      for (let k = 4; k >= 1; k--) mark(addDays(today, -k), doneOn(write.id, t('forms.demoChapterDraft', { chapter: 5 - k }), addDays(today, -k)).id, { outcome: k === 2 ? 'partial' : 'done' });
       // 团队：前几天很忙，之后安静了几天
-      for (let k = 11; k >= 9; k--) mark(addDays(today, -k), doneOn(team.id, ['整理需求', '和设计对齐', '写周报'][11 - k], addDays(today, -k)).id, { outcome: 'done' });
-      const tPost = doneOn(team.id, '季度复盘', addDays(today, -2));
+      for (let k = 11; k >= 9; k--) mark(addDays(today, -k), doneOn(team.id, [t('forms.demoRequirements'), t('forms.demoDesignSync'), t('forms.demoWeeklyReport')][11 - k], addDays(today, -k)).id, { outcome: 'done' });
+      const tPost = doneOn(team.id, t('forms.demoQuarterReview'), addDays(today, -2));
       mark(addDays(today, -2), tPost.id, { outcome: 'skipped', reason: 'interrupted' });
       // 健身：没精力的几天不伤害村落
-      mark(addDays(today, -3), doneOn(gym.id, '慢跑 3 公里', addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
+      mark(addDays(today, -3), doneOn(gym.id, t('forms.demoJog'), addDays(today, -3)).id, { outcome: 'skipped', reason: 'no_energy' });
       for (const [date, m] of [...settled.entries()].sort((a, b) => a[0].localeCompare(b[0]))) A.settleDay(store, date, m);
 
     // 一个已经落成的项目：立在海岸上
-      const photo = A.createProject(store, '整理旧照片');
+      const photo = A.createProject(store, t('forms.demoPhotos'));
       back(photo.id, 40);
       for (let k = 0; k < 7; k++) {
         const d = addDays(today, -38 + k * 4);
-        const t = doneOn(photo.id, ['扫描相册', '去重', '按年份归档', '补写说明', '做一本电子相册', '备份到硬盘', '分享给家人'][k], d);
-        A.settleDay(store, d, new Map([[`task|${t.id}`, { outcome: 'done' }]]));
+        const photoTask = doneOn(photo.id, [t('forms.demoScanAlbums'), t('forms.demoDeduplicate'), t('forms.demoSortByYear'), t('forms.demoAddNotes'), t('forms.demoPhotoBook'), t('forms.demoBackupDrive'), t('forms.demoShareFamily')][k], d);
+        A.settleDay(store, d, new Map([[`task|${photoTask.id}`, { outcome: 'done' }]]));
       }
       A.completeProject(store, photo.id, 'landmark');
       store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
       for (const op of store.data.operations) if (op.projectId === photo.id && op.kind === 'project-completed') store.put('operations', { ...op, date: addDays(today, -10) });
-      for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes('整理旧照片')) store.put('chronicle', { ...c, date: addDays(today, -10) });
+      for (const c of store.data.chronicle) if (c.kind === 'landmark' && c.text.includes(photo.name)) store.put('chronicle', { ...c, date: addDays(today, -10) });
 
-      A.createTask(store, { title: '第 5 章初稿', projectId: write.id, scheduledFor: today });
-      A.createTask(store, { title: '找出版社聊聊', projectId: write.id });
-      A.createTask(store, { title: '准备周会', projectId: team.id, scheduledFor: today });
-      A.createTask(store, { title: '回复客户邮件', projectId: team.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoChapterDraft', { chapter: 5 }), projectId: write.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoPublisherChat'), projectId: write.id });
+      A.createTask(store, { title: t('forms.demoTeamMeeting'), projectId: team.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoClientReply'), projectId: team.id, scheduledFor: today });
       A.rescheduleTask(store, tPost.id, today);
-      A.createTask(store, { title: '比价搬家公司', projectId: move.id, scheduledFor: addDays(today, -6) });
-      A.createTask(store, { title: '打包书架', projectId: move.id });
-      A.createTask(store, { title: '力量训练', projectId: gym.id, scheduledFor: today });
-      A.createTask(store, { title: '预约牙医' });
-      A.createTask(store, { title: '朋友婚礼的礼物' });
+      A.createTask(store, { title: t('forms.demoMovingQuotes'), projectId: move.id, scheduledFor: addDays(today, -6) });
+      A.createTask(store, { title: t('forms.demoPackShelf'), projectId: move.id });
+      A.createTask(store, { title: t('forms.demoStrength'), projectId: gym.id, scheduledFor: today });
+      A.createTask(store, { title: t('forms.demoDentist') });
+      A.createTask(store, { title: t('forms.demoWeddingGift') });
       A.refreshStages(store);
     });
-    toast('放好了四座示例村落');
+    toast(t('forms.demoDone'));
   } catch (e) {
     // Store.batch 已恢复数据和缓存；这里只显示业务错误。
     if (e instanceof A.ActionError) toast(e.message, true);

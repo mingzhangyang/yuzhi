@@ -1,5 +1,6 @@
 import { describe as group, expect, it } from 'vitest';
 import { describe, moonName, type InfoContext } from '../src/island/info';
+import { setLocale } from '../src/i18n';
 
 const ctx = (o: Partial<InfoContext> = {}): InfoContext => ({
   season: 0,
@@ -95,5 +96,34 @@ group('日程说明', () => {
     const info = describe({ kind: 'agenda', target: 'p', targetName: '团队', phase: 'allday', later: 0, ended: 0, banners: ['出差'] }, ctx());
     expect(info.lines.join('')).not.toContain('稍后');
     expect(info.lines.join('')).toContain('今天全天：出差');
+  });
+});
+
+
+group('scenery localization', () => {
+  it('renders the same island facts in English without translating user content', () => {
+    setLocale('en', false);
+    try {
+      const sea = describe({ kind: 'sea' }, ctx({ season: 2, light: 'night', hour: 22, fest: ['zhongqiu'] }));
+      expect(sea.lines[0]).toBe('Autumn · Night · Clear');
+      expect(sea.lines[1]).toContain('Full moon');
+
+      const agenda = describe({
+        kind: 'agenda',
+        target: 'p',
+        targetName: 'Team Alpha',
+        phase: 'soon',
+        title: '周会',
+        start: new Date(2026, 9, 4, 14, 10).toISOString(),
+        later: 0,
+        ended: 0,
+        banners: [],
+      }, ctx());
+      expect(agenda.title).toBe('Team Alpha');
+      expect(agenda.lines[0]).toContain('“周会” starts soon');
+      expect(agenda.lines[0]).toContain('14:10');
+    } finally {
+      setLocale('zh-CN', false);
+    }
   });
 });

@@ -30,7 +30,7 @@ function setEventProjectImpl(store: Store, eventId: string, projectId: string | 
   const nextProjectId = projectId || CHORES;
   if (e.sourceId === LOCAL_CALENDAR_SOURCE_ID && e.projectId !== nextProjectId) {
     if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
-      throw new ActionError('这个日程已经留下结算记录，不能直接修改');
+      throw new ActionError('error.scheduleSettledEdit');
     }
     const before = scheduleSnapshot(e);
     const next = { ...e, projectId: nextProjectId, classified: true };
@@ -139,12 +139,12 @@ const LOCAL_YMD = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 function localScheduleStamp(date: ISODate, hm: string): string {
   const d = startOfLocalDay(date);
-  if (localDate(d) !== date) throw new ActionError('日程日期不存在');
+  if (localDate(d) !== date) throw new ActionError('error.scheduleDateMissing');
   const [h, m] = hm.split(':').map(Number);
   d.setHours(h, m, 0, 0);
   const actual = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   if (localDate(d) !== date || actual !== hm) {
-    throw new ActionError('这个当地时间因夏令时切换不存在，请重新选择');
+    throw new ActionError('error.dstGap');
   }
   return d.toISOString();
 }
@@ -170,15 +170,15 @@ function buildLocalSchedule(
   identity?: Pick<CalendarEvent, 'id' | 'uid' | 'projectId'>,
 ): CalendarEvent {
   const title = input.title.trim();
-  if (!title) throw new ActionError('写一句日程标题吧');
-  if (!LOCAL_YMD.test(input.date)) throw new ActionError('日程日期格式不对');
+  if (!title) throw new ActionError('error.scheduleTitleRequired');
+  if (!LOCAL_YMD.test(input.date)) throw new ActionError('error.scheduleDateFormat');
   if (!LOCAL_HM.test(input.start) || !LOCAL_HM.test(input.end)) {
-    throw new ActionError('日程时间格式不对');
+    throw new ActionError('error.scheduleTimeFormat');
   }
   const start = localScheduleStamp(input.date, input.start);
   const end = localScheduleStamp(input.date, input.end);
   if (Date.parse(end) <= Date.parse(start)) {
-    throw new ActionError('日程结束时间要晚于开始时间');
+    throw new ActionError('error.scheduleEndAfterStart');
   }
   const requested = input.projectId;
   const projectId = requested === CHORES
@@ -224,7 +224,7 @@ function editScheduleImpl(store: Store, eventId: string, input: LocalScheduleInp
   const event = store.data.events.find((item) => item.id === eventId);
   if (!event || event.sourceId !== LOCAL_CALENDAR_SOURCE_ID) return undefined;
   if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
-    throw new ActionError('这个日程已经留下结算记录，不能直接修改');
+    throw new ActionError('error.scheduleSettledEdit');
   }
   const next = buildLocalSchedule(store, input, { id: event.id, uid: event.uid, projectId: event.projectId });
   const before = scheduleSnapshot(event);
@@ -250,7 +250,7 @@ function deleteScheduleImpl(store: Store, eventId: string) {
   const event = store.data.events.find((item) => item.id === eventId);
   if (!event || event.sourceId !== LOCAL_CALENDAR_SOURCE_ID) return;
   if (store.data.entries.some((entry) => entry.itemType === 'event' && entry.itemId === eventId)) {
-    throw new ActionError('这个日程已经留下结算记录，不能直接删除');
+    throw new ActionError('error.scheduleSettledDelete');
   }
   const before = scheduleSnapshot(event);
   operation(store, {

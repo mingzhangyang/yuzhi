@@ -1,5 +1,6 @@
 import type { Data, ISODate } from '../types';
 import { addDays } from '../lib/date';
+import { t } from '../i18n';
 
 export type CultivationKind = 'field' | 'orchard' | 'pond' | 'garden';
 export type CultivationLevel = 0 | 1 | 2 | 3 | 4;
@@ -74,39 +75,39 @@ export function cultivationState(data: Data, today: ISODate): CultivationState {
   return {
     field: {
       kind: 'field',
-      name: '农田',
+      name: t('cultivation.field'),
       level: levelFrom(fieldScore, [1, 3, 7, 12]),
       score: fieldScore,
       summary: taskDone || taskPartial
-        ? `最近 14 天记录了 ${taskDone} 次 Todo 完成推进，另有 ${taskPartial} 次部分推进。`
-        : '最近 14 天还没有确认推进 Todo，农田正在休耕。',
+        ? t('cultivation.fieldActive', { done: taskDone, partial: taskPartial })
+        : t('cultivation.fieldIdle'),
     },
     orchard: {
       kind: 'orchard',
-      name: '果园',
+      name: t('cultivation.orchard'),
       level: levelFrom(orchardScore, [0.5, 2, 5, 9]),
       score: orchardScore,
       summary: eventDone || eventPartial || eventSkipped
-        ? `最近 14 天有 ${eventDone + eventPartial + eventSkipped} 场日程经过结算：完成 ${eventDone} 场、部分完成 ${eventPartial} 场、未完成 ${eventSkipped} 场。`
-        : '最近 14 天还没有经过结算的定时日程。未来安排只显示在日程层，不会直接让果园生长。',
+        ? t('cultivation.orchardActive', { count: eventDone + eventPartial + eventSkipped, done: eventDone, partial: eventPartial, skipped: eventSkipped })
+        : t('cultivation.orchardIdle'),
     },
     pond: {
       kind: 'pond',
-      name: '鱼塘',
+      name: t('cultivation.pond'),
       level: levelFrom(settledDays.size, [1, 4, 8, 12]),
       score: settledDays.size,
       summary: settledDays.size
-        ? `最近 14 天有 ${settledDays.size} 天被认真结算。鱼塘只认真实记录，不评价这一天做得多不多。`
-        : '最近 14 天还没有结算记录，鱼塘水面很安静。',
+        ? t('cultivation.pondActive', { count: settledDays.size })
+        : t('cultivation.pondIdle'),
     },
     garden: {
       kind: 'garden',
-      name: '花园',
+      name: t('cultivation.garden'),
       level: levelFrom(diaryDays.size, [1, 3, 7, 14]),
       score: diaryDays.size,
       summary: diaryDays.size
-        ? `最近 30 天有 ${diaryDays.size} 天写过日记；同一天写很多篇也只算一次。`
-        : '最近 30 天还没有日记，花圃里只留着嫩芽的位置。',
+        ? t('cultivation.gardenActive', { count: diaryDays.size })
+        : t('cultivation.gardenIdle'),
     },
   };
 }

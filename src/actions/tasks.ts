@@ -7,7 +7,7 @@ import { ActionError, operation, putSettlementEntry, q } from './shared';
 
 function createTaskImpl(store: Store, o: { title: string; projectId?: string; scheduledFor?: ISODate }): Task {
   const title = o.title.trim();
-  if (!title) throw new ActionError('写一句要做的事吧');
+  if (!title) throw new ActionError('error.taskRequired');
   const today = store.today();
   const projectId = o.projectId && store.project(o.projectId)?.status === 'active' ? o.projectId : undefined;
   const t: Task = { id: uid('t'), title, projectId, scheduledFor: projectId ? o.scheduledFor : undefined, status: 'open', createdAt: today };

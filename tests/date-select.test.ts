@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dateSelect, dateSelectRestorePlan, readDate } from '../src/ui/date-select';
+import { setLocale } from '../src/i18n';
 
 describe('shared date select', () => {
   const today = '2026-10-05';
@@ -23,6 +24,19 @@ describe('shared date select', () => {
     expect(diary).toContain('前天');
     expect(diary).not.toContain('明天');
     expect(diary).toContain('其他日期…');
+  });
+
+  it('renders English labels from the same date-select model', () => {
+    setLocale('en', false);
+    try {
+      const html = dateSelect('date', today, { withNone: true, mode: 'task' });
+      expect(html).toContain('No date');
+      expect(html).toContain('Today');
+      expect(html).toContain('Tomorrow');
+      expect(html).toContain('Other date…');
+    } finally {
+      setLocale('zh-CN', false);
+    }
   });
 
   it('recreates a custom drafted date after a locale-driven select rebuild', () => {

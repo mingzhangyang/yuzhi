@@ -144,8 +144,11 @@ try {
 
     rebuilt.value = 'other';
     rebuilt.dispatchEvent(new Event('change', { bubbles: true }));
-    const secondPicker = document.querySelector('form[data-form="ptask"] input[type="date"][aria-label="选择日期"]');
+    const secondPicker = document.querySelector('form[data-form="ptask"] input[type="date"]');
     if (!(secondPicker instanceof HTMLInputElement)) throw new Error('second custom date picker missing');
+    if (secondPicker.getAttribute('aria-label') !== 'Choose date') {
+      throw new Error(`custom date picker aria label did not localize: ${secondPicker.getAttribute('aria-label')}`);
+    }
     secondPicker.value = '';
     secondPicker.dispatchEvent(new Event('blur'));
 

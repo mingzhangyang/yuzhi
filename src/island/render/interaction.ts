@@ -7,6 +7,7 @@ import type { AgendaView, Ambience, ChoresView, Hit, SceneryCandidate, SceneryFo
 import { personSize, treeBounds } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
+import { t as tr } from '../../i18n';
 
 /** 命中、说明和键盘浏览；不推进动画，也不绘制。 */
 export abstract class IslandInteraction extends IslandViewport {
@@ -47,17 +48,18 @@ export abstract class IslandInteraction extends IslandViewport {
   }
 
   protected villageLabelText(v: VillageView): string {
-    const stageTxt = v.stage ? ` · ${['', '安静', '蒙灰', '搬离'][v.stage]}` : '';
+    const stageKeys = ['', 'stage.quiet', 'stage.dusty', 'stage.leaving'] as const;
+    const stageTxt = v.stage ? ` · ${tr(stageKeys[v.stage] as 'stage.quiet' | 'stage.dusty' | 'stage.leaving')}` : '';
     const ag = v.agenda;
     const live = ag?.live?.[0];
     const soon = ag?.soon?.[0];
     const agendaParts = [
-      live ? `${live.title} 至 ${this.timeText(live.end)}` : '',
-      soon ? `${soon.title} 将开始` : '',
-      ag?.later ? `稍后 ${ag.later} 场` : '',
-      ag?.ended ? `待结算 ${ag.ended}` : '',
+      live ? tr('island.liveUntil', { title: live.title, time: this.timeText(live.end) }) : '',
+      soon ? tr('island.startsSoon', { title: soon.title }) : '',
+      ag?.later ? tr('island.laterCount', { count: ag.later }) : '',
+      ag?.ended ? tr('island.pendingCount', { count: ag.ended }) : '',
     ].filter(Boolean);
-    return `${v.name} ${v.openCount}人${agendaParts.map((part) => ` · ${part}`).join('')}${stageTxt}`;
+    return `${tr('island.villagePeople', { name: v.name, count: v.openCount })}${agendaParts.map((part) => ` · ${part}`).join('')}${stageTxt}`;
   }
 
   protected villageLabelAnchor(v: VillageView): [number, number] {
@@ -67,11 +69,11 @@ export abstract class IslandInteraction extends IslandViewport {
   }
 
   protected choresLabelText(ch: ChoresView): string {
-    const parts = [`杂务 ${ch.count}`];
-    if (ch.live) parts.push(`${ch.live.title} 至 ${this.timeText(ch.live.until)}`);
-    if (ch.soon) parts.push(`${ch.soon.title} 将开始`);
-    if (ch.later) parts.push(`稍后 ${ch.later}`);
-    if (ch.ended) parts.push(`待结算 ${ch.ended}`);
+    const parts = [tr('island.choresCount', { count: ch.count })];
+    if (ch.live) parts.push(tr('island.liveUntil', { title: ch.live.title, time: this.timeText(ch.live.until) }));
+    if (ch.soon) parts.push(tr('island.startsSoon', { title: ch.soon.title }));
+    if (ch.later) parts.push(tr('island.laterCount', { count: ch.later }));
+    if (ch.ended) parts.push(tr('island.pendingCount', { count: ch.ended }));
     return parts.join(' · ');
   }
 
@@ -306,9 +308,9 @@ export abstract class IslandInteraction extends IslandViewport {
   }
 
   protected timeText(stamp: string | undefined): string {
-    if (!stamp) return '稍后';
+    if (!stamp) return tr('island.later');
     const d = new Date(stamp);
-    if (!Number.isFinite(d.getTime())) return '稍后';
+    if (!Number.isFinite(d.getTime())) return tr('island.later');
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
@@ -318,14 +320,14 @@ export abstract class IslandInteraction extends IslandViewport {
     if (hit.kind === 'drift') return { kind: 'drift', title: hit.title };
     if (hit.kind !== 'agenda') return null;
     if (hit.target === '__lighthouse__') {
-      return { kind: 'agenda', target: hit.target, targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners };
+      return { kind: 'agenda', target: hit.target, targetName: tr('island.lighthouse'), phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners };
     }
     if (hit.target === CHORES) {
       const c = s.chores;
       return {
         kind: 'agenda',
         target: CHORES,
-        targetName: '杂务',
+        targetName: tr('common.chores'),
         phase: c.live ? 'live' : c.soon ? 'soon' : c.ended ? 'ended' : 'later',
         title: c.live?.title ?? c.soon?.title,
         until: c.live?.until,
@@ -615,7 +617,7 @@ export abstract class IslandInteraction extends IslandViewport {
     }
     if (s.lighthouseBanners.length) {
       const [x, y] = this.lighthouseBannerAnchor();
-      add({ kind: 'agenda', target: '__lighthouse__', targetName: '灯塔', phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
+      add({ kind: 'agenda', target: '__lighthouse__', targetName: tr('island.lighthouse'), phase: 'allday', later: 0, ended: 0, banners: s.lighthouseBanners }, null, x, y);
     }
     for (let k = 0; k < s.drifting.length; k++) {
       const [x, y] = this.driftBottleAnchor(k);

@@ -1,5 +1,6 @@
 import type { ISODate } from '../types';
 import { addDays, fmtDay, startOfLocalDay } from '../lib/date';
+import { t } from '../i18n';
 
 export type DateSelectMode = 'task' | 'schedule' | 'diary';
 
@@ -21,19 +22,19 @@ export function dateSelect(name: string, today: ISODate, options: DateSelectOpti
   const { current, withNone = true, mode = 'task' } = options;
   const opts: Array<[string, string]> = [];
 
-  if (withNone) opts.push(['', '不定日期']);
+  if (withNone) opts.push(['', t('dateSelect.none')]);
 
   if (mode === 'diary') {
-    opts.push([today, '今天'], [addDays(today, -1), '昨天'], [addDays(today, -2), '前天']);
+    opts.push([today, t('date.today')], [addDays(today, -1), t('date.yesterday')], [addDays(today, -2), t('date.dayBeforeYesterday')]);
   } else {
-    opts.push([today, '今天'], [addDays(today, 1), '明天'], [addDays(today, 2), '后天']);
+    opts.push([today, t('date.today')], [addDays(today, 1), t('date.tomorrow')], [addDays(today, 2), t('date.dayAfterTomorrow')]);
     const wd = startOfLocalDay(today).getDay();
     const nextMon = addDays(today, ((8 - wd) % 7) || 7);
-    pushUnique(opts, nextMon, `下周一（${fmtDay(nextMon)}）`);
+    pushUnique(opts, nextMon, t('dateSelect.nextMonday', { date: fmtDay(nextMon) }));
   }
 
   if (current) pushUnique(opts, current, fmtDay(current));
-  opts.push(['other', '其他日期…']);
+  opts.push(['other', t('dateSelect.other')]);
 
   const selected = current ?? (withNone ? '' : today);
   return `<select name="${name}" data-date-select data-date-mode="${mode}">${opts
@@ -93,7 +94,7 @@ export function bindDateSelects(root: ParentNode, today: ISODate) {
       const input = document.createElement('input');
       input.type = 'date';
       input.value = previousValue;
-      input.setAttribute('aria-label', '选择日期');
+      input.setAttribute('aria-label', t('dateSelect.aria'));
 
       const mode = sel.dataset.dateMode as DateSelectMode | undefined;
       if (mode === 'diary') input.max = today;

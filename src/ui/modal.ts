@@ -1,4 +1,5 @@
 import { $, esc } from './dom';
+import { t } from '../i18n';
 
 export interface ModalOpts {
   kick?: string;
@@ -26,7 +27,7 @@ export function openModal(o: ModalOpts) {
   lifetime = controller;
   lastFocus = document.activeElement;
   const box = $('mdlBox');
-  box.innerHTML = `${o.dismissable === false ? '' : '<button class="x" data-close aria-label="关闭">×</button>'}${o.kick ? `<div class="kick">${esc(o.kick)}</div>` : ''}<h2 id="mdlT">${esc(o.title)}</h2>${o.body}`;
+  box.innerHTML = `${o.dismissable === false ? '' : `<button class="x" data-close aria-label="${esc(t('common.close'))}">×</button>`}${o.kick ? `<div class="kick">${esc(o.kick)}</div>` : ''}<h2 id="mdlT">${esc(o.title)}</h2>${o.body}`;
   $('mdl').hidden = false;
   o.mount?.(box, controller.signal);
   const f = box.querySelector<HTMLElement>('[autofocus]') ?? box;
@@ -63,7 +64,7 @@ export function confirmModal(o: { kick?: string; title: string; text: string; ok
     openModal({
       kick: o.kick,
       title: o.title,
-      body: `<p>${esc(o.text)}</p><div class="actions"><button class="btn" data-close>算了</button><button class="btn ${o.danger ? 'danger' : 'primary'}" data-ok${o.readOnlySafe ? ' data-readonly-safe' : ''} autofocus>${esc(o.ok)}</button></div>`,
+      body: `<p>${esc(o.text)}</p><div class="actions"><button class="btn" data-close>${esc(t('forms.nevermind'))}</button><button class="btn ${o.danger ? 'danger' : 'primary'}" data-ok${o.readOnlySafe ? ' data-readonly-safe' : ''} autofocus>${esc(o.ok)}</button></div>`,
       mount(box, signal) {
         signal.addEventListener('abort', () => resolve(false), { once: true });
         box.querySelector('[data-ok]')!.addEventListener('click', () => {
