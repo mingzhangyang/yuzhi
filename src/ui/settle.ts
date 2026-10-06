@@ -10,8 +10,15 @@ import { roofOf } from './scene';
 import * as A from '../actions';
 import { itemsForDay, pendingDays, type SettleItem } from '../logic/days';
 import { fmtDay, relDay, weekday } from '../lib/date';
+import { t, type MessageKey } from '../i18n';
 
 const REASONS: SkipReason[] = ['interrupted', 'no_energy', 'not_important', 'postponed'];
+const REASON_KEYS: Record<SkipReason, MessageKey> = {
+  interrupted: 'reason.interrupted',
+  no_energy: 'reason.noEnergy',
+  not_important: 'reason.notImportant',
+  postponed: 'reason.postponed',
+};
 const SWIPE = 72;
 
 export interface SettleHooks {
@@ -122,34 +129,34 @@ export class SettleSheet {
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
     const extra = s.tasks().filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
     const extraSel = extra.length
-      ? `<div class="sextra"><select data-pull aria-label="还做了别的事"><option value="">${this.date === today ? '今天' : '这天'}还做了别的事…</option>${extra.map((t) => `<option value="${t.id}">${esc(t.title)} · ${esc(s.project(t.projectId)?.name ?? '')}</option>`).join('')}</select></div>`
+      ? `<div class="sextra"><select data-pull aria-label="${esc(t('settle.extraAria'))}"><option value="">${esc(t(this.date === today ? 'settle.extraToday' : 'settle.extraDay'))}</option>${extra.map((task) => `<option value="${task.id}">${esc(task.title)} · ${esc(s.project(task.projectId)?.name ?? '')}</option>`).join('')}</select></div>`
       : '';
     this.box.innerHTML = `
       <div class="shead">
-        <div class="kick"><span>${this.date < today ? '海雾里的一天 · 补上记录' : '黄昏 · 晚间结算'}</span><button class="x" data-act="close" aria-label="关闭">×</button></div>
-        <h2 id="settleT">${fmtDay(this.date)} ${weekday(this.date)}${settled ? ' <small style="font-size:12px;color:var(--faint)">已结算</small>' : ''}</h2>
+        <div class="kick"><span>${esc(t(this.date < today ? 'settle.catchUpKick' : 'settle.eveningKick'))}</span><button class="x" data-act="close" aria-label="${esc(t('common.close'))}">×</button></div>
+        <h2 id="settleT">${fmtDay(this.date)} ${weekday(this.date)}${settled ? ` <small style="font-size:12px;color:var(--faint)">${esc(t('settle.reviewed'))}</small>` : ''}</h2>
         ${days.length > 1 ? `<div class="daytabs">${tabs}</div>` : ''}
       </div>
-      <div class="sbar"><span>${items.length} 条 · 已确认 ${confirmed}</span>${items.length ? `<button class="btn small" data-act="all">全部做了</button>` : ''}</div>
-      <div class="slist">${cards || `<div class="sempty">这一天没有排上日期的任务，也没有日历事件。<br>${extra.length ? '如果做了什么，可以从下面加进来。' : '安安静静的一天。'}</div>`}${extraSel}</div>
-      <div class="sfoot"><span class="grow">${items.length ? (left ? `右滑做了 · 左滑没做 · 轻点做了一部分；还有 ${left} 条没确认` : '都确认好了') : ''}</span><button class="btn dusk" data-act="commit">${settled ? '更新结算' : '完成结算'}</button></div>`;
+      <div class="sbar"><span>${esc(t('settle.progress', { count: items.length, confirmed }))}</span>${items.length ? `<button class="btn small" data-act="all">${esc(t('settle.allDone'))}</button>` : ''}</div>
+      <div class="slist">${cards || `<div class="sempty">${esc(t('settle.empty'))}<br>${esc(t(extra.length ? 'settle.emptyExtra' : 'settle.emptyQuiet'))}</div>`}${extraSel}</div>
+      <div class="sfoot"><span class="grow">${items.length ? (left ? esc(t('settle.gestureLeft', { count: left })) : esc(t('settle.allConfirmed'))) : ''}</span><button class="btn dusk" data-act="commit">${esc(t(settled ? 'settle.update' : 'settle.complete'))}</button></div>`;
   }
 
   private card(it: SettleItem, dec: A.Decision | undefined) {
     const s = this.store;
     const p = it.projectId && it.projectId !== CHORES ? s.project(it.projectId) : undefined;
     const color = p ? roofOf(p.islandSlot) : it.projectId === CHORES ? '#8a8578' : 'var(--line)';
-    const where = p ? p.name : it.projectId === CHORES ? '杂务' : it.type === 'event' ? '未归类' : '';
-    const meta = [it.type === 'event' && it.start ? `${timeOf(it.start)}–${timeOf(it.end!)} · 日历` : '任务', where].filter(Boolean).join(' · ');
+    const where = p ? p.name : it.projectId === CHORES ? t('common.chores') : it.type === 'event' ? t('common.unclassified') : '';
+    const meta = [it.type === 'event' && it.start ? `${timeOf(it.start)}–${timeOf(it.end!)} · ${t('settle.calendar')}` : t('settle.task'), where].filter(Boolean).join(' · ');
     const o = dec?.outcome;
     const reasons =
       o === 'skipped'
         ? `<div class="reasons">${REASONS.map((r) => `<button data-reason="${r}" class="${dec?.reason === r ? 'on' : ''}">${A.REASON_TEXT[r]}</button>`).join('')}</div>`
         : '';
     return `<div class="sitem ${o ? 'o-' + o : ''}" data-key="${esc(it.key)}" data-project="${esc(p?.id ?? '')}">
-      <div class="swipe"><div class="under"><span class="l">做了 ✓</span><span class="r">没做</span></div>
-      <div class="scard"><i class="sw" style="background:${color}"></i><div class="tx"><b>${esc(it.title)}</b><span>${esc(meta)}${o === 'done' ? ' · 做了' : o === 'partial' ? ' · 做了一部分' : o === 'skipped' ? ' · 没做' : ''}</span></div>
-      <div class="st"><button class="d ${o === 'done' ? 'on' : ''}" data-set="done" aria-label="做了" title="做了">✓</button><button class="p ${o === 'partial' ? 'on' : ''}" data-set="partial" aria-label="做了一部分" title="做了一部分">½</button><button class="s ${o === 'skipped' ? 'on' : ''}" data-set="skipped" aria-label="没做" title="没做">✕</button></div></div></div>
+      <div class="swipe"><div class="under"><span class="l">${esc(t('settle.done'))} ✓</span><span class="r">${esc(t('settle.skipped'))}</span></div>
+      <div class="scard"><i class="sw" style="background:${color}"></i><div class="tx"><b>${esc(it.title)}</b><span>${esc(meta)}${o === 'done' ? ' · ' + t('settle.done') : o === 'partial' ? ' · ' + t('settle.partial') : o === 'skipped' ? ' · ' + t('settle.skipped') : ''}</span></div>
+      <div class="st"><button class="d ${o === 'done' ? 'on' : ''}" data-set="done" aria-label="${esc(t('settle.done'))}" title="${esc(t('settle.done'))}">✓</button><button class="p ${o === 'partial' ? 'on' : ''}" data-set="partial" aria-label="${esc(t('settle.partial'))}" title="${esc(t('settle.partial'))}">½</button><button class="s ${o === 'skipped' ? 'on' : ''}" data-set="skipped" aria-label="${esc(t('settle.skipped'))}" title="${esc(t('settle.skipped'))}">✕</button></div></div></div>
       ${reasons}</div>`;
   }
 
