@@ -55,6 +55,8 @@ export const uiZh = {
   'settle.skipped': '没做',
 
   'ceremony.smoothBlockers': '一路顺利，没有明显的卡点。',
+  'ceremony.occurrence': '{count} 次',
+  'ceremony.occurrences': '{count} 次',
   'ceremony.smoothTurns': '平平稳稳，没有大的起伏。',
   'ceremony.days': '用时（天）',
   'ceremony.tasksDone': '完成的事',
@@ -298,6 +300,8 @@ export const uiEn: Record<UiMessageKey, string> = {
   'settle.skipped': 'Not done',
 
   'ceremony.smoothBlockers': 'A smooth run with no clear blockers.',
+  'ceremony.occurrence': '{count} occurrence',
+  'ceremony.occurrences': '{count} occurrences',
   'ceremony.smoothTurns': 'Steady progress without major swings.',
   'ceremony.days': 'Days',
   'ceremony.tasksDone': 'Tasks done',
