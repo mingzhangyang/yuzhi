@@ -9,6 +9,7 @@ import { islandRings } from '../actions';
 import { addDays, localDate, seasonOf } from '../lib/date';
 import { readSeenDrifts } from './drift';
 import { cultivationAreas, cultivationState } from '../logic/cultivation';
+import { t } from '../i18n';
 
 /** 村落的屋顶颜色，按槽位固定 */
 export const ROOFS = ['#b5553d', '#4c6a84', '#3f7a86', '#8656a6', '#c08a2a', '#5d8a4a', '#a8622a', '#6b5ca5'];
@@ -140,7 +141,7 @@ export function buildScene(
     lighthouseBanners: agenda.lighthouseBanners,
     granaryBusy: granaryBusy(store, now),
     granaryRatio: g.workHours ? g.available / g.workHours : 0,
-    granaryLabel: `粮仓 ${g.available.toFixed(1)} 小时`,
+    granaryLabel: t('scene.granaryLabel', { hours: g.available.toFixed(1) }),
     fog: Math.min(1, pending * 0.4),
     selected,
     rings: islandRings(store),
