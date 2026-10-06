@@ -452,8 +452,8 @@ export function seedDemo(store: Store) {
       back(photo.id, 40);
       for (let k = 0; k < 7; k++) {
         const d = addDays(today, -38 + k * 4);
-        const t = doneOn(photo.id, [t('forms.demoScanAlbums'), t('forms.demoDeduplicate'), t('forms.demoSortByYear'), t('forms.demoAddNotes'), t('forms.demoPhotoBook'), t('forms.demoBackupDrive'), t('forms.demoShareFamily')][k], d);
-        A.settleDay(store, d, new Map([[`task|${t.id}`, { outcome: 'done' }]]));
+        const photoTask = doneOn(photo.id, [t('forms.demoScanAlbums'), t('forms.demoDeduplicate'), t('forms.demoSortByYear'), t('forms.demoAddNotes'), t('forms.demoPhotoBook'), t('forms.demoBackupDrive'), t('forms.demoShareFamily')][k], d);
+        A.settleDay(store, d, new Map([[`task|${photoTask.id}`, { outcome: 'done' }]]));
       }
       A.completeProject(store, photo.id, 'landmark');
       store.put('projects', { ...store.project(photo.id)!, doneAt: addDays(today, -10) });
