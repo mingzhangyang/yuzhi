@@ -9,6 +9,19 @@
 - `art-direction-board.webp`：整体视觉方向板，定义等距小岛、四季、色彩、材质和氛围。
 - `landmark-concepts.webp`：8 个永久地标概念：钟楼、藏书阁、观星台、玻璃温室、风车工坊、海港会馆、纪念塔、山亭。
 
+## 画布调色板
+
+Canvas 小岛上的所有颜色集中在 `src/island/render/palette.ts`：方向板的 10 个基础色（`BOARD`，取样值待人工校准），按材质和物件归组的当前用色，以及季节、积雪、衰败、透明度的派生函数。绘制代码里不再写颜色字面量，`tests/palette.test.ts` 会检查；地图景物的标记色 `MARKER` 仍在 `style.ts`，与图例、追踪栏共用。
+
+改画面前后用截图矩阵对照：
+
+```sh
+npm run build && npx vite preview --port 4173 --strictPort &
+SHOT_DIR=shots/before node browser-tests/island-shots.mjs   # 改之前
+SHOT_DIR=shots/after node browser-tests/island-shots.mjs    # 改之后
+node browser-tests/shot-diff.mjs shots/before shots/after shots/diff
+```
+
 ## 运行时环境道具
 
 共 34 个道具，每个道具一张独立 WebP，位于 `src/assets/island/props/<id>.webp`；尺寸与落地锚点记录在 `src/island/prop-sprites.ts`。

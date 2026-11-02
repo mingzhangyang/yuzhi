@@ -1,16 +1,10 @@
 import { tileHash } from '../map';
 import { hash } from './utils';
 
-export const SKIN = ['#f1c9a5', '#e6b48c', '#d9a074', '#c98d62'];
-export const HAIR = ['#2f2620', '#4a3426', '#1f1c1a', '#6b4a2e', '#3b2f2a'];
-export const SNOW = '#f3f6f8';
-export const BEACH = '#e9d9ae';
-export const SNOW_SHADE = '#d6e0e8';
-export const WARM = '255,206,110';
-export const LANTERN = '255,120,70';
 /**
  * 地图景物的标记色：画布、图例、追踪栏的色块和结算卡片共用同一份，
  * 改一处不会出现「图例说粮仓是黄色，标签却是另一种黄」。
+ * 画布的其余颜色都在 palette.ts；标记色按美术优化计划保持独立，不并入基础色。
  */
 export const MARKER = {
   dock: '#a8794a',
@@ -21,7 +15,6 @@ export const MARKER = {
   schedule: '#7397a7',
   lighthouse: '#c8473a',
 } as const;
-export const FIREWORK = ['#ffd36b', '#ff7a6b', '#8fd3ff', '#c99bff', '#9dff9b', '#ffffff', '#ffb3d9'];
 
 /** 村落房屋相对地块宽度的比例。 */
 export const HOUSE_SCALE = 0.42;

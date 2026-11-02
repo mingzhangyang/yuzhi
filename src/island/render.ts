@@ -10,8 +10,9 @@ import type { Hit, LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
 import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
-import { HOUSE_SCALE, houseHash, houseVariant, MARKER, personSize, SNOW, WARM } from './render/style';
-import { hash, mix, shade } from './render/utils';
+import { AGENDA, CUE, decayRoof, decayWall, GLOW, LAMP, PIER, PLASTER, SNOW, WHITE, withAlpha } from './render/palette';
+import { HOUSE_SCALE, houseHash, houseVariant, MARKER, personSize } from './render/style';
+import { hash, mix } from './render/utils';
 import { cultivationOutline, drawCultivationArea } from './render/cultivation';
 import { layoutLabels, placedLabelBounds, type LabelRequest } from './render/label-layout';
 
@@ -120,7 +121,7 @@ export class IslandRenderer extends IslandEffectsPainter {
 
     // 小溪的流水
     if (a.cover <= 0.6) {
-      c.strokeStyle = 'rgba(255,255,255,.45)';
+      c.strokeStyle = withAlpha(WHITE, 0.45);
       c.lineWidth = Math.max(0.6, tw * 0.025);
       c.lineCap = 'round';
       c.beginPath();
@@ -137,7 +138,7 @@ export class IslandRenderer extends IslandEffectsPainter {
       c.stroke();
     } else {
       // 结冰的溪面上几道裂纹
-      c.strokeStyle = 'rgba(255,255,255,.7)';
+      c.strokeStyle = withAlpha(WHITE, 0.7);
       c.lineWidth = Math.max(0.5, tw * 0.015);
       c.beginPath();
       for (const t of m.water) {
@@ -161,13 +162,13 @@ export class IslandRenderer extends IslandEffectsPainter {
       const pc = this.iso(pi + w, pj + 0.5);
       const pd = this.iso(pi - w, pj + 0.5);
       // 桩子
-      c.fillStyle = '#4e3522';
+      c.fillStyle = PIER.pile;
       c.fillRect(pd[0] - tw * 0.015, pd[1], tw * 0.03, tw * 0.16);
       c.fillRect(pc[0] - tw * 0.015, pc[1], tw * 0.03, tw * 0.16);
-      this.poly('#6b4a30', pa[0], pa[1] + tw * 0.06, pb[0], pb[1] + tw * 0.06, pc[0], pc[1] + tw * 0.06, pd[0], pd[1] + tw * 0.06);
+      this.poly(PIER.beam, pa[0], pa[1] + tw * 0.06, pb[0], pb[1] + tw * 0.06, pc[0], pc[1] + tw * 0.06, pd[0], pd[1] + tw * 0.06);
       this.poly(a.cover > 0.4 ? mix(MARKER.dock, SNOW, 0.6) : MARKER.dock, pa[0], pa[1], pb[0], pb[1], pc[0], pc[1], pd[0], pd[1]);
       // 木板缝
-      c.strokeStyle = 'rgba(80,50,30,.35)';
+      c.strokeStyle = withAlpha(PIER.seam, 0.35);
       c.lineWidth = Math.max(0.5, tw * 0.012);
       c.beginPath();
       for (const f of [0.25, 0.5, 0.75]) {
@@ -179,10 +180,10 @@ export class IslandRenderer extends IslandEffectsPainter {
       c.stroke();
       if (k === m.pierLen) {
         // 栈桥尽头的灯
-        c.fillStyle = '#3e3a36';
+        c.fillStyle = LAMP.iron;
         c.fillRect(x - hw * 0.32, y - tw * 0.3, tw * 0.025, tw * 0.32);
-        this.dot(x - hw * 0.32 + tw * 0.012, y - tw * 0.32, tw * 0.035, this.lit ? '#ffe08a' : '#e8e2cc');
-        if (this.lit) this.lights.push([x - hw * 0.32 + tw * 0.012, y - tw * 0.32, tw * 0.6, WARM]);
+        this.dot(x - hw * 0.32 + tw * 0.012, y - tw * 0.32, tw * 0.035, this.lit ? LAMP.on : LAMP.off);
+        if (this.lit) this.lights.push([x - hw * 0.32 + tw * 0.012, y - tw * 0.32, tw * 0.6, GLOW.warm]);
       }
     }
     const ships = Math.min(8, s.dockShips);
@@ -228,14 +229,14 @@ export class IslandRenderer extends IslandEffectsPainter {
         put(d, () => {
           this.drawLighthouse(x, y, tw);
           for (const banner of this.lighthouseBannerLayout(s.lighthouseBanners)) {
-            this.drawBanner(banner.x, banner.y, tw, banner.title, '#d8c9a7');
+            this.drawBanner(banner.x, banner.y, tw, banner.title, AGENDA.lighthouseBanner);
           }
         });
       }
       if (t === m.granary) put(d, () => this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy), rectOutline(x, y, tw * 0.17, tw * 0.72, tw * 0.07));
       if (t === m.chores) {
         put(d, () => {
-          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, MARKER.chores, '#e3dccb', false, false, !!s.chores.live);
+          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, MARKER.chores, PLASTER.chores, false, false, !!s.chores.live);
           this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
           // 即将开始：扫帚靠在门口；进行中：扫帚动起来
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
@@ -270,10 +271,9 @@ export class IslandRenderer extends IslandEffectsPainter {
           const g = this.grow.get(vv.projectId);
           const isNew = g && g.anim < 1 && t.slotIdx === vv.houses - 1;
           const k = isNew ? 0.3 + 0.7 * g!.anim : 1;
-          const dust = [0, 0.1, 0.45, 0.6][vv.stage];
-          const roof = mix(shade(vv.roof, (t.v - 0.5) * 0.25), '#9a9588', dust);
+          const roof = decayRoof(vv.roof, vv.stage, t.v);
           const boarded = vv.stage === 3 && t.slotIdx % 2 === 1;
-          const wall = boarded ? '#cfc4ab' : vv.stage >= 2 ? '#e6dcc6' : '#efe5cf';
+          const wall = decayWall(vv.stage, boarded);
           // 越冷清的村落，夜里亮灯的人家越少
           const litFrac = [0.9, 0.5, 0.25, 0.12][vv.stage];
           // 房屋样式：四坡顶居多，夹几座双坡顶、两层和带披屋的
@@ -366,7 +366,7 @@ export class IslandRenderer extends IslandEffectsPainter {
       const center = m.villages[village.slot].center;
       const [x, y] = this.iso(center.i, center.j);
       const k = Math.min(1, cue.t / 1.2);
-      c.strokeStyle = isDeterioratingStageCue(cue) ? `rgba(130,130,115,${(1 - k) * 0.5})` : `rgba(225,235,205,${(1 - k) * 0.65})`;
+      c.strokeStyle = isDeterioratingStageCue(cue) ? withAlpha(CUE.decline, (1 - k) * 0.5) : withAlpha(CUE.recover, (1 - k) * 0.65);
       c.lineWidth = Math.max(1, tw * 0.035);
       c.beginPath();
       c.ellipse(x, y - tw * 0.12, tw * (0.5 + k * 0.6), tw * (0.24 + k * 0.3), 0, 0, Math.PI * 2);
@@ -376,7 +376,7 @@ export class IslandRenderer extends IslandEffectsPainter {
     for (const ripple of this.bellRipples) {
       const [x, y] = this.iso(ripple.at.i, ripple.at.j);
       const k = Math.min(1, ripple.t / 1.2);
-      c.strokeStyle = `rgba(238,205,112,${(1 - k) * 0.82})`;
+      c.strokeStyle = withAlpha(CUE.bell, (1 - k) * 0.82);
       c.lineWidth = Math.max(1, tw * 0.028);
       c.beginPath();
       c.ellipse(x, y - tw * 0.52, tw * (0.18 + k * 1.15), tw * (0.07 + k * 0.45), 0, 0, Math.PI * 2);
@@ -387,7 +387,7 @@ export class IslandRenderer extends IslandEffectsPainter {
     for (const pl of this.pulses) {
       const [x, y] = this.iso(pl.at.i, pl.at.j);
       const k = pl.t / 1.4;
-      c.strokeStyle = `rgba(226,173,47,${(1 - k) * 0.9})`;
+      c.strokeStyle = withAlpha(CUE.pulse, (1 - k) * 0.9);
       c.lineWidth = 3;
       c.beginPath();
       c.ellipse(x, y, tw * (0.4 + k * 1.6), tw * (0.2 + k * 0.8), 0, 0, Math.PI * 2);
@@ -405,12 +405,12 @@ export class IslandRenderer extends IslandEffectsPainter {
         const y = cy + Math.sin(ang) * tw * 1.6 * hash('fe' + k) * 1.4;
         const g = c.createRadialGradient(x, y, 0, x, y, rr * 2);
         const al = 0.55 * fog;
-        g.addColorStop(0, `rgba(236,240,240,${al})`);
-        g.addColorStop(1, 'rgba(236,240,240,0)');
+        g.addColorStop(0, withAlpha(CUE.fog, al));
+        g.addColorStop(1, withAlpha(CUE.fog, 0));
         c.fillStyle = g;
         c.fillRect(x - rr * 2, y - rr * 2, rr * 4, rr * 4);
       }
-      c.fillStyle = `rgba(230,234,235,${0.18 * fog})`;
+      c.fillStyle = withAlpha(CUE.fogVeil, 0.18 * fog);
       c.fillRect(0, 0, v.w, v.h);
     }
 

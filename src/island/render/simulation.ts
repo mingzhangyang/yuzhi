@@ -2,7 +2,7 @@ import { dayLight, festivalsOf, seasonProgress, snowCover, weatherOf, type DayLi
 import { diffScene, pickBell, type BellCandidate, type Cue } from '../cues';
 import { buildIsland, mulberry32, type Tile, type VillageSite } from '../map';
 import type { Ambience, BellRipple, Drift, PickedBottle, Scene, Spark, StageCue, Walker } from './model';
-import { FIREWORK, HAIR, SKIN, SNOW } from './style';
+import { DRIFT, FIGURE, SKY, SNOW } from './palette';
 import { hash } from './utils';
 import { IslandInteraction } from './interaction';
 
@@ -122,8 +122,8 @@ export abstract class IslandSimulation extends IslandInteraction {
             wait: r * 3,
             color: v.roof,
             leaving: false,
-            skin: SKIN[Math.floor(r * SKIN.length)],
-            hair: HAIR[Math.floor(hash(w.id + 'h') * HAIR.length)],
+            skin: FIGURE.skin[Math.floor(r * FIGURE.skin.length)],
+            hair: FIGURE.hair[Math.floor(hash(w.id + 'h') * FIGURE.hair.length)],
             face: r < 0.5 ? 1 : -1,
             walk: r * 6,
             moving: false,
@@ -312,8 +312,8 @@ export abstract class IslandSimulation extends IslandInteraction {
     const a = this.amb;
     if (kind === 'rain') return { x, y, vx: -40, vy: 520 + r() * 180, rot: 0, vr: 0, size: 8 + r() * 8, color: '' };
     if (kind === 'snow') return { x, y, vx: (r() - 0.5) * 14, vy: 18 + r() * 26, rot: r() * 6, vr: 0.6 + r(), size: 1.1 + r() * 1.9, color: SNOW };
-    if (kind === 'petal') return { x, y, vx: 16 + r() * 18, vy: 16 + r() * 16, rot: r() * 6, vr: (r() - 0.5) * 4, size: 2.2 + r() * 1.8, color: r() < 0.7 ? '#f6c1cf' : '#fbe3ea' };
-    const leaf = a.progress < 0.4 ? ['#e2b13c', '#d98a2b', '#c9a23a'] : ['#c4532e', '#d9782a', '#a8432a', '#e0a33a'];
+    if (kind === 'petal') return { x, y, vx: 16 + r() * 18, vy: 16 + r() * 16, rot: r() * 6, vr: (r() - 0.5) * 4, size: 2.2 + r() * 1.8, color: DRIFT.petal[r() < 0.7 ? 0 : 1] };
+    const leaf = a.progress < 0.4 ? DRIFT.leafEarly : DRIFT.leafLate;
     return { x, y, vx: 10 + r() * 20, vy: 20 + r() * 18, rot: r() * 6, vr: (r() - 0.5) * 5, size: 2.6 + r() * 2, color: leaf[Math.floor(r() * leaf.length)] };
   }
 
@@ -342,7 +342,7 @@ export abstract class IslandSimulation extends IslandInteraction {
     if (show && this.t > this.nextRocket) {
       this.nextRocket = this.t + 0.6 + this.rnd() * 1.4;
       const x = v.w * (0.15 + this.rnd() * 0.7);
-      this.sparks.push({ x, y: v.h * 0.78, vx: (this.rnd() - 0.5) * 30, vy: -v.h * (0.7 + this.rnd() * 0.35), life: 0, max: 2, color: FIREWORK[Math.floor(this.rnd() * FIREWORK.length)], rocket: true, burstAt: 0.7 + this.rnd() * 0.35 });
+      this.sparks.push({ x, y: v.h * 0.78, vx: (this.rnd() - 0.5) * 30, vy: -v.h * (0.7 + this.rnd() * 0.35), life: 0, max: 2, color: SKY.firework[Math.floor(this.rnd() * SKY.firework.length)], rocket: true, burstAt: 0.7 + this.rnd() * 0.35 });
     }
     const born: Spark[] = [];
     for (const p of this.sparks) {
@@ -355,7 +355,7 @@ export abstract class IslandSimulation extends IslandInteraction {
           p.life = p.max;
           const n = 34 + Math.floor(this.rnd() * 24);
           const sp = v.h * (0.16 + this.rnd() * 0.12);
-          const twin = this.rnd() < 0.35 ? FIREWORK[Math.floor(this.rnd() * FIREWORK.length)] : p.color;
+          const twin = this.rnd() < 0.35 ? SKY.firework[Math.floor(this.rnd() * SKY.firework.length)] : p.color;
           born.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0, max: 0.45, color: p.color, rocket: false, burstAt: 0, flash: true });
           for (let k = 0; k < n; k++) {
             const a = (k / n) * Math.PI * 2 + this.rnd() * 0.2;

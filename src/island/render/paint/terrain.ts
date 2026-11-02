@@ -1,6 +1,7 @@
 import type { Scene } from '../model';
 import { tileHash, type Tile } from '../../map';
-import { BEACH, pineTiers, roundLobes, SNOW, WARM } from '../style';
+import { BEACH, CROP, FESTIVE, GLOW, GROUND, MEADOW, ROCK, seasonField, seasonGrass, snowBlend, SNOW, TREE, WHITE, withAlpha } from '../palette';
+import { pineTiers, roundLobes } from '../style';
 import { clamp, hash, mix, shade } from '../utils';
 import { IslandPaintBase } from './base';
 
@@ -25,9 +26,7 @@ export function smoothNoise(i: number, j: number, scale: number, salt = 7): numb
 export abstract class IslandTerrainPainter extends IslandPaintBase {
   protected palette() {
     const { season: se, progress: p } = this.amb;
-    const grass = [mix('#b6d27c', '#9cc464', p), mix('#8fb855', '#86ad4f', p), mix('#b3b65f', '#c7a85a', p), '#b2ad88'][se];
-    const field = [mix('#b9cf7a', '#9fc35e', p), mix('#c2c45a', '#dcbc4c', p), mix('#e3ad45', '#c7a26c', p), '#b5a382'][se];
-    return { grass, field };
+    return { grass: seasonGrass(se, p), field: seasonField(se, p) };
   }
 
   protected tileTop(t: Tile, occupied: Set<number>): string {
@@ -45,20 +44,20 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
         col = field;
         break;
       case 'water':
-        col = a.cover > 0.6 ? '#cfe2ea' : a.season === 3 ? '#9cc4d2' : '#7db3c7';
+        col = a.cover > 0.6 ? GROUND.waterFrozen : a.season === 3 ? GROUND.waterWinter : GROUND.water;
         break;
       case 'mountain':
-        col = '#a3a68f';
+        col = GROUND.mountain;
         break;
       case 'plaza':
-        col = t.village >= 0 && !occupied.has(t.village) ? grass : '#e4d8b8';
+        col = t.village >= 0 && !occupied.has(t.village) ? grass : GROUND.plaza;
         break;
       default:
-        col = '#e6d6a8';
+        col = GROUND.sand;
     }
     // 低频的明暗起伏代替逐格随机：相邻地块颜色连成一片，不再像棋盘。
     col = shade(col, (smoothNoise(t.i, t.j, 4.5) - 0.5) * (t.type === 'water' ? 0.05 : 0.12));
-    if (a.cover > 0 && t.type !== 'water') col = mix(col, SNOW, clamp(a.cover * (0.86 + 0.18 * smoothNoise(t.i, t.j, 3.5, 41)), 0, 0.92));
+    if (a.cover > 0 && t.type !== 'water') col = snowBlend(col, a.cover, smoothNoise(t.i, t.j, 3.5, 41));
     if (a.weather === 'rain') col = shade(col, -0.06);
     return col;
   }
@@ -93,15 +92,15 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       const beach = this.isBeach(t);
       // 崖壁：灰色岩石，几道横向岩层和竖向裂缝，顶上一圈草皮（沙滩处是沙，冬天是雪）
       const lip = a.cover > 0.3 ? SNOW : beach ? BEACH : shade(col, -0.08);
-      const rock = shade('#a39b8b', (smoothNoise(t.i, t.j, 3, 21) - 0.5) * 0.16);
+      const rock = shade(ROCK.cliff, (smoothNoise(t.i, t.j, 3, 21) - 0.5) * 0.16);
       const front = !m.at(t.i, t.j + 1);
       const right = !m.at(t.i + 1, t.j);
       if (front) {
-        this.poly(wat ? '#5f93a8' : rock, x - hw, y, x, y + hh, x, y + hh + D, x - hw, y + D);
+        this.poly(wat ? GROUND.waterFaceLeft : rock, x - hw, y, x, y + hh, x, y + hh + D, x - hw, y + D);
         if (!wat) this.cliffDetail(t, x - hw, y, x, y + hh, D, rock, lip, 0);
       }
       if (right) {
-        this.poly(wat ? '#4f8197' : shade(rock, -0.16), x, y + hh, x + hw, y, x + hw, y + D, x, y + hh + D);
+        this.poly(wat ? GROUND.waterFaceRight : shade(rock, -0.16), x, y + hh, x + hw, y, x + hw, y + D, x, y + hh + D);
         if (!wat) this.cliffDetail(t, x, y + hh, x + hw, y, D, shade(rock, -0.16), shade(lip, -0.12), 1);
       }
       // 地块顶面：北角略亮、南角略暗
@@ -119,7 +118,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     // 村里的小路：广场通向每座房子
     gc.lineCap = 'round';
     gc.lineJoin = 'round';
-    const path = mix(this.palette().grass, '#d9c79c', 0.7);
+    const path = mix(this.palette().grass, GROUND.path, 0.7);
     for (const vv of s.villages) {
       const site = m.villages[vv.slot];
       const [cx, cy] = this.iso(site.center.i, site.center.j);
@@ -198,7 +197,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       c.stroke();
       if (a.cover < 0.3 && tileHash(t.i, t.j, 90 + k) < 0.4) {
         const u = 0.3 + tileHash(t.i, t.j, 94 + k) * 0.4;
-        this.dot(p0[0] + (p1[0] - p0[0]) * u + ix * 0.15, p0[1] + (p1[1] - p0[1]) * u + iy * 0.15, tw * 0.022, '#f6efe2');
+        this.dot(p0[0] + (p1[0] - p0[0]) * u + ix * 0.15, p0[1] + (p1[1] - p0[1]) * u + iy * 0.15, tw * 0.022, GROUND.foamDot);
       }
     }
   }
@@ -285,7 +284,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
   protected drawRock(x: number, y: number, r: number, seed: number, cover: number) {
     const c = this.ctx;
     // 水线上一圈白沫
-    c.fillStyle = 'rgba(255,255,255,.45)';
+    c.fillStyle = withAlpha(WHITE, 0.45);
     c.beginPath();
     c.ellipse(x + r * 0.2, y, r * 1.45, r * 0.42, 0, 0, Math.PI * 2);
     c.fill();
@@ -302,7 +301,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       const w = r * 0.62 * k;
       const h = r * 0.95 * k;
       // 底宽顶窄的圆角块：受光面
-      c.fillStyle = cover > 0.3 ? '#9b968c' : '#8f887b';
+      c.fillStyle = cover > 0.3 ? ROCK.stoneSnowy : ROCK.stone;
       c.beginPath();
       c.moveTo(sx - w, sy);
       c.quadraticCurveTo(sx - w * 1.05, sy - h * 0.7, sx - w * 0.35, sy - h);
@@ -311,7 +310,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       c.closePath();
       c.fill();
       // 背光面
-      c.fillStyle = '#6f695f';
+      c.fillStyle = ROCK.stoneShade;
       c.beginPath();
       c.moveTo(sx + w * 0.05, sy);
       c.quadraticCurveTo(sx + w * 0.2, sy - h * 0.6, sx + w * 0.7, sy - h * 0.62);
@@ -319,7 +318,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       c.closePath();
       c.fill();
       // 顶上的高光或积雪
-      c.fillStyle = cover > 0.3 ? SNOW : '#a9a294';
+      c.fillStyle = cover > 0.3 ? SNOW : ROCK.stoneTop;
       c.beginPath();
       c.ellipse(sx - w * 0.3, sy - h * 0.82, w * 0.38, h * 0.14, -0.2, 0, Math.PI * 2);
       c.fill();
@@ -362,16 +361,16 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
         c.stroke();
       }
       if (a.season === 0 && h(40) < 0.32) {
-        const cols = ['#f7c6d4', '#ffffff', '#f6dc6b', '#c9b3f0'];
+        const cols = MEADOW.spring;
         for (let k = 0; k < 1 + Math.floor(h(41) * 3); k++) {
           const [px, py] = pt(5 + k);
           this.dot(px, py, tw * 0.022, cols[Math.floor(h(42 + k) * cols.length)]);
         }
       } else if (a.season === 1 && h(40) < 0.18) {
         const [px, py] = pt(5);
-        this.dot(px, py, tw * 0.025, h(43) < 0.5 ? '#f6dc6b' : '#ffffff');
+        this.dot(px, py, tw * 0.025, MEADOW.summer[h(43) < 0.5 ? 0 : 1]);
       } else if (a.season === 2 && (kind === 'forest' || h(40) < 0.4)) {
-        const cols = ['#d9782a', '#c4532e', '#e2b13c', '#a8432a'];
+        const cols = MEADOW.fallen;
         const n = (kind === 'forest' ? 3 : 1) + Math.floor(a.progress * 3);
         for (let k = 0; k < n; k++) {
           const [px, py] = pt(5 + k);
@@ -382,7 +381,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
         }
       } else if (snowy && h(40) < 0.3) {
         const [px, py] = pt(5);
-        this.dot(px, py, tw * 0.02, '#ffffff');
+        this.dot(px, py, tw * 0.02, MEADOW.snowDot);
       }
     } else if (kind === 'field') {
       // 田垄：春天是一行行小苗，夏天是长高的庄稼，秋天是金黄的穗子或收割后的茬，冬天被雪盖住
@@ -400,7 +399,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
         c.lineTo(x1, y1);
         c.stroke();
         if (snowy) continue;
-        const crop = a.season === 0 ? '#6f9c3f' : a.season === 1 ? '#5f8f34' : a.season === 2 && a.progress < 0.5 ? '#d8a332' : '#a88a5a';
+        const crop = a.season === 0 ? CROP.spring : a.season === 1 ? CROP.summer : a.season === 2 && a.progress < 0.5 ? CROP.ripe : CROP.stubble;
         const tall = a.season === 1 ? 0.12 : a.season === 2 && a.progress < 0.5 ? 0.1 : 0.05;
         c.strokeStyle = crop;
         c.lineWidth = Math.max(0.8, tw * (a.season === 1 ? 0.035 : 0.028));
@@ -417,8 +416,8 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       if (a.season === 2 && a.progress >= 0.5 && h(47) < 0.6) {
         const [px, py] = pt(6);
         this.shadow(px + tw * 0.02, py, tw * 0.08, tw * 0.03, 0.18);
-        this.poly('#d8b25a', px - tw * 0.07, py, px, py - tw * 0.13, px + tw * 0.07, py);
-        this.poly('#b8913f', px, py - tw * 0.13, px + tw * 0.07, py, px, py + tw * 0.015);
+        this.poly(CROP.hay, px - tw * 0.07, py, px, py - tw * 0.13, px + tw * 0.07, py);
+        this.poly(CROP.hayShade, px, py - tw * 0.13, px + tw * 0.07, py, px, py + tw * 0.015);
       }
     } else if (kind === 'plaza') {
       // 石板
@@ -440,7 +439,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       }
       if (h(48) < 0.35) {
         const [px, py] = pt(5);
-        this.dot(px, py, tw * 0.03, '#f4ead8');
+        this.dot(px, py, tw * 0.03, GROUND.shell);
       }
     } else if (kind === 'mountain') {
       for (let k = 0; k < 3; k++) {
@@ -468,7 +467,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     c.fillStyle = g;
     c.fillRect(0, 0, v.w, v.h);
     // 远处的波纹
-    c.strokeStyle = `rgba(255,255,255,${a.weather === 'rain' ? 0.22 : 0.35})`;
+    c.strokeStyle = withAlpha(WHITE, a.weather === 'rain' ? 0.22 : 0.35);
     c.lineWidth = 1;
     c.beginPath();
     for (let k = 0; k < 40; k++) {
@@ -510,7 +509,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       for (const pass of [0, 1]) {
         const ph = this.t * 0.9 + pass * Math.PI + group * 2.1;
         const out = (0.5 + 0.5 * Math.sin(ph)) * tw * 0.09 + tw * 0.03;
-        c.strokeStyle = `rgba(255,255,255,${0.3 + 0.38 * (0.5 - 0.5 * Math.sin(ph))})`;
+        c.strokeStyle = withAlpha(WHITE, 0.3 + 0.38 * (0.5 - 0.5 * Math.sin(ph)));
         c.beginPath();
         for (const t of m.all) {
           if (!t.edge) continue;
@@ -534,7 +533,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     }
     // 晴天白日的波光
     if (a.weather === 'clear' && this.day.night < 0.3) {
-      c.fillStyle = '#ffffff';
+      c.fillStyle = WHITE;
       for (let k = 0; k < 34; k++) {
         const x = hash('gx' + k) * v.w;
         const y = hash('gy' + k) * v.h;
@@ -592,7 +591,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const wind = (a.weather === 'rain' ? 1.6 : 1) * (0.6 + 0.4 * Math.sin(this.t * 0.4));
     const sway = Math.sin(this.t * 1.4 + seed * 9) * s * 0.025 * wind;
     this.shadow(x + s * 0.06, y, s * 0.34, s * 0.13, 0.16);
-    c.fillStyle = '#6e5034';
+    c.fillStyle = TREE.trunk;
     c.beginPath();
     c.moveTo(x - s * 0.055, y);
     c.lineTo(x + s * 0.055, y);
@@ -601,7 +600,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     c.fill();
     if (kind === 'pine') {
       // 三层松枝：左侧受光、右侧背光，冬天每层顶上压着雪
-      const col = se === 3 ? '#4f6f4f' : se === 0 ? '#55874a' : '#45743f';
+      const col = TREE.pine[se];
       const tiers = pineTiers(seed);
       for (let k = 0; k < tiers.length; k++) {
         const [b, top, w] = tiers[k];
@@ -616,13 +615,13 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       }
       // 圣诞：松树上挂彩灯
       if (a.fest.has('christmas') && seed % 1 < 0.6) {
-        const cols = ['#ff5a5a', '#ffd84a', '#5ab4ff', '#7cff7a'];
+        const cols = FESTIVE.bulbs;
         for (let k = 0; k < 6; k++) {
           const ly = y - s * (0.3 + k * 0.14);
           const lx = x + sway + (k % 2 ? 1 : -1) * s * (0.24 - k * 0.03);
           const on = Math.sin(this.t * 3 + k + seed * 7) > -0.3;
-          this.dot(lx, ly, Math.max(0.8, s * 0.035), on ? cols[k % cols.length] : '#5a4a3a');
-          if (on && this.lit) this.lights.push([lx, ly, s * 0.18, cols[k % cols.length] === '#ffd84a' ? WARM : '255,140,140']);
+          this.dot(lx, ly, Math.max(0.8, s * 0.035), on ? cols[k % cols.length] : FESTIVE.bulbOff);
+          if (on && this.lit) this.lights.push([lx, ly, s * 0.18, k % cols.length === 1 ? GLOW.warm : GLOW.festive]);
         }
       }
       return;
@@ -633,7 +632,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const ty = y - s * 0.66;
     if (se === 3 || (se === 2 && a.progress > 0.85)) {
       // 光秃的枝条
-      c.strokeStyle = '#6e5034';
+      c.strokeStyle = TREE.trunk;
       c.lineWidth = Math.max(0.7, s * 0.04);
       c.lineCap = 'round';
       c.beginPath();
@@ -661,18 +660,18 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       }
       if (se === 2) {
         // 最后几片叶子
-        this.dot(tx - s * 0.2, y - s * 0.84, s * 0.05, '#c4532e');
-        this.dot(tx + s * 0.14, y - s * 0.96, s * 0.045, '#d9782a');
+        this.dot(tx - s * 0.2, y - s * 0.84, s * 0.05, TREE.lastLeaves[0]);
+        this.dot(tx + s * 0.14, y - s * 0.96, s * 0.045, TREE.lastLeaves[1]);
       }
       return;
     }
     let col: string;
-    if (cherry) col = a.progress < 0.55 ? '#f2b8c8' : '#a8cf78';
-    else if (se === 0) col = '#86b54e';
-    else if (se === 1) col = '#5c8f3c';
+    if (cherry) col = a.progress < 0.55 ? TREE.cherryBloom : TREE.cherryLeaf;
+    else if (se === 0) col = TREE.round[0];
+    else if (se === 1) col = TREE.round[1];
     else {
-      const autumn = ['#d99a2b', '#c8642c', '#b84a2e', '#d6b23a'];
-      col = mix('#a7a43c', autumn[Math.floor((seed * 7.3) % 1 * autumn.length)], clamp(a.progress * 1.6, 0.25, 1));
+      const autumn = TREE.autumn;
+      col = mix(TREE.autumnBase, autumn[Math.floor((seed * 7.3) % 1 * autumn.length)], clamp(a.progress * 1.6, 0.25, 1));
     }
     // 三四团叶子叠出树冠：暗底、中间、受光的高光
     const thin = se === 2 ? 1 - a.progress * 0.25 : 1;
@@ -681,10 +680,10 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     for (const [dx, dy, r] of lobes) this.dot(tx + dx * s - s * 0.03, ty + dy * s - s * 0.04, r * s * 0.82 * thin, col);
     this.dot(tx - s * 0.1, ty - s * 0.16, s * 0.12 * thin, shade(col, 0.2));
     if (cherry && a.progress < 0.55) {
-      for (let k = 0; k < 5; k++) this.dot(tx + (((seed * 13 + k * 0.37) % 1) - 0.5) * s * 0.5, ty + (((seed * 29 + k * 0.53) % 1) - 0.5) * s * 0.4, s * 0.035, '#fff1f5');
+      for (let k = 0; k < 5; k++) this.dot(tx + (((seed * 13 + k * 0.37) % 1) - 0.5) * s * 0.5, ty + (((seed * 29 + k * 0.53) % 1) - 0.5) * s * 0.4, s * 0.035, TREE.petal);
     } else if (se === 1 && (seed * 11) % 1 < 0.3) {
       // 夏天的果子
-      for (let k = 0; k < 3; k++) this.dot(tx + (k - 1) * s * 0.14, ty + s * (0.05 + (k % 2) * 0.08), s * 0.035, '#d9483a');
+      for (let k = 0; k < 3; k++) this.dot(tx + (k - 1) * s * 0.14, ty + s * (0.05 + (k % 2) * 0.08), s * 0.035, TREE.fruit);
     }
   }
 
@@ -724,8 +723,8 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const TR: [number, number] = [bx + w * (0.25 + r * 0.15), by - h * (1 - r * 0.12)];
     const RM: [number, number] = [bx + w * 0.02, by - h * 0.78];
     this.shadow(bx + w * 0.2, by + w * 0.14, w * 1.15, w * 0.42, 0.14);
-    const lit = '#aaa496';
-    const dark = '#7c776c';
+    const lit = ROCK.massLit;
+    const dark = ROCK.massShade;
     this.poly(lit, BL[0], BL[1], SL[0], SL[1], TL[0], TL[1], RM[0], RM[1], BM[0], BM[1]);
     this.poly(dark, RM[0], RM[1], TR[0], TR[1], SR[0], SR[1], BR[0], BR[1], BM[0], BM[1]);
     // 顶面最亮
@@ -733,12 +732,12 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     // 受光面上一块略亮的岩面
     this.poly(shade(lit, 0.07), SL[0], SL[1], TL[0], TL[1], RM[0], RM[1], bx - w * 0.4, by - h * 0.35);
     // 山脚的草坡（冬天被雪盖住）
-    const foot = a.cover > 0.3 ? SNOW : mix('#8d927c', '#7fa25a', green);
+    const foot = a.cover > 0.3 ? SNOW : mix(ROCK.footBare, ROCK.footGreen, green);
     const fy = h * 0.18;
     this.poly(foot, BL[0], BL[1], BL[0] + w * 0.12, BL[1] - fy, BM[0], BM[1] - fy * 0.7, BM[0], BM[1]);
     this.poly(shade(foot, -0.14), BM[0], BM[1], BM[0], BM[1] - fy * 0.7, BR[0] - w * 0.12, BR[1] - fy * 0.6, BR[0], BR[1]);
     // 横向的岩层缝，几道短线
-    c.strokeStyle = 'rgba(60,58,50,.28)';
+    c.strokeStyle = withAlpha(ROCK.seam, 0.28);
     c.lineWidth = Math.max(0.6, w * 0.035);
     c.beginPath();
     c.moveTo(bx - w * 0.7, by - h * 0.42);
@@ -756,7 +755,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       const m = down(RM, k * 0.3);
       const rr = down(TR, k * 0.35);
       this.poly(SNOW, TL[0], TL[1], RM[0], RM[1], m[0], m[1], (l[0] + m[0]) / 2, (l[1] + m[1]) / 2 - h * 0.05, l[0], l[1]);
-      this.poly('#dcdcd2', RM[0], RM[1], TR[0], TR[1], rr[0], rr[1], (rr[0] + m[0]) / 2, (rr[1] + m[1]) / 2 - h * 0.05, m[0], m[1]);
+      this.poly(ROCK.snowShade, RM[0], RM[1], TR[0], TR[1], rr[0], rr[1], (rr[0] + m[0]) / 2, (rr[1] + m[1]) / 2 - h * 0.05, m[0], m[1]);
     }
   }
 
@@ -773,26 +772,26 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const c = this.ctx;
     const s = tw * 0.9;
     const dir = Math.cos(ang) - Math.sin(ang) > 0 ? -1 : 1;
-    c.strokeStyle = 'rgba(255,255,255,.5)';
+    c.strokeStyle = withAlpha(WHITE, 0.5);
     c.lineWidth = 1;
     c.beginPath();
     c.moveTo(x - dir * s * 0.6, y + s * 0.08);
     c.lineTo(x - dir * s * 1.1, y + s * 0.02);
     c.stroke();
-    this.poly('#c8473a', x - s * 0.55, y - s * 0.05, x + s * 0.55, y - s * 0.05, x + s * 0.45, y + s * 0.06, x - s * 0.45, y + s * 0.06);
-    this.poly('#e2ad2f', x - s * 0.55, y - s * 0.05, x + s * 0.55, y - s * 0.05, x + s * 0.5, y - s * 0.01, x - s * 0.5, y - s * 0.01);
+    this.poly(FESTIVE.boatHull, x - s * 0.55, y - s * 0.05, x + s * 0.55, y - s * 0.05, x + s * 0.45, y + s * 0.06, x - s * 0.45, y + s * 0.06);
+    this.poly(FESTIVE.boatTrim, x - s * 0.55, y - s * 0.05, x + s * 0.55, y - s * 0.05, x + s * 0.5, y - s * 0.01, x - s * 0.5, y - s * 0.01);
     // 龙头与龙尾
     const hx0 = x + dir * s * 0.55;
-    this.poly('#2f7a4a', hx0, y - s * 0.05, hx0 + dir * s * 0.12, y - s * 0.2, hx0 + dir * s * 0.2, y - s * 0.16, hx0 + dir * s * 0.06, y - s * 0.02);
-    this.dot(hx0 + dir * s * 0.13, y - s * 0.18, s * 0.015, '#ffd84a');
-    this.poly('#2f7a4a', x - dir * s * 0.55, y - s * 0.05, x - dir * s * 0.66, y - s * 0.22, x - dir * s * 0.5, y - s * 0.06);
+    this.poly(FESTIVE.dragon, hx0, y - s * 0.05, hx0 + dir * s * 0.12, y - s * 0.2, hx0 + dir * s * 0.2, y - s * 0.16, hx0 + dir * s * 0.06, y - s * 0.02);
+    this.dot(hx0 + dir * s * 0.13, y - s * 0.18, s * 0.015, FESTIVE.dragonEye);
+    this.poly(FESTIVE.dragon, x - dir * s * 0.55, y - s * 0.05, x - dir * s * 0.66, y - s * 0.22, x - dir * s * 0.5, y - s * 0.06);
     // 划手
     for (let k = 0; k < 6; k++) {
       const px = x + (k - 2.5) * s * 0.15;
       const row = Math.sin(this.t * 6 + k * 0.3);
-      this.dot(px, y - s * 0.1, s * 0.035, ['#c8473a', '#e0b84a', '#4c6a84'][k % 3]);
-      this.dot(px, y - s * 0.16, s * 0.025, '#e6b48c');
-      c.strokeStyle = '#6b4a30';
+      this.dot(px, y - s * 0.1, s * 0.035, FESTIVE.rowers[k % 3]);
+      this.dot(px, y - s * 0.16, s * 0.025, FESTIVE.rowerSkin);
+      c.strokeStyle = FESTIVE.oar;
       c.beginPath();
       c.moveTo(px, y - s * 0.08);
       c.lineTo(px - dir * row * s * 0.06, y + s * 0.08);
