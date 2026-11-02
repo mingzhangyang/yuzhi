@@ -85,6 +85,11 @@
     <button class="btn small" id="tabTakeover" data-i18n="shell.takeOver">接管写权限</button>
   </div>
 
+  <div class="safety-notice card" id="safetyNotice" hidden role="status">
+    <div class="tx" id="safetyTxt"></div>
+    <div class="acts"><button class="btn small primary" id="safetyGo">现在导出</button><button class="btn small" id="safetyLater">稍后</button></div>
+  </div>
+
   <section class="stats" id="stats"></section>
 
   <div class="main">
@@ -137,7 +142,7 @@
 </div>
 
 <div class="menu card" id="menu" role="menu" hidden>
-  <button data-m="settings" role="menuitem" data-i18n="menu.settings">工作时段与外观</button>
+  <button data-m="settings" role="menuitem" data-i18n="menu.settings">设置：工作时段、外观与备份</button>
   <button data-m="export" role="menuitem" data-i18n="menu.export">导出备份（JSON）</button>
   <button data-m="import" role="menuitem" data-i18n="menu.import">导入备份…</button>
   <hr>

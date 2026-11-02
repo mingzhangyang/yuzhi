@@ -14,6 +14,8 @@ import { roofOf } from './scene';
 import { bindDateSelects, dateSelect, readDate } from './date-select';
 import { MAX_VILLAGES } from '../logic/config';
 import { getLocale, t } from '../i18n';
+import { fillSafetySettings, refreshSafetySettings, safetySettingsHtml } from './safety';
+import type { AutoBackup } from './auto-backup';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -351,16 +353,27 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
   });
 }
 
-/** 设置：工作时段与外观 */
-export function openSettings(store: Store, applyTheme: () => void) {
+/** 设置：工作时段、外观，以及这个浏览器里数据的安全与备份 */
+export function openSettings(store: Store, applyTheme: () => void, safety: { exportBackup?: () => void; autoBackup?: AutoBackup } = {}) {
+  const { exportBackup, autoBackup } = safety;
   const s = store.data.settings;
   openModal({
     title: t('forms.settingsTitle'),
     body: `<p class="hint">${esc(t('forms.granaryEquation'))}</p>
       <div style="display:flex;gap:10px"><label class="field" style="flex:1">${esc(t('forms.start'))}<input type="time" name="ws" value="${esc(s.workStart)}"></label><label class="field" style="flex:1">${esc(t('forms.end'))}<input type="time" name="we" value="${esc(s.workEnd)}"></label></div>
       <label class="field">${esc(t('forms.appearance'))}<select name="theme"><option value="auto"${s.theme === 'auto' ? ' selected' : ''}>${esc(t('forms.themeAuto'))}</option><option value="light"${s.theme === 'light' ? ' selected' : ''}>${esc(t('forms.themeLight'))}</option><option value="dark"${s.theme === 'dark' ? ' selected' : ''}>${esc(t('forms.themeDark'))}</option></select></label>
+      ${safetySettingsHtml(store.today())}
       <div class="actions"><button class="btn" data-close>${esc(t('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(t('common.save'))}</button></div>`,
     mount(box) {
+      fillSafetySettings(box, () => box.isConnected);
+      const autoBox = box.querySelector<HTMLElement>('[data-auto-backup]');
+      if (autoBox && autoBackup) autoBackup.mountSettings(autoBox, () => store.today(), () => refreshSafetySettings(box, store.today()));
+      const exportButton = box.querySelector<HTMLButtonElement>('[data-safety-export]')!;
+      exportButton.hidden = !exportBackup;
+      exportButton.addEventListener('click', () => {
+        closeModal(false);
+        exportBackup?.();
+      });
       box.querySelector('[data-ok]')!.addEventListener('click', () => {
         const ws = box.querySelector<HTMLInputElement>('input[name=ws]')!.value || '09:00';
         const we = box.querySelector<HTMLInputElement>('input[name=we]')!.value || '18:00';
@@ -377,7 +390,7 @@ export function openSettings(store: Store, applyTheme: () => void) {
 }
 
 /** 第一次打开 */
-export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void }) {
+export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void; restore(): void }) {
   openModal({
     kick: t('forms.welcomeKick'),
     title: t('forms.welcomeTitle'),
@@ -385,12 +398,13 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
       <p class="hint">${esc(t('forms.welcomeHint'))}</p>
       <button class="opt" data-w="project"><b>${esc(t('forms.welcomeProject'))}</b><span>${esc(t('forms.welcomeProjectDesc'))}</span></button>
       <button class="opt" data-w="calendar"><b>${esc(t('forms.welcomeCalendar'))}</b><span>${esc(t('forms.welcomeCalendarDesc'))}</span></button>
-      <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>`,
+      <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>
+      <button class="opt" data-w="restore"><b>${esc(t('forms.welcomeRestore'))}</b><span>${esc(t('forms.welcomeRestoreDesc'))}</span></button>`,
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) =>
         b.addEventListener('click', () => {
           closeModal(false);
-          const w = b.dataset.w as 'project' | 'demo' | 'calendar';
+          const w = b.dataset.w as 'project' | 'demo' | 'calendar' | 'restore';
           handlers[w]();
         }),
       );

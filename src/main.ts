@@ -2,7 +2,7 @@ import './styles.css';
 import { exportBackup, parseBackup } from './db';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
-import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
+import { $, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
@@ -22,6 +22,8 @@ import { syncThemeDataset } from './ui/theme';
 import { markDriftSeen } from './ui/drift';
 import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonName, t, toggleLocale, weatherName } from './i18n';
 import { formatChronicleLine } from './history';
+import { deliverBackup, markBackupExported, SafetyNoticeBar } from './ui/safety';
+import { AutoBackup } from './ui/auto-backup';
 
 async function boot() {
   initI18n({ detectBrowser: true });
@@ -240,7 +242,7 @@ async function boot() {
     openNew: (kind) => openNew(store, kind, openProjectAfterCreate),
     openClassify: () => openClassify(store),
     openPrompt: (p) => abandonPrompt(store, p, () => setTimeout(maybePrompt, 300)),
-    openSettings: () => openSettings(store, applyTheme),
+    openSettings: () => openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup }),
     openCeremony: (p) => ceremony.open(p),
     onViewChange: () => update(),
   });
@@ -260,6 +262,8 @@ async function boot() {
       update();
       if (!o) setTimeout(maybePrompt, 600);
     },
+    // An evening review is the day's real change: refresh today's backup file.
+    settled: () => { void autoBackup.run('settled'); },
   });
 
   function flyBrick(pid: string, from: DOMRect) {
@@ -405,6 +409,11 @@ async function boot() {
     renderer.resetView();
   };
 
+  // 数据只在这个浏览器里：申请持久存储、提醒备份、自动备份到文件夹、说明「添加到主屏幕」。
+  const autoBackup = new AutoBackup(store);
+  const safetyBar = new SafetyNoticeBar(store, () => void exportFlow(), autoBackup);
+  autoBackup.onChange = () => safetyBar.sync();
+
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
   let agendaTimer = 0;
@@ -471,6 +480,7 @@ async function boot() {
     const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
     setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(formatChronicleLine(c))}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
     setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
+    safetyBar.sync();
     scheduleAgendaRefresh(agenda, now);
   }
 
@@ -496,6 +506,8 @@ async function boot() {
     });
     if (archived.length) toast(t('daily.archived', { days: archived.map(fmtDay).join(getLocale() === 'zh-CN' ? '、' : ', ') }));
     else if (repaired.length) toast(t('daily.repairedDates', { count: repaired.length }));
+    // First chance each day (startup, takeover, date change, import).
+    void autoBackup.run('daily');
   }
 
   function resumeWriterDuties() {
@@ -550,6 +562,60 @@ async function boot() {
   });
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(() => renderer.readTheme(), 50));
 
+  /* ---------------- 导出备份 ---------------- */
+  async function exportFlow() {
+    // Reader tabs may refresh while the privacy confirmation is open.
+    // Warn about one exact Store snapshot and only download that snapshot;
+    // if reload replaced it, re-prompt against the fresh data.
+    while (true) {
+      const warnedData = store.data;
+      const diaryCount = warnedData.diaries.length;
+      const backup = exportBackup(warnedData);
+      const ok = await confirmModal({
+        title: t('main.exportTitle'),
+        text: diaryCount
+          ? t('main.exportDiaryBody', { count: diaryCount })
+          : t('main.exportBody'),
+        ok: t('main.exportOk'),
+        readOnlySafe: true,
+      });
+      if (!ok) return;
+      if (store.data !== warnedData) {
+        toast(t('main.exportChanged'), true);
+        continue;
+      }
+      const today = store.today();
+      if (await deliverBackup(`yuzhi-backup-${today}.json`, backup) === 'cancelled') return;
+      markBackupExported(today);
+      safetyBar.sync();
+      toast(t('main.exportDone'));
+      break;
+    }
+  }
+
+  /* ---------------- 导入备份 ---------------- */
+  async function importFlow() {
+    const context = store.captureWriteContext();
+    const revision = session.revision;
+    const f = await pickFile($('fileBackup') as HTMLInputElement);
+    if (!f || !context.isCurrent()) return;
+    try {
+      const d = parseBackup(await f.text());
+      if (!context.isCurrent()) return;
+      const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
+      if (!ok || !context.isCurrent()) return;
+      await store.replaceAll(d);
+      if (session.revision !== revision || store.isReadOnly) return;
+      tracker.open({ kind: 'overview' }, false);
+      applyTheme();
+      daily();
+      toast(t('main.importDone'));
+    } catch (err) {
+      if (session.revision !== revision || store.isReadOnly) return;
+      toast(err instanceof Error ? err.message : String(err), true);
+    }
+  }
+
   /* ---------------- 顶部按钮 ---------------- */
   $('settleBtn').onclick = () => settle.open();
   $('fogGo').onclick = () => settle.open();
@@ -583,53 +649,10 @@ async function boot() {
     const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
     if (!m) return;
     menu.hidden = true;
-    if (m === 'settings') openSettings(store, applyTheme);
-    else if (m === 'export') {
-      // Reader tabs may refresh while the privacy confirmation is open.
-      // Warn about one exact Store snapshot and only download that snapshot;
-      // if reload replaced it, re-prompt against the fresh data.
-      while (true) {
-        const warnedData = store.data;
-        const diaryCount = warnedData.diaries.length;
-        const backup = exportBackup(warnedData);
-        const ok = await confirmModal({
-          title: t('main.exportTitle'),
-          text: diaryCount
-            ? t('main.exportDiaryBody', { count: diaryCount })
-            : t('main.exportBody'),
-          ok: t('main.exportOk'),
-          readOnlySafe: true,
-        });
-        if (!ok) return;
-        if (store.data !== warnedData) {
-          toast(t('main.exportChanged'), true);
-          continue;
-        }
-        download(`yuzhi-backup-${store.today()}.json`, backup);
-        toast(t('main.exportDone'));
-        break;
-      }
-    } else if (m === 'import') {
-      const context = store.captureWriteContext();
-      const revision = session.revision;
-      const f = await pickFile($('fileBackup') as HTMLInputElement);
-      if (!f || !context.isCurrent()) return;
-      try {
-        const d = parseBackup(await f.text());
-        if (!context.isCurrent()) return;
-        const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
-        if (!ok || !context.isCurrent()) return;
-        await store.replaceAll(d);
-        if (session.revision !== revision || store.isReadOnly) return;
-        tracker.open({ kind: 'overview' }, false);
-        applyTheme();
-        daily();
-        toast(t('main.importDone'));
-      } catch (err) {
-        if (session.revision !== revision || store.isReadOnly) return;
-        toast(err instanceof Error ? err.message : String(err), true);
-      }
-    } else if (m === 'archive') tracker.open({ kind: 'archive' });
+    if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup });
+    else if (m === 'export') await exportFlow();
+    else if (m === 'import') await importFlow();
+    else if (m === 'archive') tracker.open({ kind: 'archive' });
     else if (m === 'demo') seedDemo(store);
   });
 
@@ -651,6 +674,9 @@ async function boot() {
         seedDemo(store);
         setTimeout(maybePrompt, 1500);
       },
+      // Moving into the installed Home Screen / Dock app starts from an empty
+      // island; restoring is how the browser's island comes along.
+      restore: () => { void importFlow(); },
     });
   } else setTimeout(maybePrompt, 1200);
 

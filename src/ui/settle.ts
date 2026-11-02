@@ -25,6 +25,8 @@ export interface SettleHooks {
   /** 做了：一块砖从卡片飞进村落 */
   brick(projectId: string, from: DOMRect): void;
   onOpenChange(open: boolean): void;
+  /** 一天结算完成并已交给持久层（例如触发自动备份） */
+  settled?(date: ISODate): void;
 }
 
 const timeOf = (iso: string) => {
@@ -324,6 +326,7 @@ export class SettleSheet {
     this.drafts.delete(date);
     this.pulled.delete(date);
     toast(text);
+    this.hooks.settled?.(date);
     const rest = pendingDays(this.store.data, this.store.today());
     if (rest.length) this.open(rest[0]);
     else this.close();
