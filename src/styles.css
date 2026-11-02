@@ -118,6 +118,10 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .toast { position: fixed; left: 50%; top: 14px; transform: translate(-50%, -6px); z-index: 80; background: var(--ink); color: var(--panel); font-size: 12.5px; padding: 7px 15px; border-radius: 99px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; max-width: 90%; text-align: center; line-height: 1.4; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.bad { background: var(--warn); color: #fff; }
+.toast.has-action.show { pointer-events: auto; display: flex; align-items: center; gap: 12px; padding-right: 7px; }
+.toast-act { flex: none; border: 0; border-radius: 99px; padding: 4px 12px; min-height: 28px; background: color-mix(in srgb, var(--panel) 18%, transparent); color: inherit; font-weight: 600; cursor: pointer; }
+.toast-act:hover { background: color-mix(in srgb, var(--panel) 30%, transparent); }
+.iconbtn.armed { width: auto; padding: 0 8px; border-color: var(--warn); background: var(--warn-soft); color: var(--warn); font-size: 12px; font-weight: 600; }
 .tab-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; border-color: var(--warn); color: var(--warn); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 2px 0; font-size: 11.5px; color: var(--muted); }
 .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
@@ -172,6 +176,7 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .task { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
 .task:last-child { border-bottom: 0; }
 .task .tt { flex: 1; min-width: 0; cursor: pointer; }
+.task div.tt { cursor: default; }
 .history-link { border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 0; }
 .history-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 .task .tt b { font-weight: 500; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -337,6 +342,18 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
 /* 窄屏把「日历」「EN」收进 ⋯ 菜单；宽屏它们在顶栏上，菜单里不重复 */
 @media (min-width: 721px) { .menu .menu-compact { display: none; } }
 
+/* 触屏：小按钮的可点范围放大到 40px 左右，相邻的 ✓ 📅 ✕ 不容易点错 */
+@media (pointer: coarse) {
+  .iconbtn { width: 40px; height: 40px; font-size: 15px; border-radius: 9px; }
+  .iconbtn.armed { width: auto; }
+  .task .acts { gap: 6px; }
+  .btn.small { min-height: 36px; padding: 6px 12px; }
+  .linkbtn, .backlink { padding: 8px 0; }
+  .mapinfo .mi-x { padding: 6px 4px 6px 12px; }
+  .zoom button { width: 40px; height: 40px; }
+  .reasons button { min-height: 34px; padding: 5px 12px; }
+  .daytabs button { min-height: 34px; padding: 5px 13px; }
+}
 @media (prefers-reduced-motion: reduce) { .toast, .tip, .scard, .brick { transition: none; } .mapinfo { animation: none; } .ceremony, .cbox { animation: none; } }
 
 @media (max-width: 980px) {
@@ -385,7 +402,6 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
   .main { grid-template-columns: minmax(0, 1fr); }
   .mapcard { padding: 10px; }
   .mapwrap { aspect-ratio: 1 / 0.8; }
-  .zoom button { width: 36px; height: 36px; }
   .right { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; max-height: 82vh; max-height: 82dvh; border-radius: 18px 18px 0 0; transform: translateY(calc(100% - var(--sheet-peek))); transition: transform .28s ease; padding-top: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 30px rgba(30,30,10,.16); overscroll-behavior: contain; }
   .right.open { transform: translateY(0); }
   .right.dragging { transition: none; }

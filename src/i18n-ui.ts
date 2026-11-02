@@ -15,6 +15,7 @@ export const uiZh = {
   'common.history': '一生之书',
   'common.versionHistory': '版本历史',
   'common.saved': '已保存',
+  'common.undo': '撤销',
 
   'dateSelect.none': '不定日期',
   'dateSelect.nextMonday': '下周一（{date}）',
@@ -302,6 +303,7 @@ export const uiEn: Record<UiMessageKey, string> = {
   'common.history': 'Life Book',
   'common.versionHistory': 'Version history',
   'common.saved': 'Saved',
+  'common.undo': 'Undo',
 
   'dateSelect.none': 'No date',
   'dateSelect.nextMonday': 'Next Monday ({date})',

@@ -5,13 +5,44 @@ const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 
 let toastT = 0;
-export function toast(msg: string, bad = false) {
+let toastClearT = 0;
+
+export interface ToastAction {
+  label: string;
+  run(): void;
+}
+
+/**
+ * 页面顶部的一句提示。带 action 时多一个按钮（例如「撤销」），停留更久，
+ * 消失后按钮随之移除，不会留在 Tab 顺序里。
+ */
+export function toast(msg: string, bad = false, action?: ToastAction) {
   const el = $('toast');
   el.textContent = msg;
   el.classList.toggle('bad', bad);
+  el.classList.toggle('has-action', Boolean(action));
+  if (action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toast-act';
+    button.textContent = action.label;
+    button.addEventListener('click', () => {
+      el.classList.remove('show', 'has-action');
+      button.remove();
+      action.run();
+    }, { once: true });
+    el.append(button);
+  }
   el.classList.add('show');
   clearTimeout(toastT);
-  toastT = window.setTimeout(() => el.classList.remove('show'), 2600);
+  clearTimeout(toastClearT);
+  toastT = window.setTimeout(() => {
+    el.classList.remove('show');
+    toastClearT = window.setTimeout(() => {
+      el.classList.remove('has-action');
+      el.querySelector('.toast-act')?.remove();
+    }, 250);
+  }, action ? 6000 : 2600);
 }
 
 /** 只在内容变化时才写 innerHTML，避免打断输入和滚动 */

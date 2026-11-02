@@ -1,5 +1,6 @@
 /** Task-domain mutations. */
-import type { ISODate, Task } from '../types';
+import type { ISODate, SettlementEntry, Task } from '../types';
+import { entryId } from '../logic/days';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { isPlausibleDate } from '../lib/date';
@@ -194,12 +195,35 @@ export function dropTaskForTrim(store: Store, taskId: string) {
   return recordDroppedTask(store, taskId, { kind: 'project-trim' });
 }
 
-/** 在结算之外直接记下「今天做完了」（例如没有日期的任务） */
-function markTaskDoneImpl(store: Store, taskId: string) {
+/** 撤销「做完了」需要的信息：哪一天，以及这一天原来有没有别的判定 */
+export interface TaskDoneUndo {
+  taskId: string;
+  date: ISODate;
+  previous?: SettlementEntry;
+}
+
+/** 在结算之外直接记下「今天做完了」（例如没有日期的任务）。返回撤销所需的信息。 */
+function markTaskDoneImpl(store: Store, taskId: string): TaskDoneUndo | undefined {
   const t = store.task(taskId);
-  if (!t || t.status !== 'open' || !t.projectId) return;
+  if (!t || t.status !== 'open' || !t.projectId) return undefined;
   const today = store.today();
+  const previous = store.data.entries.find((entry) => entry.id === entryId(today, 'task', t.id));
   putSettlementEntry(store, today, { key: `task|${t.id}`, type: 'task', id: t.id, title: t.title, projectId: t.projectId }, 'done');
+  return { taskId: t.id, date: today, previous: previous ? { ...previous } : undefined };
+}
+
+/**
+ * 撤销刚才记下的「做完了」：删掉这条结算事实，或换回原来的判定。
+ * 和晚间结算里取消一个决定是同一件事（只动事实，后果由 read model 回退）。
+ * 期间这条事实被别处改过（例如结算里改判了）就不动它。
+ */
+function undoTaskDoneImpl(store: Store, undo: TaskDoneUndo): boolean {
+  const id = entryId(undo.date, 'task', undo.taskId);
+  const current = store.data.entries.find((entry) => entry.id === id);
+  if (!current || current.outcome !== 'done') return false;
+  if (undo.previous) store.put('entries', undo.previous);
+  else store.del('entries', id);
+  return true;
 }
 
 /** 结算时把一件别的任务拉进这一天（「今天还做了…」），不算改期 */
@@ -268,6 +292,9 @@ export const dropTask = (...args: Parameters<typeof dropTaskImpl>): ReturnType<t
 
 export const markTaskDone = (...args: Parameters<typeof markTaskDoneImpl>): ReturnType<typeof markTaskDoneImpl> =>
   args[0].batch(() => markTaskDoneImpl(...args));
+
+export const undoTaskDone = (...args: Parameters<typeof undoTaskDoneImpl>): ReturnType<typeof undoTaskDoneImpl> =>
+  args[0].batch(() => undoTaskDoneImpl(...args));
 
 export const repairTruncatedYearDates = (...args: Parameters<typeof repairTruncatedYearDatesImpl>): ReturnType<typeof repairTruncatedYearDatesImpl> =>
   args[0].batch(() => repairTruncatedYearDatesImpl(...args));

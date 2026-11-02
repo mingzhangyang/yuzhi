@@ -430,7 +430,7 @@ export class Tracker {
       .map((t) => {
         const late = t.scheduledFor && t.scheduledFor < today;
         const meta = [t.scheduledFor ? relDay(t.scheduledFor, today) + (late ? ' · ' + tr('tracker.overdue') : '') : tr('tracker.noDate'), t.postponeCount ? tr('tracker.postponedCount', { count: t.postponeCount }) : '', stage === 3 ? tr('tracker.mayAbandon') : ''].filter(Boolean).join(' · ');
-        return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></div>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="${esc(tr('tracker.doneToday'))}" aria-label="${esc(tr('tracker.doneToday'))}">✓</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="${esc(tr('tracker.reschedule'))}" aria-label="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="${esc(tr('tracker.notImportant'))}" aria-label="${esc(tr('tracker.notImportant'))}">✕</button></div>` : ''}</div>`;
+        return `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></button>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="${esc(tr('tracker.doneToday'))}" aria-label="${esc(tr('tracker.doneToday'))}">✓</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="${esc(tr('tracker.reschedule'))}" aria-label="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="${esc(tr('tracker.notImportant'))}" aria-label="${esc(tr('tracker.notImportant'))}">✕</button></div>` : ''}</div>`;
       })
       .join('');
     const life = lifeBookEntries(s.data, { type: 'project', id: p.id }, stageLifeEntries(s.data, today));
@@ -448,7 +448,7 @@ export class Tracker {
       ${p.status === 'done' ? '' : `<div class="sect">${esc(tr('tracker.tasksHere'))} <small>${open.length}</small></div>`}
       ${active ? `<form class="add" data-form="ptask" data-id="${esc(p.id)}"><input name="ptask" placeholder="${esc(tr('tracker.addTaskPlaceholder'))}" autocomplete="off" aria-label="${esc(tr('tracker.newTaskAria'))}">${dateSelect('pdate', today, { current: today, withNone: true, mode: 'task' })}<button class="btn primary">${esc(tr('common.add'))}</button></form>` : ''}
       ${p.status === 'done' ? '' : `<div>${taskRows || (active ? `<p class="empty">${esc(tr('tracker.villageEmpty'))}</p>` : '')}</div>`}
-      ${done.length ? `<details class="hint"><summary>${esc(tr('tracker.completedTasks', { count: done.length }))}</summary>${done.map((t) => `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></div></div>`).join('')}</details>` : ''}
+      ${done.length ? `<details class="hint"><summary>${esc(tr('tracker.completedTasks', { count: done.length }))}</summary>${done.map((t) => `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span>${t.closedAt ? fmtDay(t.closedAt) : ''}</span></button></div>`).join('')}</details>` : ''}
       <div class="sect">${esc(tr('common.history'))} <small>${life.length}</small></div>
       ${lifeList(life, today)}
       <div class="btnrow">
@@ -515,7 +515,7 @@ export class Tracker {
         overdue
           .map((t) => {
             const p = s.project(t.projectId);
-            return `<div class="task"><div class="tt" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · ${esc(tr('tracker.originally', { date: relDay(t.scheduledFor!, today) }))}</span></div><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">${esc(tr('tracker.toToday'))}</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.reschedule'))}" title="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.notImportant'))}" title="${esc(tr('tracker.notImportant'))}">✕</button></div></div>`;
+            return `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · ${esc(tr('tracker.originally', { date: relDay(t.scheduledFor!, today) }))}</span></button><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">${esc(tr('tracker.toToday'))}</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.reschedule'))}" title="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.notImportant'))}" title="${esc(tr('tracker.notImportant'))}">✕</button></div></div>`;
           })
           .join('') || `<p class="empty">${esc(tr('tracker.noOverdue'))}</p>`
       }
@@ -642,6 +642,23 @@ export class Tracker {
     }
   }
 
+  /** 「不重要了」的两步确认：按钮先变成「确认？」，几秒内不再点就恢复原样 */
+  private armDrop(el: HTMLElement, title: string) {
+    const text = el.textContent ?? '';
+    const label = el.getAttribute('aria-label') ?? '';
+    el.dataset.armed = 'true';
+    el.classList.add('armed');
+    el.textContent = tr('tracker.confirmDrop');
+    el.setAttribute('aria-label', tr('tracker.confirmDropAria', { title }));
+    window.setTimeout(() => {
+      if (!el.isConnected || el.dataset.armed !== 'true') return;
+      delete el.dataset.armed;
+      el.classList.remove('armed');
+      el.textContent = text;
+      el.setAttribute('aria-label', label);
+    }, 3500);
+  }
+
   private async onClick(e: Event) {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!el) return;
@@ -735,12 +752,26 @@ export class Tracker {
         break;
       case 'done': {
         const t = s.task(id);
-        A.markTaskDone(s, id);
-        if (t) toast(tr('tracker.taskDoneToast', { title: t.title }));
+        const context = s.captureWriteContext();
+        const undo = A.markTaskDone(s, id);
+        if (!t || !undo) break;
+        // 「做完了」是一条当天的结算事实：几秒内可以撤销（删掉这条事实），不必等晚间结算改判。
+        toast(tr('tracker.taskDoneToast', { title: t.title }), false, {
+          label: tr('common.undo'),
+          run: () => {
+            const ok = context.isCurrent() && !s.isReadOnly && A.undoTaskDone(s, undo);
+            toast(ok ? tr('tracker.taskDoneUndone', { title: t.title }) : tr('tracker.taskDoneUndoStale'), !ok);
+          },
+        });
         break;
       }
       case 'drop': {
         const t = s.task(id);
+        // 列表里的 ✕ 和 ✓ 挨着：先变成「确认？」，再点一次才放下。任务页上的文字按钮意图明确，直接生效。
+        if (el.classList.contains('iconbtn') && el.dataset.armed !== 'true') {
+          this.armDrop(el, t?.title ?? '');
+          break;
+        }
         A.dropTask(s, id);
         if (t) toast(tr('tracker.taskDroppedToast', { title: t.title }));
         break;

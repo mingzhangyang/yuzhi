@@ -644,6 +644,14 @@ async function boot() {
     menu.hidden = !open;
     moreBtn.setAttribute('aria-expanded', String(open));
   };
+  /** 菜单里此刻能用的项：窄屏才显示的项、只读时禁用的项都跳过 */
+  const menuItems = () => [...menu.querySelectorAll<HTMLButtonElement>('button[data-m]')]
+    .filter((b) => !b.disabled && b.offsetParent !== null);
+  const focusMenuItem = (index: number) => {
+    const items = menuItems();
+    if (!items.length) return;
+    items[(index + items.length) % items.length].focus();
+  };
   moreBtn.onclick = (e) => {
     e.stopPropagation();
     if (!menu.hidden) {
@@ -654,7 +662,35 @@ async function boot() {
     setMenuOpen(true);
     menu.style.top = `${r.bottom + window.scrollY + 6}px`;
     menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.right - menu.offsetWidth))}px`;
+    // 键盘打开（Enter / 空格，detail 为 0）时焦点进入第一项；鼠标点开不抢焦点。
+    if (e.detail === 0) focusMenuItem(0);
   };
+  moreBtn.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    if (menu.hidden) moreBtn.click();
+    focusMenuItem(e.key === 'ArrowDown' ? 0 : -1);
+  });
+  menu.addEventListener('keydown', (e) => {
+    const items = menuItems();
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusMenuItem(at + (e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      focusMenuItem(e.key === 'Home' ? 0 : -1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setMenuOpen(false);
+      moreBtn.focus();
+    } else if (e.key === 'Tab') {
+      // 菜单节点在 body 末尾：放任 Tab 会跳到页面最后。收起菜单，焦点回到 ⋯。
+      e.preventDefault();
+      setMenuOpen(false);
+      moreBtn.focus();
+    }
+  });
   document.addEventListener('click', (e) => {
     if (!menu.hidden && !menu.contains(e.target as Node)) setMenuOpen(false);
   });
