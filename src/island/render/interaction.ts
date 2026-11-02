@@ -548,11 +548,12 @@ export abstract class IslandInteraction extends IslandViewport {
     // clicks obey foreground z-order, while inspection can still describe a
     // visible agenda prop or bottle even when a moving walker crosses it.
     const labelHit = this.placedLabelHitAt(pt);
-    // Inspecting a drift bottle must keep its original priority over
-    // overlapping moved labels, including on narrow mobile screens.
+    // Match hitAt()'s foreground ordering for inspectable targets: a real
+    // drift bottle or agenda prop beats even a moved agenda/cultivation label.
+    // Otherwise a click can select the prop but describe a different label.
     const inspectable = this.driftHitAt(pt)
-      ?? (labelHit?.kind === 'agenda' ? labelHit
-        : labelHit?.kind === 'cultivation' ? null : this.agendaHitAt(pt));
+      ?? this.agendaHitAt(pt)
+      ?? (labelHit?.kind === 'agenda' ? labelHit : null);
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;

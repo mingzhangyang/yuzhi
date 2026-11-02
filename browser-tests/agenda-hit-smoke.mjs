@@ -319,6 +319,61 @@ try {
     assert(lines?.includes('稍后还有 1 场') && lines.includes('1 场已经结束'), `团队 board info: ${JSON.stringify(lines)}`);
   });
 
+  await runScenario('重叠标签不能抢走告示牌的说明：日程和培育区标签都让位', async () => {
+    // Force an otherwise rare collision using the real browser renderer.
+    // The hit-target geometry is synthetic, but agendaHitAt() and inspect()
+    // exercise the production implementations against a real scene/noticeboard.
+    const probe = await page.evaluate(() => {
+      const r = window.yuzhi.renderer;
+      const village = r.scene.villages.find((v) => v.name === '评审');
+      const other = r.scene.villages.find((v) => v.projectId !== village?.projectId && v.agenda);
+      const area = r.scene.cultivation[0]?.kind;
+      if (!village || !other || !area) return { error: 'missing scene fixtures' };
+      const [x, y] = r.villageAgendaAnchor(village);
+      const span = Math.max(8, r.view.tw * 0.22) / 3;
+      const points = [[x, y], [x - span, y], [x + span, y], [x, y - span], [x, y + span]];
+      const pt = points.map(([x, y]) => ({ x, y })).find((p) =>
+        r.agendaHitAt(p)?.target === village.projectId
+        && r.hitAt(p)?.kind === 'agenda'
+        && r.hitAt(p)?.target === village.projectId);
+      if (!pt) return { error: 'no unobscured visible noticeboard point' };
+      const expected = r.inspect(pt)?.info;
+      const previous = new Map(r.placedLabels);
+      const reports = [];
+      try {
+        for (const conflicting of [
+          { kind: 'agenda', target: other.projectId },
+          { kind: 'cultivation', area },
+        ]) {
+          r.placedLabels.set('smoke:overlap', {
+            bounds: { x: pt.x, y: pt.y, w: 90, h: 24 },
+            hit: conflicting,
+          });
+          reports.push({
+            conflicting,
+            pickedLabel: r.placedLabelHitAt(pt),
+            pickedClick: r.hitAt(pt),
+            inspected: r.inspect(pt)?.info,
+          });
+        }
+      } finally {
+        r.placedLabels.clear();
+        for (const [key, label] of previous) r.placedLabels.set(key, label);
+      }
+      return { expected, villageId: village.projectId, reports };
+    });
+    assert(!probe.error, `noticeboard collision setup failed: ${JSON.stringify(probe)}`);
+    assert(probe.expected && probe.reports.length === 2, `missing collision results: ${JSON.stringify(probe)}`);
+    for (const report of probe.reports) {
+      assert(report.pickedLabel?.kind === report.conflicting.kind,
+        `overlapping label was not actually under the hit point: ${JSON.stringify(report)}`);
+      assert(report.pickedClick?.kind === 'agenda' && report.pickedClick.target === probe.villageId,
+        `agenda prop lost click priority: ${JSON.stringify(report)}`);
+      assert(JSON.stringify(report.inspected) === JSON.stringify(probe.expected),
+        `agenda prop click described the overlapping ${report.conflicting.kind} label: ${JSON.stringify(report)}`);
+    }
+  });
+
   await runScenario('即将开始：点告示牌显示开始时间', async () => {
     const info = await boardInfo(page, p['评审'].board);
     assert(info?.includes('14:40 开始'), `soon info missing start time: ${JSON.stringify(info)}`);

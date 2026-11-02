@@ -114,6 +114,7 @@ jobs:
 
           node browser-tests/input-focus-smoke.mjs
           node browser-tests/layer-focus-smoke.mjs
+          node browser-tests/settle-scroll-smoke.mjs
           node browser-tests/locale-smoke.mjs
           node browser-tests/capture-smoke.mjs
           node browser-tests/data-safety-smoke.mjs
