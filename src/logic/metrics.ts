@@ -103,8 +103,12 @@ export function backlogSeries(data: Data, today: ISODate, days = 14): number[] {
   return out;
 }
 
-/** 状态：近 7 天已结算条目中「做了」和「做了一部分」的占比 */
-export function condition(data: Data, today: ISODate): { ratio: number | null; settled: number; good: number } {
+/**
+ * 状态：近 7 天已结算条目中「做了」和「做了一部分」的占比。
+ * days 是近 7 天结算过的日子数：结算了但当天没有条目时，占比无从算起，
+ * 但不能说成「还没有结算记录」（YZ-F4）。
+ */
+export function condition(data: Data, today: ISODate): { ratio: number | null; settled: number; good: number; days: number } {
   let settled = 0;
   let good = 0;
   for (const e of data.entries) {
@@ -112,7 +116,8 @@ export function condition(data: Data, today: ISODate): { ratio: number | null; s
     settled++;
     if (e.outcome !== 'skipped') good++;
   }
-  return { ratio: settled ? good / settled : null, settled, good };
+  const days = data.days.filter((d) => d.status === 'settled' && inLast7(d.date, today)).length;
+  return { ratio: settled ? good / settled : null, settled, good, days };
 }
 
 export function conditionSeries(data: Data, today: ISODate, days = 14): number[] {

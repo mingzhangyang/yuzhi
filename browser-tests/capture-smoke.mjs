@@ -86,6 +86,56 @@ try {
   assert(capturedTask && !capturedTask.projectId && !capturedTask.scheduledFor,
     `global Todo acquired hidden defaults: ${JSON.stringify(capturedTask)}`);
 
+  // YZ-F1: typing a year digit by digit makes Chromium fire change for
+  // 0002-MM-DD, 0020-MM-DD, 0202-MM-DD and only then the real year. None of
+  // the partial years may be committed, and a half-typed year must block
+  // submission instead of saving year 2 (which then reads as "overdue").
+  await page.locator('#newBtn').click();
+  await page.locator('form[data-f="task"] input[name="title"]').fill('逐位输入年份的待办');
+  const typedYear = await page.evaluate(() => {
+    const form = document.querySelector('form[data-f="task"]');
+    const select = form?.querySelector('select[name="date"]');
+    if (!(select instanceof HTMLSelectElement)) throw new Error('task date select missing');
+    const today = window.yuzhi.store.today();
+    const [year, month, day] = today.split('-').map(Number);
+    const target = new Date(Date.UTC(year, month - 1, day + 2)).toISOString().slice(0, 10);
+    const [ty, rest] = [target.slice(0, 4), target.slice(4)];
+
+    select.value = 'other';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const input = form?.querySelector('input[type="date"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error('native task date input missing');
+    const partial = [];
+    for (let digits = 1; digits <= 3; digits++) {
+      input.value = ty.slice(0, digits).padStart(4, '0') + rest;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      partial.push({ value: select.value, editing: input.isConnected });
+    }
+    return { target, partial, input: input.value };
+  });
+  assert(typedYear.partial.every((step) => step.value === 'other' && step.editing),
+    `a partial year was committed while typing: ${JSON.stringify(typedYear)}`);
+  await page.locator('form[data-f="task"] button.primary').click();
+  const blocked = await page.evaluate(() => ({
+    modalOpen: !document.getElementById('mdl').hidden,
+    saved: window.yuzhi.store.data.tasks.some((task) => task.title === '逐位输入年份的待办'),
+  }));
+  assert(blocked.modalOpen && !blocked.saved, `half-typed year was submitted: ${JSON.stringify(blocked)}`);
+  await page.evaluate((target) => {
+    const input = document.querySelector('form[data-f="task"] input[type="date"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error('native task date input missing');
+    input.value = target;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, typedYear.target);
+  await page.locator('form[data-f="task"] button.primary').click();
+  await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
+  const typedTask = await page.evaluate(() =>
+    window.yuzhi.store.tasks().find((task) => task.title === '逐位输入年份的待办'));
+  assert(typedTask?.scheduledFor === typedYear.target,
+    `typed custom date was not saved as the full date: ${JSON.stringify({ typedTask, typedYear })}`);
+
   // Project creation continues directly into the project and its first task.
   await page.locator('#newBtn').click();
   await page.locator('[data-k="project"]').click();
@@ -128,6 +178,9 @@ try {
     if (!(firstPicker instanceof HTMLInputElement)) throw new Error('custom date picker missing');
     firstPicker.value = customDate;
     firstPicker.dispatchEvent(new Event('change', { bubbles: true }));
+    // change alone is not a commit (typing a year fires it once per digit);
+    // leaving the field is. A real click on the language button blurs first.
+    firstPicker.dispatchEvent(new Event('blur'));
 
     const languageButton = document.getElementById('langBtn');
     if (!(languageButton instanceof HTMLButtonElement)) throw new Error('language button missing');
@@ -221,8 +274,10 @@ try {
     const next = new Date(Date.UTC(year, month - 1, day + 1));
     const future = next.toISOString().slice(0, 10);
 
+    // Leaving the field is the commit point; an invalid value must not escape.
     input.value = future;
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('blur'));
 
     const rejected = {
       future,
@@ -235,6 +290,7 @@ try {
 
     input.value = today;
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('blur'));
 
     return {
       ...rejected,

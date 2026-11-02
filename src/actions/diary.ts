@@ -3,11 +3,12 @@ import type { DiaryEntry, ISODate } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { historyEvent } from '../history-types';
-import { ActionError, operation, semanticLife } from './shared';
+import { ActionError, assertPickedDate, operation, semanticLife } from './shared';
 
 function validDiaryDate(store: Store, date: ISODate | undefined): ISODate {
   const today = store.today();
   const value = date ?? today;
+  assertPickedDate(value);
   if (value > today) throw new ActionError('error.diaryFuture');
   return value;
 }

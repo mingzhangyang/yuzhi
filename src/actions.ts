@@ -29,6 +29,7 @@ export {
   moveTask,
   pullIntoDay,
   renameTask,
+  repairTruncatedYearDates,
   rescheduleTask,
 } from './actions/tasks';
 

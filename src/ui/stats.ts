@@ -70,5 +70,5 @@ export function updateStats(store: Store) {
   set('backlog', String(b.total), t('stats.backlogRight', { dock: b.dock, overdue: b.overdue }), b.total ? t('stats.backlogFoot') : t('stats.backlogEmpty'), backlogSeries(d, today), b.total >= 10);
 
   const c = condition(d, today);
-  set('condition', c.ratio == null ? '—' : String(Math.round(c.ratio * 100)), c.settled ? t('stats.settled', { good: c.good, settled: c.settled }) : t('stats.noSettlements'), t('stats.conditionFoot'), conditionSeries(d, today), c.ratio != null && c.ratio < 0.4);
+  set('condition', c.ratio == null ? '—' : String(Math.round(c.ratio * 100)), c.settled ? t('stats.settled', { good: c.good, settled: c.settled }) : c.days ? t('stats.settledNoItems', { days: c.days }) : t('stats.noSettlements'), t('stats.conditionFoot'), conditionSeries(d, today), c.ratio != null && c.ratio < 0.4);
 }

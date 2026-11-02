@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
+import { isPlausibleDate } from '../lib/date';
 import { entryId, type SettleItem } from '../logic/days';
 import { nextFactSeq } from '../logic/operations';
 import { t, type MessageKey, type MessageVars } from '../i18n';
@@ -39,6 +40,11 @@ export class ActionError extends Error {
 }
 
 export const q = (s: string) => `「${s}」`;
+
+/** 用户给出的日期必须是真实、合理的一天；拒绝而不是悄悄存下 0002-11-03 这类值。 */
+export function assertPickedDate(date: ISODate | undefined): void {
+  if (date !== undefined && !isPlausibleDate(date)) throw new ActionError('error.dateInvalid');
+}
 
 export function chronicle(store: Store, date: ISODate, text: string, kind: ChronicleKind, id = uid('c')) {
   store.put('chronicle', { id, date, text, kind });
