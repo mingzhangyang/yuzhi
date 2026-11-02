@@ -2,7 +2,7 @@ import './styles.css';
 import { exportBackup, parseBackup } from './db';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
-import { $, download, esc, pickFile, setHTML, setText, toast } from './ui/dom';
+import { $, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
@@ -22,7 +22,8 @@ import { syncThemeDataset } from './ui/theme';
 import { markDriftSeen } from './ui/drift';
 import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonName, t, toggleLocale, weatherName } from './i18n';
 import { formatChronicleLine } from './history';
-import { markBackupExported, SafetyNoticeBar } from './ui/safety';
+import { deliverBackup, markBackupExported, SafetyNoticeBar } from './ui/safety';
+import { AutoBackup } from './ui/auto-backup';
 
 async function boot() {
   initI18n({ detectBrowser: true });
@@ -241,7 +242,7 @@ async function boot() {
     openNew: (kind) => openNew(store, kind, openProjectAfterCreate),
     openClassify: () => openClassify(store),
     openPrompt: (p) => abandonPrompt(store, p, () => setTimeout(maybePrompt, 300)),
-    openSettings: () => openSettings(store, applyTheme, () => void exportFlow()),
+    openSettings: () => openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup }),
     openCeremony: (p) => ceremony.open(p),
     onViewChange: () => update(),
   });
@@ -261,6 +262,8 @@ async function boot() {
       update();
       if (!o) setTimeout(maybePrompt, 600);
     },
+    // An evening review is the day's real change: refresh today's backup file.
+    settled: () => { void autoBackup.run('settled'); },
   });
 
   function flyBrick(pid: string, from: DOMRect) {
@@ -406,8 +409,10 @@ async function boot() {
     renderer.resetView();
   };
 
-  // 数据只在这个浏览器里：申请持久存储、提醒备份、说明「添加到主屏幕」。
-  const safetyBar = new SafetyNoticeBar(store, () => void exportFlow());
+  // 数据只在这个浏览器里：申请持久存储、提醒备份、自动备份到文件夹、说明「添加到主屏幕」。
+  const autoBackup = new AutoBackup(store);
+  const safetyBar = new SafetyNoticeBar(store, () => void exportFlow(), autoBackup);
+  autoBackup.onChange = () => safetyBar.sync();
 
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
@@ -501,6 +506,8 @@ async function boot() {
     });
     if (archived.length) toast(t('daily.archived', { days: archived.map(fmtDay).join(getLocale() === 'zh-CN' ? '、' : ', ') }));
     else if (repaired.length) toast(t('daily.repairedDates', { count: repaired.length }));
+    // First chance each day (startup, takeover, date change, import).
+    void autoBackup.run('daily');
   }
 
   function resumeWriterDuties() {
@@ -578,7 +585,7 @@ async function boot() {
         continue;
       }
       const today = store.today();
-      download(`yuzhi-backup-${today}.json`, backup);
+      if (await deliverBackup(`yuzhi-backup-${today}.json`, backup) === 'cancelled') return;
       markBackupExported(today);
       safetyBar.sync();
       toast(t('main.exportDone'));
@@ -642,7 +649,7 @@ async function boot() {
     const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
     if (!m) return;
     menu.hidden = true;
-    if (m === 'settings') openSettings(store, applyTheme, () => void exportFlow());
+    if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup });
     else if (m === 'export') await exportFlow();
     else if (m === 'import') await importFlow();
     else if (m === 'archive') tracker.open({ kind: 'archive' });

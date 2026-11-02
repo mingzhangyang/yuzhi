@@ -7,6 +7,9 @@
  * or "later", Apple WebKit users get the Home Screen hint, and settings report
  * the current state.
  */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium, devices } from 'playwright';
 
 const baseURL = process.env.BASE_URL ?? 'http://127.0.0.1:4173';
@@ -134,6 +137,17 @@ try {
   // iPhone: the Home Screen hint shows even right after a backup, and "got it" quiets it.
   {
     const context = await browser.newContext({ ...devices['iPhone 13'], locale: 'zh-CN' });
+    // Record what reaches the system share sheet instead of opening it.
+    await context.addInitScript(() => {
+      window.__shared = [];
+      window.__shareMode = 'save';
+      navigator.canShare = (data) => Boolean(data?.files?.length);
+      navigator.share = async (data) => {
+        const file = data.files[0];
+        window.__shared.push({ name: file.name, type: file.type, text: await file.text() });
+        if (window.__shareMode === 'cancel') throw new DOMException('Share canceled', 'AbortError');
+      };
+    });
     const page = await context.newPage();
     await openApp(page);
     await page.evaluate(() => window.yuzhi.actions.createProject(window.yuzhi.store, '手机上的岛'));
@@ -146,10 +160,167 @@ try {
     await page.locator('#safetyLater').click();
     const quiet = await notice(page);
     assert(!quiet.visible && quiet.state.installHintUntil, `got it did not quiet the hint: ${JSON.stringify(quiet)}`);
+
+    // On a phone, export hands the file to the share sheet ("Save to Files").
+    const exportFromMenu = async () => {
+      await page.locator('#moreBtn').click();
+      await page.locator('#menu [data-m="export"]').click();
+      await page.waitForFunction(() => !document.getElementById('mdl').hidden, undefined, { timeout });
+      await page.locator('#mdl [data-ok]').click();
+      await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
+    };
+    const today = await page.evaluate(() => window.yuzhi.store.today());
+    await page.evaluate(() => { window.__shareMode = 'cancel'; });
+    await exportFromMenu();
+    const cancelled = await page.evaluate(() => ({ shared: window.__shared.length, state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}') }));
+    assert(cancelled.shared === 1 && !cancelled.state.lastBackup, `a cancelled share counted as a backup: ${JSON.stringify(cancelled)}`);
+
+    await page.evaluate(() => { window.__shareMode = 'save'; });
+    await exportFromMenu();
+    const shared = await page.evaluate(() => ({ last: window.__shared.at(-1), state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}') }));
+    const sharedBackup = JSON.parse(shared.last.text);
+    assert(shared.last.name === `yuzhi-backup-${today}.json` && shared.last.type === 'application/json'
+      && sharedBackup.format === 'yuzhi-backup' && sharedBackup.projects.length === 1 && shared.state.lastBackup === today,
+      `share-sheet export failed: ${JSON.stringify({ name: shared.last.name, state: shared.state })}`);
     await context.close();
   }
 
-  console.log('[data-safety] persistence, backup reminder and install hint passed');
+  // Desktop Chromium: automatic backup into a picked folder. The native picker
+  // cannot run headless, so it returns a real Origin Private File System
+  // folder; permission prompts are scripted through the handle prototype.
+  // This needs an ordinary on-disk profile: Chromium tears down an
+  // off-the-record context when a stored FileSystemHandle is read back from
+  // IndexedDB, and Playwright's default contexts are off-the-record.
+  const profile = await mkdtemp(join(tmpdir(), 'yuzhi-auto-backup-'));
+  try {
+    const context = await chromium.launchPersistentContext(profile, { channel: channel || undefined, headless: true, locale: 'zh-CN' });
+    await context.addInitScript(() => {
+      // Init scripts also run in contexts without the File System Access API.
+      if (typeof FileSystemHandle === 'undefined') return;
+      window.__requested = 0;
+      const permission = () => sessionStorage.getItem('yuzhi-test-permission') ?? 'granted';
+      window.showDirectoryPicker = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+      FileSystemHandle.prototype.queryPermission = async () => permission();
+      FileSystemHandle.prototype.requestPermission = async () => {
+        window.__requested += 1;
+        sessionStorage.setItem('yuzhi-test-permission', 'granted');
+        return 'granted';
+      };
+    });
+    const page = await context.newPage();
+    await openApp(page);
+    const today = await page.evaluate(() => window.yuzhi.store.today());
+    const todayFile = `yuzhi-auto-${today}.json`;
+    const folder = () => page.evaluate(async () => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
+      const files = {};
+      for await (const [name, handle] of dir.entries()) files[name] = await (await handle.getFile()).text();
+      return files;
+    });
+    const setDeviceLastDate = (date) => page.evaluate((date) => new Promise((resolve, reject) => {
+      const open = indexedDB.open('yuzhi-device', 1);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction('kv', 'readwrite');
+        const kv = tx.objectStore('kv');
+        const get = kv.get('autoBackup');
+        get.onsuccess = () => kv.put({ ...get.result, lastDate: date }, 'autoBackup');
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    }), date);
+    const openSettings = async () => {
+      await page.locator('#moreBtn').click();
+      await page.locator('#menu [data-m="settings"]').click();
+      await page.waitForFunction(() => document.querySelector('#mdl [data-auto-backup] .btnrow'), undefined, { timeout });
+    };
+    const closeSettings = async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
+    };
+
+    await page.evaluate(() => window.yuzhi.actions.createProject(window.yuzhi.store, '自动备份验收'));
+    await openSettings();
+    await page.locator('#mdl [data-auto="choose"]').click();
+    await page.waitForFunction(() => document.querySelector('#mdl [data-auto-backup]')?.textContent.includes('正在自动备份到「picked」，上次：今天'), undefined, { timeout });
+    let files = await folder();
+    const first = JSON.parse(files[todayFile] ?? 'null');
+    assert(first?.format === 'yuzhi-backup' && first.projects.length === 1, `choosing a folder did not write today's backup: ${Object.keys(files)}`);
+    assert((await notice(page)).state.lastBackup === today, 'automatic backup did not count as a backup');
+    assert(await page.evaluate(() => document.querySelector('#mdl [data-safety-last]')?.textContent === '上次在这个浏览器导出备份：今天。'),
+      'settings still show the pre-backup state after an automatic backup');
+    await closeSettings();
+
+    // An evening review refreshes today's file.
+    await page.evaluate(() => {
+      const { store, actions } = window.yuzhi;
+      const project = store.data.projects[0];
+      actions.createTask(store, { title: '结算后应进入备份', projectId: project.id, scheduledFor: store.today() });
+    });
+    await page.locator('#settleBtn').click();
+    await page.locator('#settle [data-act="commit"]').click();
+    await page.waitForFunction(async (name) => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked');
+      return (await (await (await dir.getFileHandle(name)).getFile()).text()).includes('结算后应进入备份');
+    }, todayFile, { timeout });
+
+    // Only our own files are pruned, down to the newest 30.
+    await page.evaluate(async () => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked');
+      const write = async (name) => {
+        const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
+        await writable.write('{}');
+        await writable.close();
+      };
+      for (let day = 1; day <= 31; day++) await write(`yuzhi-auto-2025-01-${String(day).padStart(2, '0')}.json`);
+      await write('keep-me.txt');
+      await write('yuzhi-backup-2025-01-01.json');
+    });
+    await openSettings();
+    await page.locator('#mdl [data-auto="run"]').click();
+    await page.waitForFunction(async () => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked');
+      let auto = 0;
+      for await (const name of dir.keys()) if (/^yuzhi-auto-/.test(name)) auto++;
+      return auto === 30;
+    }, undefined, { timeout });
+    files = await folder();
+    assert(files['keep-me.txt'] !== undefined && files['yuzhi-backup-2025-01-01.json'] !== undefined && files[todayFile] && !files['yuzhi-auto-2025-01-01.json'],
+      `pruning touched the wrong files: ${Object.keys(files).sort()}`);
+    await closeSettings();
+
+    // A new day's first opening writes a fresh copy on its own.
+    await page.evaluate(async (name) => (await (await navigator.storage.getDirectory()).getDirectoryHandle('picked')).removeEntry(name), todayFile);
+    await setDeviceLastDate('2025-12-31');
+    await openApp(page);
+    await page.waitForFunction(async (name) => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked');
+      try { await dir.getFileHandle(name); return true; } catch { return false; }
+    }, todayFile, { timeout });
+
+    // Without remembered permission nothing is written silently; the notice
+    // asks once and a click both re-grants and backs up.
+    await page.evaluate(async (name) => {
+      sessionStorage.setItem('yuzhi-test-permission', 'prompt');
+      await (await (await navigator.storage.getDirectory()).getDirectoryHandle('picked')).removeEntry(name);
+    }, todayFile);
+    await setDeviceLastDate('2025-12-31');
+    await openApp(page);
+    await page.waitForFunction(() => !document.getElementById('safetyNotice').hidden, undefined, { timeout });
+    const ask = await notice(page);
+    assert(ask.text.includes('需要你再允许一次写入') && ask.go === '允许并备份' && ask.later === '今天先不',
+      `missing permission notice: ${JSON.stringify(ask)}`);
+    assert(!(await folder())[todayFile], 'wrote a backup without permission');
+    await page.locator('#safetyGo').click();
+    await page.waitForFunction(() => document.getElementById('safetyNotice').hidden, undefined, { timeout });
+    assert(await page.evaluate(() => window.__requested) === 1 && (await folder())[todayFile], 'allow-and-back-up did not write today\'s backup');
+    await context.close();
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+
+  console.log('[data-safety] persistence, reminders, install hint, share-sheet export and folder auto-backup passed');
 } finally {
   await browser.close();
 }

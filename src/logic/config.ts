@@ -57,3 +57,5 @@ export const BACKUP_REMIND_AFTER_DAYS = 14;
 export const BACKUP_SNOOZE_DAYS = 7;
 /** 「添加到主屏幕」说明点了「知道了」之后安静多少天。 */
 export const INSTALL_HINT_SNOOZE_DAYS = 30;
+/** 自动备份文件夹里保留最近多少份每日备份。 */
+export const AUTO_BACKUP_KEEP = 30;

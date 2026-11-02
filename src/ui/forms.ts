@@ -14,7 +14,8 @@ import { roofOf } from './scene';
 import { bindDateSelects, dateSelect, readDate } from './date-select';
 import { MAX_VILLAGES } from '../logic/config';
 import { getLocale, t } from '../i18n';
-import { fillSafetySettings, safetySettingsHtml } from './safety';
+import { fillSafetySettings, refreshSafetySettings, safetySettingsHtml } from './safety';
+import type { AutoBackup } from './auto-backup';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -352,8 +353,9 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
   });
 }
 
-/** 设置：工作时段与外观，以及这个浏览器里数据的安全状况 */
-export function openSettings(store: Store, applyTheme: () => void, exportBackup?: () => void) {
+/** 设置：工作时段、外观，以及这个浏览器里数据的安全与备份 */
+export function openSettings(store: Store, applyTheme: () => void, safety: { exportBackup?: () => void; autoBackup?: AutoBackup } = {}) {
+  const { exportBackup, autoBackup } = safety;
   const s = store.data.settings;
   openModal({
     title: t('forms.settingsTitle'),
@@ -364,6 +366,8 @@ export function openSettings(store: Store, applyTheme: () => void, exportBackup?
       <div class="actions"><button class="btn" data-close>${esc(t('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(t('common.save'))}</button></div>`,
     mount(box) {
       fillSafetySettings(box, () => box.isConnected);
+      const autoBox = box.querySelector<HTMLElement>('[data-auto-backup]');
+      if (autoBox && autoBackup) autoBackup.mountSettings(autoBox, () => store.today(), () => refreshSafetySettings(box, store.today()));
       const exportButton = box.querySelector<HTMLButtonElement>('[data-safety-export]')!;
       exportButton.hidden = !exportBackup;
       exportButton.addEventListener('click', () => {

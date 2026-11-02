@@ -4,7 +4,7 @@
  */
 import type { Store } from '../store';
 import type { ISODate } from '../types';
-import { $, esc, setText } from './dom';
+import { $, download, esc, setText } from './dom';
 import { relDay } from '../lib/date';
 import { getLocale, t } from '../i18n';
 import {
@@ -12,12 +12,15 @@ import {
   hasKeepsakeData,
   installHintFor,
   parseBackupReminderState,
+  quietAutoBackupToday,
   recordBackupDone,
   safetyNotice,
   snoozeBackupReminder,
   type BackupReminderState,
   type InstallHint,
+  type SafetyNotice,
 } from '../logic/backup';
+import type { AutoBackup } from './auto-backup';
 
 /** 按浏览器保存：要提醒的正是这个浏览器里的这一份数据。 */
 export const SAFETY_STATE_KEY = 'yuzhi:data-safety';
@@ -94,6 +97,47 @@ export function requestPersistentStorage(): Promise<PersistenceStatus> {
   return persistRequest;
 }
 
+/** Phones and tablets: a share sheet beats a download that lands somewhere hard to find. */
+function prefersShareSheet(): boolean {
+  try {
+    return window.matchMedia?.('(pointer: coarse)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+export type BackupDelivery = 'shared' | 'downloaded' | 'cancelled';
+
+/**
+ * Hand a backup file to the user. On touch devices that can share files this
+ * opens the system share sheet ("Save to Files" puts it in iCloud Drive on
+ * iOS); everywhere else, or if sharing fails, it downloads. Must be called
+ * while the export click's user activation is still valid.
+ */
+export async function deliverBackup(name: string, text: string): Promise<BackupDelivery> {
+  if (prefersShareSheet() && typeof File !== 'undefined' && typeof navigator !== 'undefined' && navigator.canShare && navigator.share) {
+    const file = new File([text], name, { type: 'application/json' });
+    let shareable = false;
+    try {
+      shareable = navigator.canShare({ files: [file] });
+    } catch {
+      // Some engines throw for unsupported file types instead of returning false.
+    }
+    if (shareable) {
+      try {
+        await navigator.share({ files: [file] });
+        return 'shared';
+      } catch (error) {
+        // Closing the sheet is a choice, not a failure: nothing was saved.
+        if ((error as { name?: unknown } | null)?.name === 'AbortError') return 'cancelled';
+        // Anything else (permission, unsupported target): fall back to a download.
+      }
+    }
+  }
+  download(name, text);
+  return 'downloaded';
+}
+
 const installKey = (hint: InstallHint) => (hint === 'ios' ? 'safety.installIos' : 'safety.installMac');
 
 /** Settings section: how safe this browser's copy is right now. */
@@ -105,9 +149,18 @@ export function safetySettingsHtml(today: ISODate): string {
     : t('safety.neverBacked');
   return `<div class="sect">${esc(t('safety.title'))}</div>
     <p class="hint" data-safety-storage>${esc(t('safety.checking'))}</p>
-    <p class="hint">${esc(last)}</p>
+    <p class="hint" data-safety-last>${esc(last)}</p>
     ${hint ? `<p class="hint">${esc(t(installKey(hint)))}</p>` : ''}
-    <div class="btnrow"><button type="button" class="btn small" data-safety-export data-readonly-safe>${esc(t('safety.exportButton'))}</button></div>`;
+    <div class="btnrow"><button type="button" class="btn small" data-safety-export data-readonly-safe>${esc(t('safety.exportButton'))}</button></div>
+    <div data-auto-backup></div>`;
+}
+
+/** Re-read the last-backup line, e.g. after an automatic backup ran from Settings. */
+export function refreshSafetySettings(box: HTMLElement, today: ISODate) {
+  const line = box.querySelector<HTMLElement>('[data-safety-last]');
+  if (!line) return;
+  const state = readSafetyState();
+  setText(line, state.lastBackup ? t('safety.lastBackup', { when: relDay(state.lastBackup, today) }) : t('safety.neverBacked'));
 }
 
 export function fillSafetySettings(box: HTMLElement, isCurrent: () => boolean) {
@@ -125,17 +178,29 @@ export class SafetyNoticeBar {
   private readonly text = $('safetyTxt');
   private readonly go = $<HTMLButtonElement>('safetyGo');
   private readonly later = $<HTMLButtonElement>('safetyLater');
-  private kind: 'backup' | 'install' | null = null;
+  private notice: SafetyNotice | null = null;
 
   constructor(
     private readonly store: Store,
     private readonly exportBackup: () => void,
+    private readonly autoBackup?: AutoBackup,
   ) {
-    this.go.addEventListener('click', () => this.exportBackup());
+    this.go.addEventListener('click', () => {
+      const notice = this.notice;
+      if (notice?.kind !== 'auto' || !this.autoBackup) {
+        this.exportBackup();
+        return;
+      }
+      // Both start a browser prompt, so they must run inside this click.
+      void (notice.need === 'permission' ? this.autoBackup.allowAndRun() : this.autoBackup.choose()).finally(() => this.sync());
+    });
     this.later.addEventListener('click', () => {
       const today = this.store.today();
       const state = readSafetyState();
-      writeSafetyState(this.kind === 'install' ? dismissInstallHint(state, today) : snoozeBackupReminder(state, today));
+      const kind = this.notice?.kind;
+      writeSafetyState(kind === 'auto' ? quietAutoBackupToday(state, today)
+        : kind === 'install' ? dismissInstallHint(state, today)
+          : snoozeBackupReminder(state, today));
       this.sync();
     });
     // Another tab may export or snooze; keep every open tab consistent.
@@ -148,10 +213,20 @@ export class SafetyNoticeBar {
     const data = this.store.data;
     if (hasKeepsakeData(data)) void requestPersistentStorage();
 
-    const notice = safetyNotice(data, readSafetyState(), this.store.today(), currentInstallHint());
-    this.kind = notice?.kind ?? null;
+    const auto = this.store.isReadOnly ? null : this.autoBackup?.attention() ?? null;
+    const notice = safetyNotice(data, readSafetyState(), this.store.today(), currentInstallHint(), auto);
+    this.notice = notice;
     this.bar.hidden = !notice;
     if (!notice) return;
+
+    if (notice.kind === 'auto') {
+      const permission = notice.need === 'permission';
+      setText(this.text, t(permission ? 'safety.autoPermission' : 'safety.autoFailed', { folder: notice.folder }));
+      this.go.hidden = false;
+      setText(this.go, t(permission ? 'safety.autoAllow' : 'safety.autoRechoose'));
+      setText(this.later, t('safety.notToday'));
+      return;
+    }
 
     const install = notice.installHint ? t(installKey(notice.installHint)) : '';
     if (notice.kind === 'backup') {

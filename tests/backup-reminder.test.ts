@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { emptyData } from '../src/db';
 import {
+  autoBackupDue,
+  autoBackupFileName,
+  autoBackupsToPrune,
   dismissInstallHint,
   hasKeepsakeData,
   installHintFor,
   parseBackupReminderState,
+  quietAutoBackupToday,
   recordBackupDone,
   safetyNotice,
   snoozeBackupReminder,
@@ -114,5 +118,36 @@ describe('添加到主屏幕说明', () => {
     expect(installHintFor({ userAgent: iphone, maxTouchPoints: 5, standalone: true })).toBeNull();
     expect(installHintFor({ userAgent: macChrome, maxTouchPoints: 0, standalone: false })).toBeNull();
     expect(installHintFor({ userAgent: windowsChrome, maxTouchPoints: 0, standalone: false })).toBeNull();
+  });
+});
+
+describe('自动备份到文件夹', () => {
+  it('每天一份，结算和手动备份会覆盖当天那份', () => {
+    expect(autoBackupFileName('2026-11-02')).toBe('yuzhi-auto-2026-11-02.json');
+    expect(autoBackupDue(undefined, '2026-11-02', 'daily')).toBe(true);
+    expect(autoBackupDue('2026-11-01', '2026-11-02', 'daily')).toBe(true);
+    expect(autoBackupDue('2026-11-02', '2026-11-02', 'daily')).toBe(false);
+    expect(autoBackupDue('2026-11-02', '2026-11-02', 'settled')).toBe(true);
+    expect(autoBackupDue('2026-11-02', '2026-11-02', 'manual')).toBe(true);
+  });
+
+  it('只清理自己写的文件，保留最新的若干份', () => {
+    const ours = Array.from({ length: 33 }, (_, i) => autoBackupFileName(`2026-10-${String(i + 1).padStart(2, '0')}`).replace('2026-10-32', '2026-11-01').replace('2026-10-33', '2026-11-02'));
+    const others = ['yuzhi-backup-2026-01-01.json', 'notes.txt', 'yuzhi-auto-2026-13-40.json', 'yuzhi-auto-2026-01-01.json.bak'];
+    const prune = autoBackupsToPrune([...others, ...ours.slice().reverse()], 30);
+    expect(prune).toEqual(['yuzhi-auto-2026-10-01.json', 'yuzhi-auto-2026-10-02.json', 'yuzhi-auto-2026-10-03.json']);
+    expect(autoBackupsToPrune(ours.slice(0, 5), 30)).toEqual([]);
+  });
+
+  it('自动备份停了而今天还没存时最先提醒；「今天先不」安静到明天', () => {
+    const data = island('2026-10-01');
+    const auto = { need: 'permission' as const, folder: 'iCloud 屿志', lastDate: '2026-11-01' };
+    expect(safetyNotice(data, {}, '2026-11-02', 'mac', auto)).toEqual({ kind: 'auto', need: 'permission', folder: 'iCloud 屿志' });
+    // Today's copy already exists: nothing urgent.
+    expect(safetyNotice(data, recordBackupDone({}, '2026-11-02'), '2026-11-02', null, { ...auto, lastDate: '2026-11-02' })).toBeNull();
+    const quiet = quietAutoBackupToday({}, '2026-11-02');
+    expect(safetyNotice(data, quiet, '2026-11-02', null, auto)?.kind).toBe('backup');
+    expect(safetyNotice(data, quiet, '2026-11-03', null, auto)?.kind).toBe('auto');
+    expect(parseBackupReminderState({ autoQuietUntil: '2026-11-03' })).toEqual({ autoQuietUntil: '2026-11-03' });
   });
 });
