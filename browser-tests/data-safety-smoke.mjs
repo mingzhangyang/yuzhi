@@ -144,7 +144,11 @@ try {
       navigator.canShare = (data) => Boolean(data?.files?.length);
       navigator.share = async (data) => {
         const file = data.files[0];
-        window.__shared.push({ name: file.name, type: file.type, text: await file.text() });
+        const entry = { name: file.name, type: file.type, text: await file.text(), done: false };
+        window.__shared.push(entry);
+        // Settle in a later task so the app's continuation has run before
+        // the test reads its result.
+        setTimeout(() => { entry.done = true; }, 0);
         if (window.__shareMode === 'cancel') throw new DOMException('Share canceled', 'AbortError');
       };
     });
@@ -172,11 +176,15 @@ try {
     const today = await page.evaluate(() => window.yuzhi.store.today());
     await page.evaluate(() => { window.__shareMode = 'cancel'; });
     await exportFromMenu();
+    // The share sheet resolves asynchronously; wait for it before judging.
+    await page.waitForFunction(() => window.__shared.length === 1 && window.__shared[0].done, undefined, { timeout });
     const cancelled = await page.evaluate(() => ({ shared: window.__shared.length, state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}') }));
     assert(cancelled.shared === 1 && !cancelled.state.lastBackup, `a cancelled share counted as a backup: ${JSON.stringify(cancelled)}`);
 
     await page.evaluate(() => { window.__shareMode = 'save'; });
     await exportFromMenu();
+    await page.waitForFunction((today) => window.__shared.length === 2 && window.__shared[1].done
+      && JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}').lastBackup === today, today, { timeout }).catch(() => {});
     const shared = await page.evaluate(() => ({ last: window.__shared.at(-1), state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}') }));
     const sharedBackup = JSON.parse(shared.last.text);
     assert(shared.last.name === `yuzhi-backup-${today}.json` && shared.last.type === 'application/json'
