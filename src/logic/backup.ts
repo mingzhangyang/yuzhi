@@ -2,7 +2,7 @@
  * 数据安全提醒的纯规则。屿志的数据只存在当前浏览器里：这里决定什么时候提醒用户
  * 导出备份、什么时候说明「添加到主屏幕」能让浏览器不再清理数据。不碰 DOM 和存储。
  */
-import { LOCAL_CALENDAR_SOURCE_ID, type Data, type ISODate } from '../types';
+import type { Data, ISODate } from '../types';
 import { addDays, diffDays, isPlausibleDate } from '../lib/date';
 import { BACKUP_REMIND_AFTER_DAYS, BACKUP_SNOOZE_DAYS, INSTALL_HINT_SNOOZE_DAYS } from './config';
 
@@ -26,13 +26,14 @@ export type SafetyNotice =
   | { kind: 'backup'; /** 距上次导出的天数；从没导出过时为 null */ days: number | null; installHint: InstallHint | null }
   | { kind: 'install'; installHint: InstallHint };
 
-/** 丢了会心疼的数据：用户亲手记下的东西。订阅日历可以重新拉取，不算。 */
+/**
+ * 丢了会心疼的数据：用户亲手记下的东西。只有带订阅链接的日历能重新拉取，不算；
+ * 本地日程和上传的 .ics 文件（原文件不在屿志手里）都算。
+ */
 export function hasKeepsakeData(data: Data): boolean {
-  return data.projects.length > 0
-    || data.tasks.length > 0
-    || data.diaries.length > 0
-    || data.entries.length > 0
-    || data.events.some((event) => event.sourceId === LOCAL_CALENDAR_SOURCE_ID);
+  if (data.projects.length || data.tasks.length || data.diaries.length || data.entries.length) return true;
+  const refetchable = new Set(data.sources.filter((source) => source.icsUrl).map((source) => source.id));
+  return data.events.some((event) => !refetchable.has(event.sourceId));
 }
 
 export function parseBackupReminderState(raw: unknown): BackupReminderState {
@@ -66,12 +67,14 @@ export function safetyNotice(
   const since = state.lastBackup ?? data.settings.firstDay;
   const age = diffDays(since, today);
   const snoozed = state.snoozedUntil !== undefined && today < state.snoozedUntil;
+  const installQuiet = state.installHintUntil !== undefined && today < state.installHintUntil;
   if (age >= BACKUP_REMIND_AFTER_DAYS && !snoozed) {
-    return { kind: 'backup', days: state.lastBackup ? age : null, installHint };
+    return { kind: 'backup', days: state.lastBackup ? age : null, installHint: installQuiet ? null : installHint };
   }
 
-  const installQuiet = state.installHintUntil !== undefined && today < state.installHintUntil;
-  if (installHint && !installQuiet) return { kind: 'install', installHint };
+  // "Later" on a backup notice that carried the install hint quiets the whole
+  // bar; the hint must not take over the moment the reminder is snoozed.
+  if (installHint && !installQuiet && !snoozed) return { kind: 'install', installHint };
   return null;
 }
 

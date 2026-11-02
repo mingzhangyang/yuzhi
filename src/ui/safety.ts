@@ -162,8 +162,11 @@ export class SafetyNoticeBar {
       setText(this.go, t('safety.exportNow'));
       setText(this.later, t('safety.later'));
     } else {
+      // Installing starts an empty, separate island: keep the export that the
+      // move depends on one click away.
       setText(this.text, install);
-      this.go.hidden = true;
+      this.go.hidden = false;
+      setText(this.go, t('safety.exportNow'));
       setText(this.later, t('safety.gotIt'));
     }
   }

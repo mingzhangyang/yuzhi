@@ -27,11 +27,16 @@ describe('备份提醒', () => {
     expect(safetyNotice(data, {}, '2026-11-01', 'ios')).toBeNull();
   });
 
-  it('订阅来的日历可以重新拉取，不算要保护的数据；本地日程和日记算', () => {
+  it('只有订阅链接能重新拉取；本地日程、上传的 .ics 文件和日记都要保护', () => {
     const subscribed = island('2026-10-01', (data) => {
+      data.sources.push({ id: 'work', name: '工作', icsUrl: 'https://example.com/work.ics' });
       data.events.push({ id: 'e1', sourceId: 'work', uid: 'u', title: '会', start: '2026-10-01T01:00:00Z', end: '2026-10-01T02:00:00Z', allDay: false, classified: false });
     });
     expect(hasKeepsakeData(subscribed)).toBe(false);
+    // An uploaded file has no URL to fetch from again (PR #37 review).
+    const uploaded = structuredClone(subscribed);
+    delete uploaded.sources[0].icsUrl;
+    expect(hasKeepsakeData(uploaded)).toBe(true);
     subscribed.events[0].sourceId = LOCAL_CALENDAR_SOURCE_ID;
     expect(hasKeepsakeData(subscribed)).toBe(true);
     expect(hasKeepsakeData(island('2026-10-01', (data) => {
@@ -72,6 +77,17 @@ describe('备份提醒', () => {
     // A due backup reminder takes priority and carries the install hint along.
     expect(safetyNotice(data, backedUp, '2026-12-01', 'ios')).toEqual({ kind: 'backup', days: 30, installHint: 'ios' });
     expect(safetyNotice(data, backedUp, '2026-11-02', null)).toBeNull();
+    // Once the hint is dismissed, a later backup reminder does not repeat it.
+    expect(safetyNotice(data, dismissInstallHint(backedUp, '2026-11-20'), '2026-12-01', 'ios'))
+      .toEqual({ kind: 'backup', days: 30, installHint: null });
+  });
+
+  it('「稍后」推迟带着安装说明的备份提醒时，整条提示都安静下来（PR #37 review）', () => {
+    const data = island('2026-10-01');
+    expect(safetyNotice(data, {}, '2026-11-01', 'ios')?.kind).toBe('backup');
+    const snoozed = snoozeBackupReminder({}, '2026-11-01');
+    expect(safetyNotice(data, snoozed, '2026-11-01', 'ios')).toBeNull();
+    expect(safetyNotice(data, snoozed, '2026-11-08', 'ios')).toEqual({ kind: 'backup', days: null, installHint: 'ios' });
   });
 
   it('本地记录损坏时当作什么都没记过', () => {

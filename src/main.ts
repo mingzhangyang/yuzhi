@@ -586,6 +586,29 @@ async function boot() {
     }
   }
 
+  /* ---------------- 导入备份 ---------------- */
+  async function importFlow() {
+    const context = store.captureWriteContext();
+    const revision = session.revision;
+    const f = await pickFile($('fileBackup') as HTMLInputElement);
+    if (!f || !context.isCurrent()) return;
+    try {
+      const d = parseBackup(await f.text());
+      if (!context.isCurrent()) return;
+      const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
+      if (!ok || !context.isCurrent()) return;
+      await store.replaceAll(d);
+      if (session.revision !== revision || store.isReadOnly) return;
+      tracker.open({ kind: 'overview' }, false);
+      applyTheme();
+      daily();
+      toast(t('main.importDone'));
+    } catch (err) {
+      if (session.revision !== revision || store.isReadOnly) return;
+      toast(err instanceof Error ? err.message : String(err), true);
+    }
+  }
+
   /* ---------------- 顶部按钮 ---------------- */
   $('settleBtn').onclick = () => settle.open();
   $('fogGo').onclick = () => settle.open();
@@ -621,27 +644,8 @@ async function boot() {
     menu.hidden = true;
     if (m === 'settings') openSettings(store, applyTheme, () => void exportFlow());
     else if (m === 'export') await exportFlow();
-    else if (m === 'import') {
-      const context = store.captureWriteContext();
-      const revision = session.revision;
-      const f = await pickFile($('fileBackup') as HTMLInputElement);
-      if (!f || !context.isCurrent()) return;
-      try {
-        const d = parseBackup(await f.text());
-        if (!context.isCurrent()) return;
-        const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
-        if (!ok || !context.isCurrent()) return;
-        await store.replaceAll(d);
-        if (session.revision !== revision || store.isReadOnly) return;
-        tracker.open({ kind: 'overview' }, false);
-        applyTheme();
-        daily();
-        toast(t('main.importDone'));
-      } catch (err) {
-        if (session.revision !== revision || store.isReadOnly) return;
-        toast(err instanceof Error ? err.message : String(err), true);
-      }
-    } else if (m === 'archive') tracker.open({ kind: 'archive' });
+    else if (m === 'import') await importFlow();
+    else if (m === 'archive') tracker.open({ kind: 'archive' });
     else if (m === 'demo') seedDemo(store);
   });
 
@@ -663,6 +667,9 @@ async function boot() {
         seedDemo(store);
         setTimeout(maybePrompt, 1500);
       },
+      // Moving into the installed Home Screen / Dock app starts from an empty
+      // island; restoring is how the browser's island comes along.
+      restore: () => { void importFlow(); },
     });
   } else setTimeout(maybePrompt, 1200);
 

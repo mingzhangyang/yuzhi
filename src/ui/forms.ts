@@ -386,7 +386,7 @@ export function openSettings(store: Store, applyTheme: () => void, exportBackup?
 }
 
 /** 第一次打开 */
-export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void }) {
+export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void; restore(): void }) {
   openModal({
     kick: t('forms.welcomeKick'),
     title: t('forms.welcomeTitle'),
@@ -394,12 +394,13 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
       <p class="hint">${esc(t('forms.welcomeHint'))}</p>
       <button class="opt" data-w="project"><b>${esc(t('forms.welcomeProject'))}</b><span>${esc(t('forms.welcomeProjectDesc'))}</span></button>
       <button class="opt" data-w="calendar"><b>${esc(t('forms.welcomeCalendar'))}</b><span>${esc(t('forms.welcomeCalendarDesc'))}</span></button>
-      <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>`,
+      <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>
+      <button class="opt" data-w="restore"><b>${esc(t('forms.welcomeRestore'))}</b><span>${esc(t('forms.welcomeRestoreDesc'))}</span></button>`,
     mount(box) {
       box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) =>
         b.addEventListener('click', () => {
           closeModal(false);
-          const w = b.dataset.w as 'project' | 'demo' | 'calendar';
+          const w = b.dataset.w as 'project' | 'demo' | 'calendar' | 'restore';
           handlers[w]();
         }),
       );

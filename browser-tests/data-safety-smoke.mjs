@@ -28,11 +28,12 @@ const countPersistRequests = () => {
   };
 };
 
-async function openApp(page) {
+async function openApp(page, onWelcome) {
   await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.yuzhi?.store), undefined, { timeout });
   await page.waitForFunction(() => document.body.dataset.readOnly === 'false', undefined, { timeout });
   if (await page.locator('#mdl').isVisible()) {
+    await onWelcome?.();
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
   }
@@ -66,7 +67,13 @@ try {
     const context = await browser.newContext({ locale: 'zh-CN', acceptDownloads: true });
     await context.addInitScript(countPersistRequests);
     const page = await context.newPage();
-    await openApp(page);
+    // An installed Home Screen / Dock app starts empty; restoring a backup is
+    // offered right on the welcome screen.
+    let welcomeRestore = false;
+    await openApp(page, async () => {
+      welcomeRestore = await page.locator('#mdl [data-w="restore"]').isVisible();
+    });
+    assert(welcomeRestore, 'welcome screen does not offer restoring from a backup');
 
     const empty = await notice(page);
     assert(!empty.visible, `an empty island must not nag: ${JSON.stringify(empty)}`);
@@ -132,7 +139,9 @@ try {
     await page.evaluate(() => window.yuzhi.actions.createProject(window.yuzhi.store, '手机上的岛'));
     await page.waitForFunction(() => !document.getElementById('safetyNotice').hidden, undefined, { timeout });
     const hint = await notice(page);
-    assert(hint.text.includes('添加到主屏幕') && hint.go === null && hint.later === '知道了',
+    // The installed app keeps its own storage, so the hint must explain the
+    // export-then-import move and keep the export one tap away.
+    assert(hint.text.includes('添加到主屏幕') && hint.text.includes('导入备份') && hint.go === '现在导出' && hint.later === '知道了',
       `iPhone install hint missing: ${JSON.stringify(hint)}`);
     await page.locator('#safetyLater').click();
     const quiet = await notice(page);
