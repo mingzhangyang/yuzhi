@@ -72,3 +72,21 @@ describe('settlement sheet ownership', () => {
     expect(store.data.entries.some((e) => e.outcome === 'done')).toBe(true);
   });
 });
+
+describe('YZ-F5 结算时「还做了别的事」', () => {
+  it('明天的任务单独分组并标出原定日期，到期和未定日期的放在前面', () => {
+    const { store, today } = makeStore('2026-11-01', '2026-11-01');
+    const p = A.createProject(store, '屿志推广');
+    A.createTask(store, { title: '回复帖子', projectId: p.id, scheduledFor: '2026-11-02' });
+    A.createTask(store, { title: '整理素材', projectId: p.id });
+    const sheet = new SettleSheet(store, { brick() {}, onOpenChange() {} });
+    sheet.open(today);
+    const html = box.innerHTML;
+    const due = html.indexOf('<optgroup label="到期未做、未定日期的">');
+    const ahead = html.indexOf('<optgroup label="提前做了的（原定在之后）">');
+    expect(due).toBeGreaterThan(-1);
+    expect(ahead).toBeGreaterThan(due);
+    expect(html.slice(due, ahead)).toContain('整理素材 · 屿志推广 · 未定日期');
+    expect(html.slice(ahead)).toContain('回复帖子 · 屿志推广 · 原定明天');
+  });
+});

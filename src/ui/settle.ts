@@ -128,8 +128,23 @@ export class SettleSheet {
     const tabs = days.map((x) => `<button data-day="${x}" class="${x === this.date ? 'on' : ''} ${x < today ? 'fog' : ''}">${esc(relDay(x, today))}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
     const extra = s.tasks().filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
+    // Tasks planned for a later day stay available (doing one early is a real
+    // thing to record) but are grouped apart and labelled with their planned
+    // day, so tomorrow's work is not counted for this day by accident (YZ-F5).
+    const due = extra
+      .filter((task) => !task.scheduledFor || task.scheduledFor < this.date)
+      .sort((a, b) => (a.scheduledFor ?? '9999').localeCompare(b.scheduledFor ?? '9999'));
+    const ahead = extra
+      .filter((task) => task.scheduledFor && task.scheduledFor > this.date)
+      .sort((a, b) => a.scheduledFor!.localeCompare(b.scheduledFor!));
+    const option = (task: (typeof extra)[number]) => {
+      const planned = task.scheduledFor ? t('settle.extraPlanned', { date: relDay(task.scheduledFor, today) }) : t('settle.extraUndated');
+      return `<option value="${task.id}">${esc(task.title)} · ${esc(s.project(task.projectId)?.name ?? '')} · ${esc(planned)}</option>`;
+    };
+    const group = (label: MessageKey, tasks: typeof extra) =>
+      tasks.length ? `<optgroup label="${esc(t(label))}">${tasks.map(option).join('')}</optgroup>` : '';
     const extraSel = extra.length
-      ? `<div class="sextra"><select data-pull aria-label="${esc(t('settle.extraAria'))}"><option value="">${esc(t(this.date === today ? 'settle.extraToday' : 'settle.extraDay'))}</option>${extra.map((task) => `<option value="${task.id}">${esc(task.title)} · ${esc(s.project(task.projectId)?.name ?? '')}</option>`).join('')}</select></div>`
+      ? `<div class="sextra"><select data-pull aria-label="${esc(t('settle.extraAria'))}"><option value="">${esc(t(this.date === today ? 'settle.extraToday' : 'settle.extraDay'))}</option>${group('settle.extraDue', due)}${group('settle.extraAhead', ahead)}</select></div>`
       : '';
     this.box.innerHTML = `
       <div class="shead">
