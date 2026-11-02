@@ -9,7 +9,7 @@
  *
  * 环境变量：BASE_URL（默认 http://127.0.0.1:4173）、PW_CHANNEL（默认空，用 Playwright 自带的
  * Chromium）、SHOT_DIR（截图目录，默认 shots）、SHOT_ONLY（只跑名字里含这些词的场景，逗号分隔，
- * 例如 SHOT_ONLY=decay,cult）。
+ * 例如 SHOT_ONLY=decay,cult）。SHOT_DIR 应为专用目录：每次运行前清理其中已有的 PNG。
  *
  * 矩阵（文件名 `<组>-<场景>-<视口>.png`）：
  *   time     夏季 10:30 / 18:50 / 21:30                     桌面 @2x、手机 @3x
@@ -21,7 +21,7 @@
  *   cover    补充覆盖（不在计划矩阵里）：八种地标的昼 / 夜 / 雪、日程进行中、雨天、下雪、
  *            春节 / 端午 / 中秋 / 国庆 / 圣诞                     桌面
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 
@@ -38,7 +38,7 @@ const VIEWPORTS = {
 
 /** 选的日子都是晴天、不逢节日（ambience.weatherOf / festivalsOf），季节之间只比季节本身。 */
 const SUMMER = '2026-07-14';
-const SPRING = '2026-04-15';
+const SPRING = '2026-04-16';
 const AUTUMN = '2026-10-20';
 const WINTER = '2026-01-20';
 
@@ -336,11 +336,16 @@ async function shoot(browser, scene, vpName) {
   }
 }
 
+const selectedScenes = SCENES.filter((scene) => !only.length || only.some((word) => scene.name.includes(word)));
+if (!selectedScenes.length) throw new Error('SHOT_ONLY did not match any screenshot scenarios');
 mkdirSync(shotDir, { recursive: true });
+// SHOT_DIR is a dedicated capture directory. Clean only its generated root-level PNGs.
+for (const entry of readdirSync(shotDir, { withFileTypes: true })) {
+  if (entry.isFile() && entry.name.endsWith('.png')) unlinkSync(join(shotDir, entry.name));
+}
 const browser = await chromium.launch({ channel: channel || undefined, headless: true });
 try {
-  for (const scene of SCENES) {
-    if (only.length && !only.some((w) => scene.name.includes(w))) continue;
+  for (const scene of selectedScenes) {
     for (const vp of scene.vps) {
       for (const file of await shoot(browser, scene, vp)) console.log(file);
     }

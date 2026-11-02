@@ -111,27 +111,71 @@ describe('island palette', () => {
 });
 
 /**
- * 原则 7：颜色只从调色板派生。小岛绘制代码里不写新的颜色字面量；
- * 例外只有标记色 MARKER（style.ts，按计划保持独立）、CSS 变量的回退值（viewport.ts）
- * 和 shade() 里的黑白两端（utils.ts）。
+ * 原则 7：绘制颜色只能从调色板派生。豁免仅限 MARKER 对象、
+ * 已审核的 viewport 主题默认值/CSS 回退表达式，以及 shade() 两个端点。
  */
-describe('island color literals', () => {
-  const LITERAL = /'#[0-9a-fA-F]{3,8}'|rgba?\(\s*\d|'\d{1,3},\s*\d{1,3},\s*\d{1,3}'/g;
-  const ALLOWED = new Set(['palette.ts', 'viewport.ts', 'utils.ts']);
+const COLOR_LITERAL = /(['"`])(?:#[0-9a-fA-F]{3,8}|\d{1,3},\s*\d{1,3},\s*\d{1,3})\1|\brgba?\(\s*\d/gi;
 
+function unapprovedColors(path: string, source: string): string[] {
+  if (path.endsWith('/render/palette.ts')) return [];
+  let code = source;
+  if (path.endsWith('/render/style.ts')) {
+    code = code.replace(/export const MARKER = \{[\s\S]*?\} as const;/, '');
+  }
+  if (path.endsWith('/render/viewport.ts')) {
+    // Exact existing fallbacks, not whole-file exemptions. New literals still fail.
+    const allowed = [
+      "protected theme: RenderTheme = { label: '#fff', ink: '#263022', line: '#dfe2d2', accent: '#4f7136', accentInk: '#fff', sea: '#a9d3dc', seaDeep: '#8cc0cc' };",
+      "label: g('--label', '#fff')",
+      "ink: g('--ink', '#263022')",
+      "line: g('--line', '#dfe2d2')",
+      "accent: g('--accent', '#4f7136')",
+      "accentInk: g('--accent-ink', '#fff')",
+      "sea: g('--sea', '#a9d3dc')",
+      "seaDeep: g('--sea-deep', '#8cc0cc')",
+    ];
+    for (const expr of allowed) {
+      code = code.replace(expr, expr.replace(/(['"`])#[0-9a-fA-F]{3,8}\1/g, "'approved'"));
+    }
+  }
+  if (path.endsWith('/render/utils.ts')) {
+    code = code.replace(
+      "return t > 0 ? mix(c, '#ffffff', t) : mix(c, '#000000', -t);",
+      'return t > 0 ? mix(c, white, t) : mix(c, black, -t);',
+    );
+  }
+  return code.split('\n').flatMap((line, i) =>
+    (line.match(COLOR_LITERAL) ?? []).map((lit) => String(i + 1) + ': ' + lit));
+}
+
+describe('island color literals', () => {
   it('scans the island sources', () => {
     expect(Object.keys(islandSources).length).toBeGreaterThan(10);
   });
 
+  it('recognizes single, double, and backtick hex and RGB literals', () => {
+    const sample = [
+      "const a = '#fff';",
+      'const b = "#123456";',
+      'const c = `#abcdef80`;',
+      "const d = '12,34,56';",
+      'const e = rgba(1, 2, 3, 0.5);',
+    ].join('\n');
+    expect(unapprovedColors('src/island/render/paint/terrain.ts', sample)).toHaveLength(5);
+  });
+
+  it('allows only reviewed fallback expressions, not extra viewport colors', () => {
+    const viewport = "label: g('--label', '#fff');\nconst stray = \"#abcdef\";";
+    expect(unapprovedColors('src/island/render/viewport.ts', viewport)).toEqual(['2: "#abcdef"']);
+    expect(unapprovedColors('src/island/render/utils.ts', "const stray = '#fff';")).toHaveLength(1);
+    expect(unapprovedColors('src/island/render/utils.ts',
+      "return t > 0 ? mix(c, '#ffffff', t) : mix(c, '#000000', -t);")).toEqual([]);
+  });
+
   for (const [path, source] of Object.entries(islandSources)) {
-    const file = path.split('/').pop()!;
-    if (ALLOWED.has(file)) continue;
-    it(`${path.replace('../', '')} draws only palette colors`, () => {
-      const code = file === 'style.ts' ? source.replace(/export const MARKER = \{[\s\S]*?\} as const;/, '') : source;
-      const hits = code
-        .split('\n')
-        .flatMap((line, k) => (line.match(LITERAL) ?? []).map((lit) => `${k + 1}: ${lit}`));
-      expect(hits).toEqual([]);
+    if (path.endsWith('/render/palette.ts')) continue;
+    it(path.replace('../', '') + ' draws only palette colors', () => {
+      expect(unapprovedColors(path, source)).toEqual([]);
     });
   }
 });

@@ -22,6 +22,8 @@ SHOT_DIR=shots/after node browser-tests/island-shots.mjs    # 改之后
 node browser-tests/shot-diff.mjs shots/before shots/after shots/diff
 ```
 
+`SHOT_DIR` 应为专用截图目录。脚本运行前会清理目录根层旧 PNG，因此 `SHOT_ONLY=...` 跑子集也不会混入旧截图；其他文件、子目录不受影响。`shot-diff.mjs` 会拒绝空截图集，避免误报通过。
+
 ## 运行时环境道具
 
 共 34 个道具，每个道具一张独立 WebP，位于 `src/assets/island/props/<id>.webp`；尺寸与落地锚点记录在 `src/island/prop-sprites.ts`。

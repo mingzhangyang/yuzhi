@@ -14,8 +14,9 @@
  * PERF_BATCH=1 时再加一列「连续」：与 step+draw 相同，但帧与帧之间不让出，一口气画完 120 帧。
  * 浏览器没有机会在帧间提交画布，绘制命令越攒越多，隔一段就集中光栅化一次，用来复现第 1 节看到的周期性长帧。
  *
- * PERF_LAYERS=1 时，在 4 倍降速下用「+flush」口径再测一组：每次把一类景物的绘制函数换成空函数，
- * 整帧少掉的时间就是这类景物每帧的成本，也就是把它画进离屏缓存最多能省下的时间。
+ * PERF_LAYERS=1 时，按「+flush」口径估算跳过某一类景物的成本，但须保留
+ * 这些景物给 drawLights() 注册的夜间灯光。固定场景为无节日的 2026-07-14：
+ * 若今后测试会随动画改变灯光注册的场景，需改成逐帧追踪而不能复用记录。
  *
  * 环境变量：BASE_URL（默认 http://127.0.0.1:4173）、PW_CHANNEL、PERF_FRAMES（默认 120）、PERF_LAYERS、PERF_BATCH。
  */
@@ -38,7 +39,7 @@ const TIMES = [
   { name: 'night', hm: '21:30' },
 ];
 
-/** 按图层拆分时换成空函数的绘制方法；static 是「大部分帧不变」的那一组的合计 */
+/** 按图层拆分时省略景物绘制但重放灯光登记；static 是「大部分帧不变」的一组 */
 const LAYER_STUBS = {
   trees: ['drawTree'],
   mountains: ['drawMountain'],
@@ -56,6 +57,7 @@ const LAYER_STUBS = {
 async function seed(page) {
   await page.evaluate(async () => {
     const { store, actions: A } = window.yuzhi;
+    window.__reseed();
     const have = new Set(store.data.projects.map((p) => p.name));
     const make = (name, done, open) => {
       const p = A.createProject(store, name);
@@ -77,21 +79,82 @@ async function seed(page) {
 }
 
 /**
- * 在页面里测 frames 帧：yieldFrames 为 true 时每帧之间让出一次 rAF；
- * flush 为 true 时读回 1 像素逼出光栅化；stubs 里的绘制方法换成空函数。
+ * Each layer sample records painter light registrations in the unchanged frame,
+ * then replays those registrations while skipping the painters. This keeps
+ * drawLights() work in the night-time sample and detects changed call counts.
  */
 async function measure(page, flush, stubs = [], yieldFrames = true) {
   return page.evaluate(
     async ({ frames, warmup, flush, stubs, yieldFrames }) => {
       const r = window.yuzhi.renderer;
-      const saved = stubs.map((name) => [name, r[name]]);
-      for (const name of stubs) r[name] = () => {};
       const ctx = r.ctx;
+      window.__resetPerfFrame();
+
+      const installLightReplay = () => {
+        if (!stubs.length) return null;
+        const originals = new Map(stubs.map((name) => {
+          if (typeof r[name] !== 'function') throw new Error('Unknown painter: ' + name);
+          return [name, r[name]];
+        }));
+        const recorded = new Map(stubs.map((name) => [name, []]));
+        const restore = () => { for (const [name, fn] of originals) r[name] = fn; };
+        let depth = 0;
+        try {
+          for (const [name, fn] of originals) {
+            r[name] = function (...args) {
+              // If two stubbed painters nest, the outermost record owns all
+              // their lights and will replay them exactly once.
+              if (depth) return fn.apply(this, args);
+              const before = this.lights.length;
+              depth++;
+              try {
+                return fn.apply(this, args);
+              } finally {
+                depth--;
+                recorded.get(name).push(this.lights.slice(before).map((light) => [...light]));
+              }
+            };
+          }
+          r.draw();
+          const reference = r.lights.map((light) => [...light]);
+          const indices = new Map();
+          for (const name of originals.keys()) {
+            r[name] = function () {
+              const idx = indices.get(name) ?? 0;
+              const registrations = recorded.get(name)[idx];
+              if (!registrations) throw new Error('Painter calls changed: ' + name);
+              indices.set(name, idx + 1);
+              for (const light of registrations) this.lights.push([...light]);
+            };
+          }
+          const draw = () => {
+            for (const name of originals.keys()) indices.set(name, 0);
+            r.draw();
+            for (const name of originals.keys()) {
+              if (indices.get(name) !== recorded.get(name).length) {
+                throw new Error('Painter call count changed: ' + name);
+              }
+            }
+            if (r.lights.length !== reference.length || reference.some((light, i) =>
+              light.some((value, j) => r.lights[i][j] !== value))) {
+              throw new Error('Light registrations changed: invalid layer measurement');
+            }
+          };
+          draw(); // Preflight the replay against a full render.
+          ctx.getImageData(0, 0, 1, 1); // Flush setup rendering before timing starts.
+          return { draw, restore };
+        } catch (error) {
+          restore();
+          throw error;
+        }
+      };
+      const replay = installLightReplay();
+
       let groundBuilds = 0;
       const drawGround = r.drawGround;
-      r.drawGround = function (s) {
+      r.drawGround = function (scene) {
         const before = this.groundKey;
-        drawGround.call(this, s);
+        drawGround.call(this, scene);
         if (this.groundKey !== before) groundBuilds++;
       };
       const times = [];
@@ -101,12 +164,13 @@ async function measure(page, flush, stubs = [], yieldFrames = true) {
           const t0 = performance.now();
           r.t += 1 / 30;
           r.step(1 / 30);
-          r.draw();
+          if (replay) replay.draw();
+          else r.draw();
           if (flush) ctx.getImageData(0, 0, 1, 1);
           if (k >= warmup) times.push(performance.now() - t0);
         }
       } finally {
-        for (const [name, fn] of saved) r[name] = fn;
+        replay?.restore();
         r.drawGround = drawGround;
       }
       const sorted = times.slice().sort((a, b) => a - b);
@@ -129,6 +193,26 @@ try {
     for (const time of TIMES) {
       const { name: vpName, ...opts } = vp;
       const context = await browser.newContext({ timezoneId: TZ, locale: 'zh-CN', ...opts });
+      // Deterministic IDs must be installed before the app creates records.
+      await context.addInitScript(() => {
+        let seed = 20260714;
+        let counter = 0;
+        window.__reseed = () => { seed = 20260714; counter = 0; };
+        const rand = () => {
+          seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        Math.random = rand;
+        crypto.randomUUID = () => {
+          counter++;
+          const part = () => Math.floor(rand() * 2 ** 32).toString(16).padStart(8, '0');
+          const hex = counter.toString(16).padStart(8, '0') + part() + part() + part();
+          return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
+            hex.slice(16, 20) + '-' + hex.slice(20);
+        };
+      });
       const page = await context.newPage();
       await page.clock.setFixedTime(new Date(`2026-07-14T${time.hm}:00+08:00`));
       await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
@@ -148,6 +232,34 @@ try {
         const r = window.yuzhi.renderer;
         r.draw();
         await Promise.all([...r.propArt.images.values()].map((img) => img.decode().catch(() => {})));
+        // Snapshot a settled scene. Otherwise later layer measurements inherit
+        // progressed walker trajectories, random particles and time offsets.
+        for (const g of r.grow.values()) g.anim = 1;
+        const walkers = [...r.walkers].map(([id, walker]) => [id, { ...walker }]);
+        const grow = [...r.grow].map(([id, state]) => [id, { ...state }]);
+        window.__resetPerfFrame = () => {
+          window.__reseed();
+          r.walkers = new Map(walkers.map(([id, walker]) => [id, { ...walker }]));
+          r.grow = new Map(grow.map(([id, state]) => [id, { ...state }]));
+          r.t = 0;
+          r.pulses = [];
+          r.bellRipples = [];
+          r.pickedBottles = [];
+          r.stageCues = [];
+          r.granaryTransition = null;
+          r.fogTransition = null;
+          r.drifts = [];
+          r.driftKind = '';
+          r.sparks = [];
+          r.nextRocket = 0;
+          let seed = 7;
+          r.rnd = () => {
+            seed = (seed + 0x6d2b79f5) | 0;
+            let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+          };
+        };
       });
       const cdp = await context.newCDPSession(page);
       for (const rate of [1, 4]) {

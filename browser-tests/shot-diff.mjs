@@ -5,7 +5,7 @@
  *   node browser-tests/shot-diff.mjs shots/before shots/after [diffDir]
  *
  * 给出 diffDir 时，为有差异的截图另存一张差异图：差异像素标红，其余像素淡化成灰。
- * 所有同名截图完全一致时退出码为 0；有差异、缺图或尺寸不同时为 1。
+ * 非空且所有同名截图完全一致时退出码为 0；空集、有差异、缺图或尺寸不同时为 1。
  */
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -102,6 +102,10 @@ if (!beforeDir || !afterDir) {
 }
 const before = new Set(readdirSync(beforeDir).filter((f) => f.endsWith('.png')));
 const after = new Set(readdirSync(afterDir).filter((f) => f.endsWith('.png')));
+if (!before.size || !after.size) {
+  console.error('Expected non-empty PNG sets (before: ' + before.size + ', after: ' + after.size + ').');
+  process.exit(1);
+}
 let failed = false;
 if (diffDir) mkdirSync(diffDir, { recursive: true });
 for (const name of [...new Set([...before, ...after])].sort()) {
