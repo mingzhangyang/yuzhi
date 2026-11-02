@@ -14,6 +14,7 @@ import { roofOf } from './scene';
 import { bindDateSelects, dateSelect, readDate } from './date-select';
 import { MAX_VILLAGES } from '../logic/config';
 import { getLocale, t } from '../i18n';
+import { fillSafetySettings, safetySettingsHtml } from './safety';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -351,16 +352,24 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
   });
 }
 
-/** 设置：工作时段与外观 */
-export function openSettings(store: Store, applyTheme: () => void) {
+/** 设置：工作时段与外观，以及这个浏览器里数据的安全状况 */
+export function openSettings(store: Store, applyTheme: () => void, exportBackup?: () => void) {
   const s = store.data.settings;
   openModal({
     title: t('forms.settingsTitle'),
     body: `<p class="hint">${esc(t('forms.granaryEquation'))}</p>
       <div style="display:flex;gap:10px"><label class="field" style="flex:1">${esc(t('forms.start'))}<input type="time" name="ws" value="${esc(s.workStart)}"></label><label class="field" style="flex:1">${esc(t('forms.end'))}<input type="time" name="we" value="${esc(s.workEnd)}"></label></div>
       <label class="field">${esc(t('forms.appearance'))}<select name="theme"><option value="auto"${s.theme === 'auto' ? ' selected' : ''}>${esc(t('forms.themeAuto'))}</option><option value="light"${s.theme === 'light' ? ' selected' : ''}>${esc(t('forms.themeLight'))}</option><option value="dark"${s.theme === 'dark' ? ' selected' : ''}>${esc(t('forms.themeDark'))}</option></select></label>
+      ${safetySettingsHtml(store.today())}
       <div class="actions"><button class="btn" data-close>${esc(t('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(t('common.save'))}</button></div>`,
     mount(box) {
+      fillSafetySettings(box, () => box.isConnected);
+      const exportButton = box.querySelector<HTMLButtonElement>('[data-safety-export]')!;
+      exportButton.hidden = !exportBackup;
+      exportButton.addEventListener('click', () => {
+        closeModal(false);
+        exportBackup?.();
+      });
       box.querySelector('[data-ok]')!.addEventListener('click', () => {
         const ws = box.querySelector<HTMLInputElement>('input[name=ws]')!.value || '09:00';
         const we = box.querySelector<HTMLInputElement>('input[name=we]')!.value || '18:00';

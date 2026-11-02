@@ -72,10 +72,11 @@ src/
     chronicle.ts      编年史的一句话
     summary.ts        一生之书小结（落成仪式、档案馆）
     classify.ts       日历事件归类规则
+    backup.ts         数据安全提醒：何时提醒导出备份、何时说明「添加到主屏幕」
   ics.ts              ical.js 解析：RRULE、例外、EXDATE、时区
   calendar.ts         订阅链接 / 上传文件 / 自动刷新
   island/             小岛：地形生成（map.ts）与 Canvas 绘制、交互（render.ts）
-  ui/                 指标卡、追踪栏（含档案馆）、晚间结算、落成仪式、对话框
+  ui/                 指标卡、追踪栏（含档案馆）、晚间结算、落成仪式、对话框、数据安全提示条
 shared/icsProxy.ts    .ics 代理核心，Worker 与 Vite 开发服务器共用
 worker/index.ts       Cloudflare Worker 入口（静态资源 + /api/ics）
 tests/                单元测试

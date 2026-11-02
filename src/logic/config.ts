@@ -50,3 +50,10 @@ export const BANNERS_MAX = 2;
 export const DRIFT_BOTTLES_MAX = 3;
 /** 近 7 天杂务结算数对应的柴堆档位。 */
 export const WOODPILE_STEPS = [1, 4, 9] as const;
+
+/** 距上次导出备份（从没导出过则从第一天算起）多少天后，温和地提醒一次。 */
+export const BACKUP_REMIND_AFTER_DAYS = 14;
+/** 备份提醒点了「稍后」之后安静多少天。 */
+export const BACKUP_SNOOZE_DAYS = 7;
+/** 「添加到主屏幕」说明点了「知道了」之后安静多少天。 */
+export const INSTALL_HINT_SNOOZE_DAYS = 30;

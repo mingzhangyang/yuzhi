@@ -71,6 +71,9 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .fogbar .tx { flex: 1; min-width: 0; font-size: 13px; }
 .fogbar .tx b { margin-right: 4px; }
 .fogbar .tx span { color: var(--muted); }
+.safety-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; margin-bottom: 12px; border-color: var(--faint); }
+.safety-notice .tx { flex: 1 1 260px; min-width: 0; font-size: 13px; color: var(--muted); }
+.safety-notice .acts { display: flex; gap: 8px; flex-shrink: 0; }
 
 /* 顶部指标 */
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
