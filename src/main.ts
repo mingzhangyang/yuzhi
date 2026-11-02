@@ -259,8 +259,8 @@ async function boot() {
     onViewChange: () => update(),
   });
   tracker.bindChange();
-  // 手机上追踪栏展开时整块盖住地图，暂停地图动画。
-  tracker.sheet.onCoverChange = (covering) => renderer.setOccluded('sheet', covering);
+  // The partly exposed map remains interactive while the tracker is open;
+  // only real viewport occlusion may suspend animation.
 
   ceremony = new Ceremony(store, {
     pause: (on) => (renderer.paused = on),
@@ -705,6 +705,7 @@ async function boot() {
       e.preventDefault();
       setMenuOpen(false);
       moreBtn.focus();
+      e.stopPropagation();
     } else if (e.key === 'Tab') {
       // 菜单节点在 body 末尾：放任 Tab 会跳到页面最后。收起菜单，焦点回到 ⋯。
       e.preventDefault();
@@ -719,6 +720,9 @@ async function boot() {
     const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
     if (!m) return;
     setMenuOpen(false);
+    // The keyboard-selected menu item is hidden now; dialogs must restore
+    // focus to the visible menu trigger rather than that hidden item.
+    moreBtn.focus({ preventScroll: true });
     if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup });
     else if (m === 'export') await exportFlow();
     else if (m === 'import') await importFlow();

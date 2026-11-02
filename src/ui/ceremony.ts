@@ -52,7 +52,11 @@ export class Ceremony {
       if (e.target === this.root) this.close();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen() && isTopLayer(this.root)) this.close();
+      if (e.key === 'Escape' && this.isOpen() && isTopLayer(this.root)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.close();
+      }
     });
   }
 

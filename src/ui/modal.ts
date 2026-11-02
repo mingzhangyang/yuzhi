@@ -55,7 +55,11 @@ export function initModal() {
     if (t.closest('[data-close]') || (t.id === 'mdl' && current?.dismissable !== false)) closeModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && isModalOpen() && isTopLayer($('mdl')) && current?.dismissable !== false) closeModal();
+    if (e.key === 'Escape' && isModalOpen() && isTopLayer($('mdl')) && current?.dismissable !== false) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeModal();
+    }
   });
 }
 

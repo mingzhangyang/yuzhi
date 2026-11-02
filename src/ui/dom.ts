@@ -26,6 +26,9 @@ export function toast(msg: string, bad = false, action?: ToastAction) {
     button.type = 'button';
     button.className = 'toast-act';
     button.textContent = action.label;
+    // A live-region announcement may appear behind a dialog, but its Undo
+    // action must never be usable outside the active layer.
+    button.inert = document.documentElement.classList.contains('layer-open');
     button.addEventListener('click', () => {
       el.classList.remove('show', 'has-action');
       button.remove();

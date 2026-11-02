@@ -17,6 +17,8 @@ const stack: Layer[] = [];
 
 /** 遮罩打开时需要变成 inert 的背景：页面主体、⋯ 菜单，以及所有遮罩层的根 */
 const BACKGROUND_SELECTORS = ['.wrap', '#menu', '#mdl', '#settle', '#ceremony'];
+const OVERLAYS = ['#mdl', '#settle', '#ceremony'];
+const LAYER_Z_BASE = 100;
 
 function hasDom(): boolean {
   return typeof document !== 'undefined' && typeof document.querySelectorAll === 'function';
@@ -29,6 +31,18 @@ function sync() {
     const el = document.querySelector<HTMLElement>(selector);
     if (el) el.inert = Boolean(top) && el !== top;
   }
+  // Keep the visible paint order consistent with the interactive stack.
+  // Fixed CSS z-indices alone put ceremonies over later opened dialogs.
+  for (const selector of OVERLAYS) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (!el) continue;
+    const index = stack.findIndex((layer) => layer.el === el);
+    el.style.zIndex = index < 0 ? '' : String(LAYER_Z_BASE + index * 10);
+  }
+  // A toast remains a live announcement, but Undo cannot be clicked or
+  // focused behind a modal. Restore it if the toast outlives the modal.
+  const action = document.querySelector<HTMLButtonElement>('#toast .toast-act');
+  if (action) action.inert = Boolean(top);
   document.documentElement.classList.toggle('layer-open', Boolean(top));
 }
 

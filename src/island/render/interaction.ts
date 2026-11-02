@@ -8,6 +8,7 @@ import { personSize, treeBounds } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
 import { t as tr } from '../../i18n';
+import { labelContains, type VisibleLabelBounds } from './label-layout';
 
 /** 命中、说明和键盘浏览；不推进动画，也不绘制。 */
 export abstract class IslandInteraction extends IslandViewport {
@@ -122,16 +123,25 @@ export abstract class IslandInteraction extends IslandViewport {
     return [x, y - this.view.tw * 1.05];
   }
 
-  /**
-   * 上一帧标签避让给每个标签的纵向偏移（按标签 id）。存偏移而不是绝对坐标：
-   * 平移、缩放后到下一帧之前，点击判定仍落在画出来的位置附近。
-   */
-  protected labelShift = new Map<string, number>();
+  /** Exact bounds of visible labels from the last paint, in paint order. */
+  protected placedLabels = new Map<string, { bounds: VisibleLabelBounds; hit: NonNullable<Hit> }>();
 
-  /** 村名标签实际画在哪里：点击判定、键盘浏览和绘制共用 */
+  protected visibleLabelAnchor(id: string): [number, number] | null {
+    const bounds = this.placedLabels.get(id)?.bounds;
+    return bounds ? [bounds.x, bounds.y] : null;
+  }
+
+  protected placedLabelHitAt(pt: { x: number; y: number }): Hit {
+    // Later labels paint over earlier ones and win overlapping hits.
+    for (const label of [...this.placedLabels.values()].reverse()) {
+      if (labelContains(label.bounds, pt)) return label.hit;
+    }
+    return null;
+  }
+
+  /** Village agenda labels and keyboard browsing use the painted anchor. */
   protected villageLabelAnchor(v: VillageView): [number, number] {
-    const [x, y] = this.villageLabelBase(v);
-    return [x, y + (this.labelShift.get(`village:${v.projectId}`) ?? 0)];
+    return this.visibleLabelAnchor(`village:${v.projectId}`) ?? this.villageLabelBase(v);
   }
 
   protected choresLabelText(ch: ChoresView): string {
@@ -346,13 +356,7 @@ export abstract class IslandInteraction extends IslandViewport {
       for (const b of banners) {
         if (this.bannerHitAt(pt, b)) return { kind: 'agenda', target: v.projectId };
       }
-      // 进行中 / 仅待结算没有额外道具；用已经画出的村名标签承载说明，
-      // 避开井和小人，保持项目点击区域不变。
-      if (!hasBoard && !banners.length) {
-        const [lx, ly] = this.villageLabelAnchor(v);
-        const { text, compact } = this.villageLabel(v);
-        if (this.labelHitAt(pt, lx, ly, text, true, compact)) return { kind: 'agenda', target: v.projectId };
-      }
+      // Village label capsules use painted geometry in placedLabelHitAt().
     }
     if ((s.chores.live || s.chores.soon) && this.broomHitAt(pt, !!s.chores.live)) {
       return { kind: 'agenda', target: CHORES };
@@ -457,6 +461,10 @@ export abstract class IslandInteraction extends IslandViewport {
     const s = this.scene;
     if (!s) return null;
 
+    // Labels paint on top: their actual visible capsules take precedence over
+    // the structures below, while hidden labels have no hit targets.
+    const label = this.placedLabelHitAt(pt);
+    if (label) return label;
     // 固定命中层级：前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 宽泛区域。
     const walker = this.walkerHitAt(pt);
     if (walker) return walker;
@@ -537,21 +545,26 @@ export abstract class IslandInteraction extends IslandViewport {
     // Inspection and click selection intentionally have different semantics:
     // clicks obey foreground z-order, while inspection can still describe a
     // visible agenda prop or bottle even when a moving walker crosses it.
-    const inspectable = this.driftHitAt(pt) ?? this.agendaHitAt(pt);
+    const labelHit = this.placedLabelHitAt(pt);
+    const inspectable = labelHit?.kind === 'agenda' ? labelHit
+      : labelHit?.kind === 'cultivation' ? null
+        : this.driftHitAt(pt) ?? this.agendaHitAt(pt);
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
-    const cultivationHit = this.cultivationHitAt(pt);
+    const cultivationHit = labelHit?.kind === 'cultivation' ? labelHit : this.cultivationHitAt(pt);
     if (cultivationHit) {
       const state = s.cultivation.find((item) => item.kind === cultivationHit.area);
       const site = m.cultivation[cultivationHit.area];
       if (state) {
         const [x, y] = this.iso(site.i, site.j);
+        const anchor = labelHit?.kind === 'cultivation'
+          ? this.visibleLabelAnchor(`cultivation:${state.kind}`) : null;
         return this.selectScenery(
           { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
           { i: site.i, j: site.j },
-          x,
-          y - tw * 0.62,
+          anchor?.[0] ?? x,
+          anchor?.[1] ?? y - tw * 0.62,
           ctx,
         );
       }
@@ -631,11 +644,12 @@ export abstract class IslandInteraction extends IslandViewport {
     for (const state of s.cultivation) {
       const site = m.cultivation[state.kind];
       const [x, y] = this.iso(site.i, site.j);
+      const [labelX, labelY] = this.visibleLabelAnchor(`cultivation:${state.kind}`) ?? [x, y - tw * 0.62];
       add(
         { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
         { i: site.i, j: site.j },
-        x,
-        y - tw * 0.62,
+        labelX,
+        labelY,
       );
     }
 
@@ -673,7 +687,7 @@ export abstract class IslandInteraction extends IslandViewport {
       add({ kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda }, null, x, y);
     }
     if (s.chores.live || s.chores.soon) {
-      const [x, y] = this.choresAgendaAnchor();
+      const [x, y] = this.visibleLabelAnchor('chores') ?? this.choresAgendaAnchor();
       const target = this.infoTargetForHit({ kind: 'agenda', target: CHORES });
       if (target) add(target, null, x, y);
     }

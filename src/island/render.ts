@@ -6,14 +6,14 @@
  */
 import { dayLight } from './ambience';
 import { tileHash } from './map';
-import type { LandmarkView, VillageView, Walker } from './render/model';
+import type { Hit, LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
 import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { HOUSE_SCALE, houseHash, houseVariant, MARKER, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
 import { cultivationOutline, drawCultivationArea } from './render/cultivation';
-import { layoutLabels, type LabelRequest } from './render/label-layout';
+import { layoutLabels, placedLabelBounds, type LabelRequest } from './render/label-layout';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
 function rectOutline(x: number, y: number, w: number, h: number, below = 0): [number, number][] {
@@ -33,7 +33,7 @@ export class IslandRenderer extends IslandEffectsPainter {
   private last = 0;
   /** start() 之后为 true；stop() 是硬停，遮挡结束也不会自己恢复 */
   private running = false;
-  /** 画面看不见的原因（滚出屏幕、被手机底部面板盖住…）；非空时不跑 rAF */
+  /** 画面完全不可见（滚出视口等）的原因；部分遮挡时仍要重画可交互区域。 */
   private readonly hiddenBy = new Set<string>();
 
   constructor(canvas: HTMLCanvasElement, wrap: HTMLElement) {
@@ -418,14 +418,14 @@ export class IslandRenderer extends IslandEffectsPainter {
     const sel = s.selected;
     // 手机上没放大时，标签收成小号胶囊（compactLabels），选中的那个照常显示
     const compact = this.compactLabels();
-    const labels: (LabelRequest & { draw: (dy: number) => void })[] = [];
+    const labels: (LabelRequest & { hit: NonNullable<Hit>; draw: (dy: number) => void })[] = [];
     const want = (
-      id: string, x: number, y: number, text: string, dot: string | null,
+      id: string, hit: NonNullable<Hit>, x: number, y: number, text: string, dot: string | null,
       hl: boolean, muted: boolean, small: boolean, priority: number, optional = false,
     ) => {
       const { bw, bh } = this.labelBox(text, !!dot, small);
       labels.push({
-        id, x, y, w: bw, h: bh,
+        id, hit, x, y, w: bw, h: bh,
         priority: hl ? 100 : priority,
         optional: optional && !hl,
         draw: (dy) => this.label(x, y + dy, text, dot, hl, muted, small),
@@ -434,22 +434,24 @@ export class IslandRenderer extends IslandEffectsPainter {
     for (const vv of s.villages) {
       const [x, y] = this.villageLabelBase(vv);
       const shown = this.villageLabel(vv);
-      want(`village:${vv.projectId}`, x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact, 50);
+      want(`village:${vv.projectId}`,
+        this.labelIsAgendaEntry(vv) ? { kind: 'agenda', target: vv.projectId } : { kind: 'project', id: vv.projectId },
+        x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact, 50);
     }
     for (const area of s.cultivation) {
       const site = m.cultivation[area.kind];
       const [x, y] = this.iso(site.i, site.j);
-      want(`cultivation:${area.kind}`, x, y - tw * 0.62, `${area.name} · ${area.level}/4`, null, false, false, compact, 20, true);
+      want(`cultivation:${area.kind}`, { kind: 'cultivation', area: area.kind }, x, y - tw * 0.62, `${area.name} · ${area.level}/4`, null, false, false, compact, 20, true);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
-      want('dock', x, y + tw * 0.2, s.dockLabel, null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock', 40);
+      want('dock', { kind: 'dock' }, x, y + tw * 0.2, s.dockLabel, null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock', 40);
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
-      want('granary', gx, gy + tw * 0.32, s.granaryLabel, MARKER.granary, sel?.kind === 'granary', false, compact && sel?.kind !== 'granary', 40);
+      want('granary', { kind: 'granary' }, gx, gy + tw * 0.32, s.granaryLabel, MARKER.granary, sel?.kind === 'granary', false, compact && sel?.kind !== 'granary', 40);
       const ch = s.chores;
       if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        want('chores', cx2, cy2 + tw * 0.3, this.choresLabelText(ch), MARKER.chores, sel?.kind === 'chores', true, compact && sel?.kind !== 'chores', 30);
+        want('chores', { kind: 'chores' }, cx2, cy2 + tw * 0.3, this.choresLabelText(ch), MARKER.chores, sel?.kind === 'chores', true, compact && sel?.kind !== 'chores', 30);
       }
     }
     for (const l of s.landmarks) {
@@ -458,15 +460,15 @@ export class IslandRenderer extends IslandEffectsPainter {
       const hl = sel?.kind === 'project' && sel.id === l.projectId;
       if (!hl && v.zoom < 1.4) continue;
       const [x, y] = this.iso(site.i, site.j);
-      want(`landmark:${l.projectId}`, x, y - tw * 0.95, l.name, l.roof, hl, !hl, false, 10, true);
+      want(`landmark:${l.projectId}`, { kind: 'project', id: l.projectId }, x, y - tw * 0.95, l.name, l.roof, hl, !hl, false, 10, true);
     }
-    const placement = layoutLabels(labels);
-    this.labelShift.clear();
+    const bounds = placedLabelBounds(labels, layoutLabels(labels));
+    this.placedLabels.clear();
     for (const q of labels.slice().sort((a, b) => a.priority - b.priority)) {
-      const p = placement.get(q.id);
-      if (!p || p.hidden) continue;
-      if (p.dy) this.labelShift.set(q.id, p.dy);
-      q.draw(p.dy);
+      const placed = bounds.get(q.id);
+      if (!placed) continue;
+      this.placedLabels.set(q.id, { bounds: placed, hit: q.hit });
+      q.draw(placed.y - q.y);
     }
     if (selW) {
       const [p, x, y] = selW;

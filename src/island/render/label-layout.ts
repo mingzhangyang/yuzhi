@@ -22,6 +22,34 @@ export interface LabelPlacement {
   hidden: boolean;
 }
 
+/** Exact painted bounds shared by rendering, hit-testing and keyboard browsing. */
+export interface VisibleLabelBounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function placedLabelBounds(
+  requests: readonly LabelRequest[],
+  placement: ReadonlyMap<string, LabelPlacement>,
+): Map<string, VisibleLabelBounds> {
+  const visible = new Map<string, VisibleLabelBounds>();
+  for (const q of requests) {
+    const placed = placement.get(q.id);
+    if (placed && !placed.hidden) {
+      visible.set(q.id, { x: q.x, y: q.y + placed.dy, w: q.w, h: q.h });
+    }
+  }
+  return visible;
+}
+
+export function labelContains(bounds: VisibleLabelBounds, pt: { x: number; y: number }): boolean {
+  // A compact (15px) capsule gets a larger finger-sized hit target.
+  return Math.abs(pt.x - bounds.x) <= bounds.w / 2
+    && Math.abs(pt.y - bounds.y) <= Math.max(bounds.h, bounds.h <= 15 ? 24 : 0) / 2;
+}
+
 interface Rect { l: number; r: number; t: number; b: number }
 
 const rectOf = (q: LabelRequest, dy: number, gap: number): Rect => ({

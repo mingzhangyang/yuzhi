@@ -59,7 +59,11 @@ export class SettleSheet {
       if (e.target === $('settle')) this.close();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen() && isTopLayer($('settle'))) this.close();
+      if (e.key === 'Escape' && this.isOpen() && isTopLayer($('settle'))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.close();
+      }
     });
   }
 

@@ -200,6 +200,8 @@ export interface TaskDoneUndo {
   taskId: string;
   date: ISODate;
   previous?: SettlementEntry;
+  /** Exact applied fact instance; a later verdict replaces this object. */
+  applied: SettlementEntry;
 }
 
 /** 在结算之外直接记下「今天做完了」（例如没有日期的任务）。返回撤销所需的信息。 */
@@ -209,7 +211,9 @@ function markTaskDoneImpl(store: Store, taskId: string): TaskDoneUndo | undefine
   const today = store.today();
   const previous = store.data.entries.find((entry) => entry.id === entryId(today, 'task', t.id));
   putSettlementEntry(store, today, { key: `task|${t.id}`, type: 'task', id: t.id, title: t.title, projectId: t.projectId }, 'done');
-  return { taskId: t.id, date: today, previous: previous ? { ...previous } : undefined };
+  const applied = store.data.entries.find((entry) => entry.id === entryId(today, 'task', t.id));
+  if (!applied) throw new Error('Quick completion did not create a settlement fact');
+  return { taskId: t.id, date: today, previous: previous ? { ...previous } : undefined, applied };
 }
 
 /**
@@ -220,7 +224,9 @@ function markTaskDoneImpl(store: Store, taskId: string): TaskDoneUndo | undefine
 function undoTaskDoneImpl(store: Store, undo: TaskDoneUndo): boolean {
   const id = entryId(undo.date, 'task', undo.taskId);
   const current = store.data.entries.find((entry) => entry.id === id);
-  if (!current || current.outcome !== 'done') return false;
+  // Each Store.put replaces the fact instance. Skip -> done, reload and
+  // other intervening verdicts must never revive a stale undo token.
+  if (!current || current !== undo.applied || current.outcome !== 'done') return false;
   if (undo.previous) store.put('entries', undo.previous);
   else store.del('entries', id);
   return true;

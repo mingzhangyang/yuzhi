@@ -20,8 +20,6 @@ export class BottomSheet {
   private readonly back = $('sheetBack');
   private readonly mq: MediaQueryList | undefined = window.matchMedia?.(MOBILE);
   private drag: { id: number; y: number; dy: number; moved: boolean; wasOpen: boolean } | null = null;
-  /** 窄屏上展开时整块盖住地图：地图可以暂停动画 */
-  onCoverChange?: (covering: boolean) => void;
   /** 拖动结束后浏览器还会补发一次 click（触屏上可能晚一些），这段时间内的 click 不再切换 */
   private skipClickUntil = 0;
 
@@ -50,6 +48,8 @@ export class BottomSheet {
     document.addEventListener('keydown', (e) => {
       // 有对话框等遮罩层时 Esc 归它们；这里只处理面板本身。
       if (e.key !== 'Escape' || !this.mobile() || !this.isOpen() || document.documentElement.classList.contains('layer-open')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       this.close();
       this.handle.focus({ preventScroll: true });
     });
@@ -85,7 +85,6 @@ export class BottomSheet {
     this.handle.setAttribute('aria-expanded', String(!mobile || open));
     this.body.inert = mobile && !open;
     this.back.hidden = !(mobile && open);
-    this.onCoverChange?.(mobile && open);
   }
 
   /* ---------------- 拖动 ---------------- */

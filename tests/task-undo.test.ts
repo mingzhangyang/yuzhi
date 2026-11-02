@@ -26,6 +26,18 @@ describe('undo a quick “done today”', () => {
     expect(store.data.entries.find((entry) => entry.itemId === t.id)).toEqual(before);
   });
 
+  it('rejects stale undo when another verdict becomes done again', () => {
+    const { store, today } = makeStore();
+    const p = A.createProject(store, '写作');
+    const t = A.createTask(store, { title: '第四章', projectId: p.id, scheduledFor: today });
+    A.settleDay(store, today, new Map([[`task|${t.id}`, { outcome: 'partial' as const }]]));
+    const undo = A.markTaskDone(store, t.id)!;
+    A.settleDay(store, today, new Map([[`task|${t.id}`, { outcome: 'skipped' as const, reason: 'no_energy' as const }]]));
+    A.settleDay(store, today, new Map([[`task|${t.id}`, { outcome: 'done' as const }]]));
+    expect(A.undoTaskDone(store, undo)).toBe(false);
+    expect(store.data.entries.find((entry) => entry.itemId === t.id)!.outcome).toBe('done');
+  });
+
   it('leaves a verdict alone once it was changed elsewhere', () => {
     const { store, today } = makeStore();
     const p = A.createProject(store, '写作');
