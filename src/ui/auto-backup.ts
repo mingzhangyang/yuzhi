@@ -94,12 +94,50 @@ export class AutoBackup {
   }
 
   private async load() {
+    await this.reconcile();
+    await this.refreshStatus();
+  }
+
+  /**
+   * Re-read the folder choice before any backup work: another tab may have
+   * chosen, replaced or stopped it while this tab was a reader. When device
+   * storage cannot be read, keep the page-only choice this tab already has.
+   */
+  private async reconcile() {
     try {
       this.record = await deviceGet<AutoBackupRecord>(RECORD_KEY);
     } catch {
-      this.record = undefined;
+      // Device storage unavailable: fall back to what this page knows.
     }
-    await this.refreshStatus();
+  }
+
+  /** Still the same folder choice as on disk? (Not stopped or replaced elsewhere.) */
+  private async stillChosen(record: AutoBackupRecord): Promise<boolean> {
+    let stored: AutoBackupRecord | undefined;
+    try {
+      stored = await deviceGet<AutoBackupRecord>(RECORD_KEY);
+    } catch {
+      return this.record?.handle === record.handle;
+    }
+    if (!stored) return false;
+    try {
+      return await stored.handle.isSameEntry(record.handle);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Bind a backup to the writer lease and data snapshot it started under.
+   * Returns null in a read-only tab.
+   */
+  private writeContext(): { isCurrent(): boolean } | null {
+    if (this.store.isReadOnly) return null;
+    try {
+      return this.store.captureWriteContext();
+    } catch {
+      return null;
+    }
   }
 
   private async refreshStatus() {
@@ -137,8 +175,14 @@ export class AutoBackup {
   run(reason: AutoBackupReason): Promise<boolean> {
     return this.enqueue(async () => {
       await this.ready;
+      const context = this.writeContext();
+      if (!context) return false;
+      await this.reconcile();
       const record = this.record;
-      if (!record || this.store.isReadOnly) return false;
+      if (!record || !context.isCurrent()) {
+        await this.refreshStatus();
+        return false;
+      }
       const today = this.store.today();
       if (!autoBackupDue(record.lastDate, today, reason)) return false;
 
@@ -152,29 +196,43 @@ export class AutoBackup {
         this.setStatus({ kind: 'needs-permission', folder: record.folder, lastDate: record.lastDate });
         return false;
       }
-      return this.write(record, today);
+      return this.write(record, today, context);
     });
   }
 
-  private async write(record: AutoBackupRecord, today: ISODate): Promise<boolean> {
+  /**
+   * Write one backup from the snapshot taken under `context`. If the writer
+   * lease or data snapshot changes before the file is committed, the stream is
+   * aborted, so a stale tab can never replace the new writer's file; the
+   * browser only swaps a writable stream into place on close().
+   */
+  private async write(record: AutoBackupRecord, today: ISODate, context: { isCurrent(): boolean }): Promise<boolean> {
+    if (!context.isCurrent()) return false;
+    const text = exportBackup(this.store.data);
     try {
-      const text = exportBackup(this.store.data);
       const file = await record.handle.getFileHandle(autoBackupFileName(today), { create: true });
       const writable = await file.createWritable();
       try {
         await writable.write(text);
+        if (!context.isCurrent()) {
+          await writable.abort().catch(() => {});
+          return false;
+        }
         await writable.close();
       } catch (error) {
         await writable.abort().catch(() => {});
         throw error;
       }
       await this.prune(record.handle);
-      await this.saveRecord({ ...record, lastDate: today, lastError: undefined });
+      // Never resurrect a choice another tab stopped or replaced meanwhile.
+      if (await this.stillChosen(record)) await this.saveRecord({ ...record, lastDate: today, lastError: undefined });
+      else await this.reconcile();
       markBackupExported(today);
       await this.refreshStatus();
       return true;
     } catch (error) {
-      await this.saveRecord({ ...record, lastError: errorText(error) });
+      if (context.isCurrent() && await this.stillChosen(record)) await this.saveRecord({ ...record, lastError: errorText(error) });
+      else await this.reconcile();
       await this.refreshStatus();
       return false;
     }
@@ -195,6 +253,8 @@ export class AutoBackup {
   choose(): Promise<boolean> {
     const pick = picker();
     if (!pick) return Promise.resolve(false);
+    const context = this.writeContext();
+    if (!context) return Promise.resolve(false);
     // Open the picker inside the click's user activation, before any await.
     const picked = pick({ id: 'yuzhi-auto-backup', mode: 'readwrite', startIn: 'documents' });
     return this.enqueue(async () => {
@@ -205,16 +265,18 @@ export class AutoBackup {
         if (!isAbort(error)) this.setStatus(this.record ? { kind: 'error', folder: this.record.folder, lastDate: this.record.lastDate, message: errorText(error) } : { kind: 'off' });
         return false;
       }
+      if (!context.isCurrent()) return false;
       const record: AutoBackupRecord = { handle, folder: handle.name };
       await this.saveRecord(record);
-      return this.write(record, this.store.today());
+      return this.write(record, this.store.today(), context);
     });
   }
 
   /** Re-grant write access from a click, then back up right away. */
   allowAndRun(): Promise<boolean> {
     const record = this.record;
-    if (!record) return Promise.resolve(false);
+    const context = this.writeContext();
+    if (!record || !context) return Promise.resolve(false);
     // requestPermission must start inside the click's user activation.
     const asked = record.handle.requestPermission?.(READ_WRITE) ?? Promise.resolve<PermissionState>('granted');
     return this.enqueue(async () => {
@@ -228,7 +290,14 @@ export class AutoBackup {
         await this.refreshStatus();
         return false;
       }
-      return this.write(this.record ?? record, this.store.today());
+      // The folder may have been stopped or replaced in another tab meanwhile.
+      await this.reconcile();
+      const current = this.record;
+      if (!current || !(await current.handle.isSameEntry(record.handle).catch(() => false))) {
+        await this.refreshStatus();
+        return false;
+      }
+      return this.write(current, this.store.today(), context);
     });
   }
 

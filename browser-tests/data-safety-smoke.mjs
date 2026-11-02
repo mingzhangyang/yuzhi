@@ -214,7 +214,11 @@ try {
     const folder = () => page.evaluate(async () => {
       const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked', { create: true });
       const files = {};
-      for await (const [name, handle] of dir.entries()) files[name] = await (await handle.getFile()).text();
+      for await (const [name, handle] of dir.entries()) {
+        // Skip the browser's in-flight swap files; they vanish when a stream closes or aborts.
+        if (name.endsWith('.crswap')) continue;
+        try { files[name] = await (await handle.getFile()).text(); } catch { /* removed meanwhile */ }
+      }
       return files;
     });
     const setDeviceLastDate = (date) => page.evaluate((date) => new Promise((resolve, reject) => {
@@ -262,7 +266,8 @@ try {
     await page.locator('#settle [data-act="commit"]').click();
     await page.waitForFunction(async (name) => {
       const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('picked');
-      return (await (await (await dir.getFileHandle(name)).getFile()).text()).includes('结算后应进入备份');
+      // The file is swapped into place atomically; a read can race that swap.
+      try { return (await (await (await dir.getFileHandle(name)).getFile()).text()).includes('结算后应进入备份'); } catch { return false; }
     }, todayFile, { timeout });
 
     // Only our own files are pruned, down to the newest 30.
@@ -288,6 +293,59 @@ try {
     files = await folder();
     assert(files['keep-me.txt'] !== undefined && files['yuzhi-backup-2025-01-01.json'] !== undefined && files[todayFile] && !files['yuzhi-auto-2025-01-01.json'],
       `pruning touched the wrong files: ${Object.keys(files).sort()}`);
+    await closeSettings();
+
+    const settleWithTask = async (title) => {
+      await page.evaluate((title) => {
+        const { store, actions } = window.yuzhi;
+        actions.createTask(store, { title, projectId: store.data.projects[0].id, scheduledFor: store.today() });
+      }, title);
+      await page.locator('#settleBtn').click();
+      await page.locator('#settle [data-act="commit"]').click();
+      await page.waitForFunction(() => document.getElementById('settle').hidden !== false || !document.querySelector('#settle [data-act="commit"]'), undefined, { timeout }).catch(() => {});
+      await page.waitForTimeout(500);
+    };
+
+    // Losing the writer lease mid-write aborts the stream: the existing file
+    // is never replaced by a tab that is no longer the writer (PR #37 review).
+    const beforeLoss = (await folder())[todayFile];
+    await page.evaluate(() => {
+      const original = FileSystemWritableFileStream.prototype.write;
+      FileSystemWritableFileStream.prototype.write = async function (...args) {
+        await original.apply(this, args);
+        FileSystemWritableFileStream.prototype.write = original;
+        window.yuzhi.store.setReadOnly(true);
+      };
+    });
+    await settleWithTask('失去写权限后不应写入');
+    await page.evaluate(() => window.yuzhi.store.setReadOnly(false));
+    assert((await folder())[todayFile] === beforeLoss, 'a tab that lost the writer lease still replaced the backup file');
+
+    // A folder choice stopped in another tab is honoured, not resurrected.
+    await page.evaluate(() => new Promise((resolve, reject) => {
+      const open = indexedDB.open('yuzhi-device', 1);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const tx = open.result.transaction('kv', 'readwrite');
+        tx.objectStore('kv').delete('autoBackup');
+        tx.oncomplete = () => { open.result.close(); resolve(); };
+      };
+    }));
+    await page.evaluate(async (name) => (await (await navigator.storage.getDirectory()).getDirectoryHandle('picked')).removeEntry(name), todayFile);
+    await settleWithTask('停用后不应写入');
+    const stopped = await page.evaluate(() => new Promise((resolve) => {
+      const open = indexedDB.open('yuzhi-device', 1);
+      open.onsuccess = () => {
+        const get = open.result.transaction('kv').objectStore('kv').get('autoBackup');
+        get.onsuccess = () => { open.result.close(); resolve(get.result ?? null); };
+      };
+    }));
+    assert(!(await folder())[todayFile] && stopped === null, 'stale folder settings were used after another tab stopped automatic backup');
+
+    // Re-enable for the remaining checks.
+    await openSettings();
+    await page.locator('#mdl [data-auto="choose"]').click();
+    await page.waitForFunction(() => document.querySelector('#mdl [data-auto-backup]')?.textContent.includes('正在自动备份到「picked」'), undefined, { timeout });
     await closeSettings();
 
     // A new day's first opening writes a fresh copy on its own.
