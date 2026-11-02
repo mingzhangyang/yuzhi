@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { afterEach, expect, it } from 'vitest';
 
-const roots: string[] = [];
+const roots = [];
 const command = resolve(process.cwd(), 'browser-tests/shot-diff.mjs');
 
 function dirs() {
@@ -18,8 +18,8 @@ function dirs() {
   return { before, after };
 }
 
-function png(red: number) {
-  const chunk = (type: string, data: Buffer) => {
+function png(red) {
+  const chunk = (type, data) => {
     const n = Buffer.alloc(4);
     n.writeUInt32BE(data.length);
     return Buffer.concat([n, Buffer.from(type), data, Buffer.alloc(4)]);
