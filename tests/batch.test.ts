@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
+import type { IDBPDatabase } from 'idb';
 import { IdbPersistence, MemoryPersistence, emptyData } from '../src/db';
 import { Store } from '../src/store';
 import { createProject, createTask, editTaskPlan } from '../src/actions';
@@ -286,6 +287,57 @@ describe('原子批次写入', () => {
 
     expect(store.data.settings.theme).toBe('auto');
     expect(dataset.theme).toBeUndefined();
+  });
+
+  // YZ-F2: a connection can close underneath the app (browser forced close, or
+  // a caller that awaited a connection a reconnect has since replaced). The
+  // next action must reopen instead of failing with "connection is closing".
+  const underlyingConnection = (persistence: IdbPersistence) =>
+    (persistence as unknown as { dbp: Promise<IDBPDatabase> }).dbp;
+
+  it('连接被意外关闭后，下一次保存会重连并成功提交', async () => {
+    const name = dbName('idb-unexpected-close');
+    const persistence = new IdbPersistence(name);
+    const store = new Store(await persistence.load(), persistence);
+    const errors: unknown[] = [];
+    store.onError = (error) => errors.push(error);
+
+    (await underlyingConnection(persistence)).close();
+    createProject(store, '第一个村落');
+    await expect(store.flush()).resolves.toBeUndefined();
+
+    expect(errors).toEqual([]);
+    expect(store.data.projects.map((project) => project.name)).toEqual(['第一个村落']);
+    expect((await new IdbPersistence(name).load()).projects.map((project) => project.name)).toEqual(['第一个村落']);
+  });
+
+  it('只读快照在连接被意外关闭后也能重新读取', async () => {
+    const name = dbName('idb-unexpected-close-reader');
+    const writer = new IdbPersistence(name);
+    await writer.load();
+    await writer.batch([{ kind: 'put', coll: 'projects', item: { id: 'p1', name: '已保存', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } }]);
+
+    const reader = new IdbPersistence(name, false);
+    await reader.load();
+    (await underlyingConnection(reader)).close();
+    expect((await reader.load()).projects.map((project) => project.name)).toEqual(['已保存']);
+    await expect(reader.batch([{ kind: 'put', coll: 'projects', item: { id: 'p2', name: '不能写', createdAt: '2026-10-01', status: 'active', islandSlot: 1 } }]))
+      .rejects.toThrow('只读');
+  });
+
+  it('生命周期主动 close() 之后不会被保存静默重开', async () => {
+    const name = dbName('idb-deliberate-close');
+    const persistence = new IdbPersistence(name);
+    await persistence.load();
+    await persistence.close();
+
+    await expect(persistence.batch([{ kind: 'put', coll: 'projects', item: { id: 'p1', name: '挂起后', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } }]))
+      .rejects.toMatchObject({ name: 'InvalidStateError' });
+
+    // An explicit reopen is the only way back.
+    await persistence.reopen(true);
+    await persistence.batch([{ kind: 'put', coll: 'projects', item: { id: 'p1', name: '恢复后', createdAt: '2026-10-01', status: 'active', islandSlot: 0 } }]);
+    expect((await persistence.load()).projects.map((project) => project.name)).toEqual(['恢复后']);
   });
 
   it('中途写入失败时 IndexedDB 整批回滚', async () => {

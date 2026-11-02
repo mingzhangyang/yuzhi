@@ -1,4 +1,4 @@
-import { openDB, type IDBPDatabase } from 'idb';
+import { openDB, type IDBPDatabase, type IDBPTransaction } from 'idb';
 import type { Data, LifeKind, OperationKind, Settings } from './types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from './types';
 import { localDate } from './lib/date';
@@ -68,6 +68,17 @@ export class StorageUnavailableError extends Error {
 export function isStorageUnavailableError(error: unknown): error is StorageUnavailableError {
   return error instanceof StorageUnavailableError;
 }
+
+/**
+ * `IDBDatabase.transaction()` throws InvalidStateError synchronously when the
+ * connection is closing (closed by the browser, or replaced underneath an
+ * awaiting caller). No transaction exists yet, so nothing has been written.
+ */
+function isClosedConnectionError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { name?: unknown }).name === 'InvalidStateError');
+}
+
+const READ_ONLY_PERSISTENCE_MESSAGE = '当前标签页是只读的，请切换到拥有写权限的标签页';
 
 export function defaultSettings(): Settings {
   return { workStart: '09:00', workEnd: '18:00', firstDay: localDate(), theme: 'auto' };
@@ -525,6 +536,12 @@ export class IdbPersistence implements Persistence {
   private requestedWriteAccess: boolean;
   private versionChangeHandler?: () => void;
   private accessTail: Promise<void> = Promise.resolve();
+  /**
+   * The lifecycle owner closed this persistence on purpose (suspension, final
+   * close, versionchange recovery). Only an explicit reopen may undo that; a
+   * connection that closed for any other reason is reopened on next use.
+   */
+  private closeRequested = false;
   constructor(name = DB_NAME, writeAccess = true, options: { onVersionChange?: () => void } = {}) {
     this.name = name;
     this.writeAccess = writeAccess;
@@ -538,6 +555,7 @@ export class IdbPersistence implements Persistence {
       let current: IDBPDatabase | undefined;
       try { current = await this.dbp; } catch { /* reconnect from a failed/closed connection */ }
       current?.close();
+      this.closeRequested = false;
       this.writeAccess = writeAccess;
       this.dbp = writeAccess ? this.openWritableDatabase() : this.openDatabase(undefined, false);
       await this.dbp;
@@ -566,8 +584,43 @@ export class IdbPersistence implements Persistence {
   }
 
   async close() {
+    // Publish the intent before yielding so a racing transaction does not
+    // treat this deliberate close as an unexpected one and reopen it.
+    this.closeRequested = true;
     await this.accessTail.catch(() => {});
+    this.closeRequested = true;
     try { (await this.dbp).close(); } catch { /* already failed or closed */ }
+  }
+
+  /**
+   * Start a transaction on the current connection. If that connection is
+   * already closing without a deliberate close() — the browser can force-close
+   * IndexedDB connections, and a caller may have awaited a connection that a
+   * reconnect has since replaced — reopen it in the same access mode and retry
+   * once. The failure happens before any request is issued, so retrying cannot
+   * duplicate a write.
+   */
+  private async startTransaction<Mode extends IDBTransactionMode>(storeNames: string[], mode: Mode) {
+    for (let attempt = 0; ; attempt++) {
+      if (mode === 'readwrite' && !this.writeAccess) throw new Error(READ_ONLY_PERSISTENCE_MESSAGE);
+      const db = await this.dbp;
+      try {
+        return { db, tx: db.transaction(storeNames, mode) };
+      } catch (error) {
+        if (attempt > 0 || this.closeRequested || !isClosedConnectionError(error)) throw error;
+        await this.recoverClosedConnection(db);
+      }
+    }
+  }
+
+  private async recoverClosedConnection(stale: IDBPDatabase) {
+    await this.accessTail.catch(() => {});
+    if (this.closeRequested) return;
+    let current: IDBPDatabase | undefined;
+    try { current = await this.dbp; } catch { /* reopen below */ }
+    // A queued reconnect may already have replaced the stale connection.
+    if (current && current !== stale) return;
+    await this.queueReconnect(this.writeAccess);
   }
 
   onVersionChange(fn: () => void) {
@@ -666,7 +719,11 @@ export class IdbPersistence implements Persistence {
     db.close();
     return this.openDatabase(IDB_SCHEMA_VERSION, true);
   }
-  async load(): Promise<Data> {
+  load(): Promise<Data> {
+    return this.loadSnapshot(true);
+  }
+
+  private async loadSnapshot(recoverClosed: boolean): Promise<Data> {
     let db: IDBPDatabase;
     let raw: RawData;
     let storedSettings: unknown;
@@ -687,7 +744,16 @@ export class IdbPersistence implements Persistence {
       // One load is one snapshot. Issue every request before the first await so
       // IndexedDB keeps a single readonly transaction alive across all current
       // and legacy collections plus migration metadata.
-      const tx = db.transaction(storeNames, 'readonly');
+      let tx: IDBPTransaction<unknown, string[], 'readonly'>;
+      try {
+        tx = db.transaction(storeNames, 'readonly');
+      } catch (error) {
+        // Same recovery as startTransaction, but restart the whole load so the
+        // schema checks above run against the reopened connection.
+        if (!recoverClosed || this.closeRequested || !isClosedConnectionError(error)) throw error;
+        await this.recoverClosedConnection(db);
+        return await this.loadSnapshot(false);
+      }
       const collectionNames = storeNames.filter((name) => name !== 'meta');
       const meta = tx.objectStore('meta');
       const collectionsRequest = Promise.all(collectionNames.map((name) => tx.objectStore(name).getAll()));
@@ -743,9 +809,8 @@ export class IdbPersistence implements Persistence {
     return data;
   }
   async batch(writes: PersistenceWrite[]): Promise<FactSequenceUpdate[]> {
-    if (!this.writeAccess) throw new Error('当前标签页是只读的，请切换到拥有写权限的标签页');
-    const db = await this.dbp;
-    const tx = db.transaction([...COLL_NAMES, 'meta'], 'readwrite');
+    if (!this.writeAccess) throw new Error(READ_ONLY_PERSISTENCE_MESSAGE);
+    const { tx } = await this.startTransaction([...COLL_NAMES, 'meta'], 'readwrite');
     const meta = tx.objectStore('meta');
     const seqUpdates: FactSequenceUpdate[] = [];
     let maxFactSeq: number | undefined;
