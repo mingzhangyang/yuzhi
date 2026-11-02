@@ -2,7 +2,8 @@
  * 小岛绘制性能基线（美术优化计划第 4.3 节、A4 / A5）。固定场景：8 座村落 + 3 座地标，
  * 夏季白天 10:30 与夜晚 21:30；桌面 1280×860 @2x、手机 390×844 @3x；CPU 不降速与 4 倍降速。
  *
- *   npm run build && npx vite preview --port 4173 --strictPort &
+ *   npm run build                                         # foreground, finish first
+ *   npx vite preview --port 4173 --strictPort              # terminal A, wait for ready
  *   node browser-tests/island-perf.mjs                 # 只测整帧
  *   PERF_LAYERS=1 node browser-tests/island-perf.mjs   # 再按图层拆分（A5 静态层缓存评估）
  *
@@ -16,11 +17,14 @@
  *
  * PERF_LAYERS=1 时，按「+flush」口径估算跳过某一类景物的成本，但须保留
  * 这些景物给 drawLights() 注册的夜间灯光。固定场景为无节日的 2026-07-14：
- * 若今后测试会随动画改变灯光注册的场景，需改成逐帧追踪而不能复用记录。
+ * 先逐帧记录完整绘制的灯光（包括萤火虫），再让完整绘制和省略图层的测试
+ * 使用同一套逐帧灯光数据，且两边都承担相同的重放开销。
+ * 仅估算图层绘制缓存的理论上限：光源注册本身仍可能需要动态维护。
  *
  * 环境变量：BASE_URL（默认 http://127.0.0.1:4173）、PW_CHANNEL、PERF_FRAMES（默认 120）、PERF_LAYERS、PERF_BATCH。
  */
 import { chromium } from 'playwright';
+import { captureFrameLights, measureFrameCost } from './island-perf-core.mjs';
 
 const baseURL = process.env.BASE_URL ?? 'http://127.0.0.1:4173';
 const channel = process.env.PW_CHANNEL ?? '';
@@ -39,7 +43,7 @@ const TIMES = [
   { name: 'night', hm: '21:30' },
 ];
 
-/** 按图层拆分时省略景物绘制但重放灯光登记；static 是「大部分帧不变」的一组 */
+/** 按图层拆分时省略景物绘制但保留完整逐帧灯光；static 为候选静态图层集合 */
 const LAYER_STUBS = {
   trees: ['drawTree'],
   mountains: ['drawMountain'],
@@ -78,107 +82,11 @@ async function seed(page) {
   });
 }
 
-/**
- * Each layer sample records painter light registrations in the unchanged frame,
- * then replays those registrations while skipping the painters. This keeps
- * drawLights() work in the night-time sample and detects changed call counts.
- */
-async function measure(page, flush, stubs = [], yieldFrames = true) {
-  return page.evaluate(
-    async ({ frames, warmup, flush, stubs, yieldFrames }) => {
-      const r = window.yuzhi.renderer;
-      const ctx = r.ctx;
-      window.__resetPerfFrame();
-
-      const installLightReplay = () => {
-        if (!stubs.length) return null;
-        const originals = new Map(stubs.map((name) => {
-          if (typeof r[name] !== 'function') throw new Error('Unknown painter: ' + name);
-          return [name, r[name]];
-        }));
-        const recorded = new Map(stubs.map((name) => [name, []]));
-        const restore = () => { for (const [name, fn] of originals) r[name] = fn; };
-        let depth = 0;
-        try {
-          for (const [name, fn] of originals) {
-            r[name] = function (...args) {
-              // If two stubbed painters nest, the outermost record owns all
-              // their lights and will replay them exactly once.
-              if (depth) return fn.apply(this, args);
-              const before = this.lights.length;
-              depth++;
-              try {
-                return fn.apply(this, args);
-              } finally {
-                depth--;
-                recorded.get(name).push(this.lights.slice(before).map((light) => [...light]));
-              }
-            };
-          }
-          r.draw();
-          const reference = r.lights.map((light) => [...light]);
-          const indices = new Map();
-          for (const name of originals.keys()) {
-            r[name] = function () {
-              const idx = indices.get(name) ?? 0;
-              const registrations = recorded.get(name)[idx];
-              if (!registrations) throw new Error('Painter calls changed: ' + name);
-              indices.set(name, idx + 1);
-              for (const light of registrations) this.lights.push([...light]);
-            };
-          }
-          const draw = () => {
-            for (const name of originals.keys()) indices.set(name, 0);
-            r.draw();
-            for (const name of originals.keys()) {
-              if (indices.get(name) !== recorded.get(name).length) {
-                throw new Error('Painter call count changed: ' + name);
-              }
-            }
-            if (r.lights.length !== reference.length || reference.some((light, i) =>
-              light.some((value, j) => r.lights[i][j] !== value))) {
-              throw new Error('Light registrations changed: invalid layer measurement');
-            }
-          };
-          draw(); // Preflight the replay against a full render.
-          ctx.getImageData(0, 0, 1, 1); // Flush setup rendering before timing starts.
-          return { draw, restore };
-        } catch (error) {
-          restore();
-          throw error;
-        }
-      };
-      const replay = installLightReplay();
-
-      let groundBuilds = 0;
-      const drawGround = r.drawGround;
-      r.drawGround = function (scene) {
-        const before = this.groundKey;
-        drawGround.call(this, scene);
-        if (this.groundKey !== before) groundBuilds++;
-      };
-      const times = [];
-      try {
-        for (let k = 0; k < warmup + frames; k++) {
-          if (yieldFrames || k === 0) await new Promise((res) => requestAnimationFrame(res));
-          const t0 = performance.now();
-          r.t += 1 / 30;
-          r.step(1 / 30);
-          if (replay) replay.draw();
-          else r.draw();
-          if (flush) ctx.getImageData(0, 0, 1, 1);
-          if (k >= warmup) times.push(performance.now() - t0);
-        }
-      } finally {
-        replay?.restore();
-        r.drawGround = drawGround;
-      }
-      const sorted = times.slice().sort((a, b) => a - b);
-      const q = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
-      return { median: q(0.5), p95: q(0.95), long: times.filter((t) => t > 50).length, groundBuilds };
-    },
-    { frames: FRAMES, warmup: WARMUP, flush, stubs, yieldFrames },
-  );
+/** Run the reusable, browser-side measurer. Source is also exercised by unit tests. */
+async function measure(page, flush, stubs = [], yieldFrames = true, preserveLights = false) {
+  return page.evaluate(measureFrameCost, {
+    frames: FRAMES, warmup: WARMUP, flush, stubs, yieldFrames, preserveLights,
+  });
 }
 
 const fmt = (x) => (x < 10 ? x.toFixed(1) : Math.round(x).toString());
@@ -270,9 +178,13 @@ try {
         const extra = batch ? ` ${fmt(batch.median)} / ${fmt(batch.p95)} / ${batch.long} |` : '';
         console.log(`| ${vpName} | ${rate}× | ${time.name} | ${fmt(a.median)} / ${fmt(a.p95)} | ${a.long} | ${fmt(b.median)} / ${fmt(b.p95)} | ${a.groundBuilds + b.groundBuilds} |${extra}`);
         if (LAYERS && rate === 4) {
-          const full = b.median;
+          // Capture each frame's full lighting once, outside timing. The normalized
+          // baseline and all layer omissions use the SAME drawLights adapter.
+          const recorded = await page.evaluate(captureFrameLights, { frames: FRAMES, warmup: WARMUP });
+          if (recorded.frames !== FRAMES + WARMUP) throw new Error('Incomplete lighting trace');
+          const full = (await measure(page, true, [], true, true)).median;
           for (const [layer, stubs] of Object.entries(LAYER_STUBS)) {
-            const m = await measure(page, true, stubs);
+            const m = await measure(page, true, stubs, true, true);
             layerRows.push(`| ${vpName} | ${time.name} | ${layer} | ${fmt(full - m.median)} | ${Math.round(((full - m.median) / full) * 100)}% |`);
           }
           layerRows.push(`| ${vpName} | ${time.name} | （整帧） | ${fmt(full)} | 100% |`);
@@ -282,7 +194,7 @@ try {
     }
   }
   if (layerRows.length) {
-    console.log('\n4× 降速、+flush 口径，去掉一类景物后整帧少掉的时间（中位数，毫秒）：');
+    console.log('\n4× 降速、+flush 口径；基线与省略图层均使用相同的逐帧完整灯光：');
     console.log('| 视口 | 时段 | 图层 | 每帧成本 | 占整帧 |');
     console.log('|---|---|---|---|---|');
     for (const row of layerRows) console.log(row);

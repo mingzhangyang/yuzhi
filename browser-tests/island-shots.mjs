@@ -3,8 +3,9 @@
  * 每期画面调整前后各跑一次，对比同名截图即可。id、Math.random 与动画时钟都已固定：
  * 截图前停掉 rAF 循环，按固定步长推进同样的帧数再画一帧，同一份代码两次运行得到同一张图。
  *
- *   npm run build && npx vite preview --port 4173 --strictPort &
- *   SHOT_DIR=shots/after node browser-tests/island-shots.mjs
+ *   npm run build                                  # foreground, wait for completion
+ *   npx vite preview --port 4173 --strictPort       # terminal A; wait for ready
+ *   SHOT_DIR=shots/after node browser-tests/island-shots.mjs # terminal B
  *   node browser-tests/shot-diff.mjs shots/before shots/after   # 逐像素对比两批截图
  *
  * 环境变量：BASE_URL（默认 http://127.0.0.1:4173）、PW_CHANNEL（默认空，用 Playwright 自带的

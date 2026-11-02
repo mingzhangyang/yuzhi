@@ -4,11 +4,12 @@
  *
  *   node browser-tests/shot-diff.mjs shots/before shots/after [diffDir]
  *
- * 给出 diffDir 时，为有差异的截图另存一张差异图：差异像素标红，其余像素淡化成灰。
+ * 给出专用 diffDir 时，为有差异的截图另存差异图。输出目录带管理清单，
+ * 重跑时仅清除上次自己生成的 PNG；非空的旧目录（无清单）会报错，以免误删用户文件。
  * 非空且所有同名截图完全一致时退出码为 0；空集、有差异、缺图或尺寸不同时为 1。
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { crc32, deflateSync, inflateSync } from 'node:zlib';
 
 function decodePng(buf) {
@@ -100,15 +101,54 @@ if (!beforeDir || !afterDir) {
   console.error('usage: node browser-tests/shot-diff.mjs <beforeDir> <afterDir> [diffDir]');
   process.exit(2);
 }
-const before = new Set(readdirSync(beforeDir).filter((f) => f.endsWith('.png')));
-const after = new Set(readdirSync(afterDir).filter((f) => f.endsWith('.png')));
+const pngNames = (dir) => new Set(readdirSync(dir, { withFileTypes: true })
+  .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith('.png'))
+  .map((entry) => entry.name));
+const before = pngNames(beforeDir);
+const after = pngNames(afterDir);
+const names = [...new Set([...before, ...after])].sort();
+
+// Manage only our own previously generated diff PNGs. A manifest also makes
+// interrupted comparisons recoverable: write the candidate names before drawing.
+if (diffDir) {
+  mkdirSync(diffDir, { recursive: true });
+  const output = realpathSync(diffDir);
+  const isParentOf = (input) => {
+    const r = relative(output, realpathSync(input));
+    return r === '' || (r !== '..' && !r.startsWith('..' + sep) && !isAbsolute(r));
+  };
+  if (isParentOf(beforeDir) || isParentOf(afterDir)) {
+    throw new Error('diffDir must not be an input directory or a parent of one');
+  }
+
+  const manifestPath = join(diffDir, '.shot-diff-output.json');
+  let priorNames = [];
+  if (existsSync(manifestPath)) {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest.version !== 1 || !Array.isArray(manifest.files) ||
+      manifest.files.some((name) => typeof name !== 'string' || !/^[^/\\]+\.png$/.test(name))) {
+      throw new Error('Invalid shot-diff output manifest; refusing to clean directory');
+    }
+    priorNames = manifest.files;
+  }
+  const owned = new Set(priorNames);
+  const foreign = [...pngNames(diffDir)].filter((name) => !owned.has(name));
+  if (foreign.length) {
+    throw new Error('diffDir contains PNGs not owned by shot-diff; use an empty dedicated directory: ' + foreign.join(', '));
+  }
+  for (const name of owned) {
+    const file = join(diffDir, name);
+    if (existsSync(file)) unlinkSync(file);
+  }
+  writeFileSync(manifestPath, JSON.stringify({ version: 1, files: names }, null, 2) + '\n');
+}
+
 if (!before.size || !after.size) {
   console.error('Expected non-empty PNG sets (before: ' + before.size + ', after: ' + after.size + ').');
   process.exit(1);
 }
 let failed = false;
-if (diffDir) mkdirSync(diffDir, { recursive: true });
-for (const name of [...new Set([...before, ...after])].sort()) {
+for (const name of names) {
   if (!before.has(name) || !after.has(name)) {
     console.log(`${name}: only in ${before.has(name) ? beforeDir : afterDir}`);
     failed = true;
