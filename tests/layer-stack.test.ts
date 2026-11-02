@@ -65,11 +65,11 @@ class FakeElement {
     return false;
   }
 
-  querySelectorAll() {
-    return this.children.flatMap((child) => [child, ...child.querySelectorAll()]);
+  querySelectorAll(): FakeElement[] {
+    return this.children.flatMap((child): FakeElement[] => [child, ...child.querySelectorAll()]);
   }
 
-  querySelector(selector: string) {
+  querySelector(selector: string): FakeElement | null {
     return selector === '[role="dialog"]'
       ? this.querySelectorAll().find((child) => child.roleDialog) ?? null
       : null;
