@@ -461,11 +461,9 @@ export abstract class IslandInteraction extends IslandViewport {
     const s = this.scene;
     if (!s) return null;
 
-    // Labels paint on top: their actual visible capsules take precedence over
-    // the structures below, while hidden labels have no hit targets.
-    const label = this.placedLabelHitAt(pt);
-    if (label) return label;
-    // 固定命中层级：前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 宽泛区域。
+    // Preserve established foreground hit priority on cramped mobile maps.
+    // A shifted label must never steal a tap from a visible walker or bottle.
+    // 前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 标签 > 宽泛区域。
     const walker = this.walkerHitAt(pt);
     if (walker) return walker;
     if (this.dockHitAt(pt)) return { kind: 'dock' };
@@ -473,6 +471,10 @@ export abstract class IslandInteraction extends IslandViewport {
     if (drift) return drift;
     const agendaHit = this.agendaHitAt(pt);
     if (agendaHit) return agendaHit;
+    // Shared painted label bounds, after small foreground objects but
+    // before broad map regions. Hidden optional labels have no hit targets.
+    const label = this.placedLabelHitAt(pt);
+    if (label) return label;
     // 画在最前面的轮廓若带着点击目标（地标），就选它；被房子、树挡住时仍按下面的地面规则判断
     let front: (typeof this.occluders)[number] | null = null;
     for (const o of this.occluders) if ((!front || o.d >= front.d) && insidePolygon(pt, o.poly)) front = o;
@@ -546,9 +548,11 @@ export abstract class IslandInteraction extends IslandViewport {
     // clicks obey foreground z-order, while inspection can still describe a
     // visible agenda prop or bottle even when a moving walker crosses it.
     const labelHit = this.placedLabelHitAt(pt);
-    const inspectable = labelHit?.kind === 'agenda' ? labelHit
-      : labelHit?.kind === 'cultivation' ? null
-        : this.driftHitAt(pt) ?? this.agendaHitAt(pt);
+    // Inspecting a drift bottle must keep its original priority over
+    // overlapping moved labels, including on narrow mobile screens.
+    const inspectable = this.driftHitAt(pt)
+      ?? (labelHit?.kind === 'agenda' ? labelHit
+        : labelHit?.kind === 'cultivation' ? null : this.agendaHitAt(pt));
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
