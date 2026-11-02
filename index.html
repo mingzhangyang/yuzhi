@@ -48,9 +48,6 @@
   "image": "https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg"
 }
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <div class="wrap">
@@ -70,7 +67,7 @@
       <button class="btn" id="newBtn" data-i18n="shell.new">＋ 新建</button>
       <button class="btn" id="calBtn" data-i18n="shell.calendar">日历</button>
       <button class="btn" id="langBtn" aria-label="Switch to English" hidden>EN</button>
-      <button class="btn" id="moreBtn" aria-haspopup="menu" aria-label="更多" data-i18n-aria-label="shell.more">⋯</button>
+      <button class="btn" id="moreBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="menu" aria-label="更多" data-i18n-aria-label="shell.more">⋯</button>
       <button class="btn dusk" id="settleBtn" data-i18n="shell.settle">晚间结算</button>
     </div>
   </header>
@@ -114,9 +111,10 @@
     </section>
 
     <aside class="card panel right" id="tracker" aria-label="追踪栏" data-i18n-aria-label="shell.tracker">
-      <button class="sheet-handle" id="sheetHandle"><span id="sheetTitle" data-i18n="shell.tracker">追踪栏</span><small id="sheetSub"></small></button>
+      <button class="sheet-handle" id="sheetHandle" aria-expanded="false" aria-controls="trackerBody"><span id="sheetTitle" data-i18n="shell.tracker">追踪栏</span><small id="sheetSub"></small></button>
       <div id="trackerBody"></div>
     </aside>
+    <div class="sheet-back" id="sheetBack" hidden></div>
   </div>
 
   <details class="card how">
@@ -141,7 +139,10 @@
   <div class="cbox card" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="ceremonyT" id="ceremonyBox"></div>
 </div>
 
-<div class="menu card" id="menu" role="menu" hidden>
+<div class="menu card" id="menu" role="menu" aria-labelledby="moreBtn" hidden>
+  <button data-m="calendar" class="menu-compact" role="menuitem" data-i18n="menu.calendar">日历：订阅链接或上传 .ics</button>
+  <button data-m="language" class="menu-compact" role="menuitem" data-i18n="menu.language" lang="en">Switch to English</button>
+  <hr class="menu-compact">
   <button data-m="settings" role="menuitem" data-i18n="menu.settings">设置：工作时段、外观与备份</button>
   <button data-m="export" role="menuitem" data-i18n="menu.export">导出备份（JSON）</button>
   <button data-m="import" role="menuitem" data-i18n="menu.import">导入备份…</button>

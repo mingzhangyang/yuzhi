@@ -22,6 +22,7 @@ import { interruptions, lastProgressAt, type TaskView } from '../logic/read-mode
 import { summaryHTML } from './ceremony';
 import { cultivationAreas, cultivationState } from '../logic/cultivation';
 import { bindDateSelects, dateSelect, readDate, restoreDateSelectValue } from './date-select';
+import { BottomSheet } from './sheet';
 
 export type View =
   | { kind: 'overview' }
@@ -86,11 +87,13 @@ export class Tracker {
   view: View = { kind: 'overview' };
   private body = $('trackerBody');
   private hist: View[] = [];
+  /** 手机上从底部拉起的面板；桌面上是普通侧栏 */
+  readonly sheet: BottomSheet;
 
   constructor(private store: Store, private hooks: TrackerHooks) {
     this.body.addEventListener('click', (e) => this.onClick(e));
     this.body.addEventListener('submit', (e) => this.onSubmit(e));
-    $('sheetHandle').addEventListener('click', () => $('tracker').classList.toggle('open'));
+    this.sheet = new BottomSheet();
   }
 
   open(v: View, push = true) {
@@ -99,7 +102,7 @@ export class Tracker {
     this.view = v;
     this.render();
     this.body.parentElement!.scrollTop = 0;
-    $('tracker').classList.add('open');
+    this.sheet.open();
     this.hooks.onViewChange(v);
   }
 

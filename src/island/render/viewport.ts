@@ -73,12 +73,32 @@ export abstract class IslandViewport {
 
 
   zoomBy(f: number) {
-    this.view.zoom = clamp(this.view.zoom * f, 1, 2.8);
-    if (this.view.zoom <= 1.01) {
-      this.view.panX = 0;
-      this.view.panY = 0;
+    this.zoomAt(f);
+  }
+
+  /**
+   * 以屏幕上的一点为中心缩放（双指的中点、滚轮下的光标）：那一点下面的景物不动。
+   * 不给点时以画面中心缩放；缩回 1 倍时复位平移。
+   */
+  zoomAt(f: number, pt?: { x: number; y: number }) {
+    const v = this.view;
+    const before = { tw: v.tw, ox: v.ox, oy: v.oy };
+    v.zoom = clamp(v.zoom * f, 1, 2.8);
+    if (v.zoom <= 1.01) {
+      v.panX = 0;
+      v.panY = 0;
+      this.layout();
+      return;
     }
     this.layout();
+    if (pt && before.tw > 0) {
+      const k = v.tw / before.tw;
+      const ox = pt.x - (pt.x - before.ox) * k;
+      const oy = pt.y - (pt.y - before.oy) * k;
+      v.panX = ox - v.w / 2;
+      v.panY = oy - (v.h / 2 - ((this.map.N - 1) * v.tw) / 4);
+      this.layout();
+    }
   }
 
   resetView() {

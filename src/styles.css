@@ -80,7 +80,8 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .stat { padding: 12px 14px 11px; min-width: 0; border-radius: 12px; }
 .stat .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
-.stat .top span:last-child { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .top span:first-child { flex: none; white-space: nowrap; }
+.stat .top span:last-child { min-width: 0; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat .mid { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin: 3px 0 2px; }
 .stat .val { font-size: 26px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stat .val small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; }
@@ -134,8 +135,8 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .empty { font-size: 12px; color: var(--faint); }
 
 /* 右侧追踪栏 */
-.right { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
-.sheet-handle { display: none; }
+.right { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: auto; }
+.sheet-handle, .sheet-back { display: none; }
 .who { display: flex; gap: 12px; align-items: center; margin: 10px 0 8px; }
 .emblem { width: 50px; height: 50px; border-radius: 12px; flex: none; border: 1px solid var(--line); display: grid; place-items: center; }
 .emblem svg { width: 100%; height: 100%; display: block; border-radius: 11px; }
@@ -205,7 +206,7 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 /* 对话框 */
 .dlg-back { position: fixed; inset: 0; z-index: 50; background: rgba(22,28,16,.42); display: flex; align-items: center; justify-content: center; padding: 20px; }
 .dlg, .sbox, .cbox { outline: none; }
-.dlg { width: 100%; max-width: 480px; max-height: 86vh; overflow: auto; padding: 20px 20px 18px; border-radius: 16px; }
+.dlg { width: 100%; max-width: 480px; max-height: 86vh; max-height: 86dvh; overflow: auto; padding: 20px 20px 18px; border-radius: 16px; }
 .dlg .kick { font-size: 12px; color: var(--warn); font-weight: 600; }
 .dlg h2 { font-family: var(--font-display); font-size: 21px; margin: 4px 0 8px; line-height: 1.35; }
 .dlg p { margin: 0 0 8px; line-height: 1.7; }
@@ -332,6 +333,9 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
 .menu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .menu button:hover { background: var(--chip); }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.menu button:disabled { opacity: .5; cursor: default; }
+/* 窄屏把「日历」「EN」收进 ⋯ 菜单；宽屏它们在顶栏上，菜单里不重复 */
+@media (min-width: 721px) { .menu .menu-compact { display: none; } }
 
 @media (prefers-reduced-motion: reduce) { .toast, .tip, .scard, .brick { transition: none; } .mapinfo { animation: none; } .ceremony, .cbox { animation: none; } }
 
@@ -356,29 +360,47 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
   }
 }
 
-/* 手机：地图在上，指标两列，追踪栏变成从底部拉起的面板 */
+/* 手机：顶栏一行、指标横向滑动、地图尽量在首屏；追踪栏变成从底部拉起的面板 */
 @media (max-width: 720px) {
-  .wrap { padding: 12px 16px 120px; }
-  header { align-items: flex-start; margin-bottom: 10px; }
+  :root { --sheet-peek: calc(64px + env(safe-area-inset-bottom, 0px)); }
+  .wrap { padding: 10px 16px 120px; }
+  /* 顶栏：品牌 + 新建 / ⋯ / 晚间结算 一行，日期另起一行；日历和语言在 ⋯ 菜单里 */
+  header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px 6px; margin-bottom: 10px; }
+  .brand { grid-column: 1; grid-row: 1; }
+  .controls { display: contents; }
+  #calBtn, #langBtn { display: none; }
+  .controls .btn { min-height: 38px; padding: 6px 10px; white-space: nowrap; }
+  .date { grid-column: 1 / -1; grid-row: 2; padding: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand-title { gap: 8px; }
+  .brand-mark { width: 38px; height: 38px; border-radius: 10px; }
+  .brand-en { font-size: 9.5px; }
   .sub { display: none; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .stat { padding: 9px 11px 8px; }
+  /* 指标：一行横向滑动，露出下一张的边，提示还能滑 */
+  .stats { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -16px 10px; padding: 0 16px 2px; scroll-padding: 0 16px; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .stats::-webkit-scrollbar { display: none; }
+  .stat { flex: 0 0 min(46%, 210px); scroll-snap-align: start; padding: 9px 11px 8px; }
   .stat .val { font-size: 21px; }
   .stat svg { width: 52px; height: 22px; }
+  .stat .foot { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
   .main { grid-template-columns: minmax(0, 1fr); }
   .mapcard { padding: 10px; }
   .mapwrap { aspect-ratio: 1 / 0.8; }
-  .right { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; max-height: 82vh; border-radius: 18px 18px 0 0; transform: translateY(calc(100% - 64px - env(safe-area-inset-bottom, 0px))); transition: transform .28s ease; padding-top: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 30px rgba(30,30,10,.16); overscroll-behavior: contain; }
+  .zoom button { width: 36px; height: 36px; }
+  .right { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 40; max-height: 82vh; max-height: 82dvh; border-radius: 18px 18px 0 0; transform: translateY(calc(100% - var(--sheet-peek))); transition: transform .28s ease; padding-top: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 30px rgba(30,30,10,.16); overscroll-behavior: contain; }
   .right.open { transform: translateY(0); }
-  .sheet-handle { display: block; position: sticky; top: 0; z-index: 2; background: var(--panel); margin: 0 -14px 4px; padding: 8px 14px 6px; border: 0; width: calc(100% + 28px); text-align: left; cursor: pointer; }
+  .right.dragging { transition: none; }
+  .sheet-back { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(22,28,16,.26); animation: cfade .2s ease; }
+  .sheet-handle { display: block; position: sticky; top: 0; z-index: 2; background: var(--panel); margin: 0 -14px 4px; padding: 8px 14px 10px; border: 0; width: calc(100% + 28px); min-height: 56px; text-align: left; cursor: pointer; touch-action: none; }
   .sheet-handle::before { content: ""; display: block; width: 38px; height: 4px; border-radius: 4px; background: var(--line); margin: 0 auto 8px; }
   .sheet-handle span { font-size: 13px; font-weight: 600; }
   .sheet-handle small { color: var(--faint); font-size: 11.5px; margin-left: 6px; }
+  /* 把手上已经写着当前视图的标题，正文里第一行同样的标题不再重复 */
+  #trackerBody > .ptitle:first-child { display: none; }
   .settle { padding: 0; align-items: flex-end; }
-  .sbox { max-width: none; max-height: 96vh; height: 96vh; border-radius: 18px 18px 0 0; }
+  .sbox { max-width: none; max-height: 96vh; max-height: 96dvh; height: 96vh; height: 96dvh; border-radius: 18px 18px 0 0; }
   .sfoot { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .ceremony { padding: 0; align-items: flex-end; }
-  .cbox { max-width: none; max-height: 94vh; border-radius: 18px 18px 0 0; }
+  .cbox { max-width: none; max-height: 94vh; max-height: 94dvh; border-radius: 18px 18px 0 0; }
   .cfoot { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .dlg-back { align-items: flex-end; padding: 0; }
   .dlg { border-radius: 18px 18px 0 0; max-height: min(88dvh, 88vh); padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); overscroll-behavior: contain; }
@@ -394,5 +416,7 @@ details.how p { margin: 8px 0 0; max-width: 76ch; }
   .capture-actions .primary { min-width: 118px; }
   .field.diary-writing textarea { min-height: min(38dvh, 320px); resize: none; }
   .diary-date-row select { min-height: 44px; }
-  .scard .st { display: none; }
+  /* 结算：滑动之外，✓ ½ ✕ 按钮也留着——读屏和不方便滑动的人要靠它们逐条确认 */
+  .scard .st { gap: 6px; }
+  .scard .st button { width: 36px; height: 36px; font-size: 14px; }
 }

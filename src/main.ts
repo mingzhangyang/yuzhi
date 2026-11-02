@@ -25,6 +25,9 @@ import { formatChronicleLine } from './history';
 import { deliverBackup, markBackupExported, SafetyNoticeBar } from './ui/safety';
 import { AutoBackup } from './ui/auto-backup';
 
+// 标题衬线字体按需异步加载：不阻塞首屏，加载完成前用系统宋体 / 衬线回退（font-display: swap）。
+void import('./fonts.css');
+
 async function boot() {
   initI18n({ detectBrowser: true });
   initModal();
@@ -65,7 +68,7 @@ async function boot() {
       const button = document.getElementById(id) as HTMLButtonElement | null;
       if (button) button.disabled = readOnly;
     }
-    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"]')
+    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"], #menu [data-m="calendar"]')
       .forEach((button) => { button.disabled = readOnly; });
     document.body.dataset.readOnly = readOnly ? 'true' : 'false';
   };
@@ -224,6 +227,9 @@ async function boot() {
     setText(button, t('language.switch'));
     button.setAttribute('aria-label', t('language.switchAria'));
     button.hidden = false;
+    // 菜单里的同一项（窄屏用）：文字是目标语言，lang 也跟着目标语言走，读屏才会用对发音。
+    const item = document.querySelector<HTMLElement>('#menu [data-m="language"]');
+    if (item) item.lang = getLocale() === 'zh-CN' ? 'en' : 'zh-CN';
   };
   buildStats();
   renderLegend();
@@ -364,6 +370,8 @@ async function boot() {
   const showInfo = (pt: { x: number; y: number }) => showInspection(renderer.inspect(pt));
 
   mapCanvas.addEventListener('pointerdown', hideInfo);
+  // 捏合 / Ctrl+滚轮缩放后，说明卡片的位置已经不对了。
+  mapCanvas.addEventListener('wheel', (e) => { if (e.ctrlKey || e.metaKey) hideInfo(); }, { passive: true });
   mapCanvas.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && currentInspection?.target?.kind === 'drift') {
       e.preventDefault();
@@ -631,29 +639,36 @@ async function boot() {
   }
   $('calBtn').onclick = () => openCalendar(store, afterImport);
   const menu = $('menu');
-  $('moreBtn').onclick = (e) => {
+  const moreBtn = $('moreBtn');
+  const setMenuOpen = (open: boolean) => {
+    menu.hidden = !open;
+    moreBtn.setAttribute('aria-expanded', String(open));
+  };
+  moreBtn.onclick = (e) => {
     e.stopPropagation();
     if (!menu.hidden) {
-      menu.hidden = true;
+      setMenuOpen(false);
       return;
     }
-    const r = $('moreBtn').getBoundingClientRect();
-    menu.hidden = false;
+    const r = moreBtn.getBoundingClientRect();
+    setMenuOpen(true);
     menu.style.top = `${r.bottom + window.scrollY + 6}px`;
     menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.right - menu.offsetWidth))}px`;
   };
   document.addEventListener('click', (e) => {
-    if (!menu.hidden && !menu.contains(e.target as Node)) menu.hidden = true;
+    if (!menu.hidden && !menu.contains(e.target as Node)) setMenuOpen(false);
   });
   menu.addEventListener('click', async (e) => {
     const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
     if (!m) return;
-    menu.hidden = true;
+    setMenuOpen(false);
     if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup });
     else if (m === 'export') await exportFlow();
     else if (m === 'import') await importFlow();
     else if (m === 'archive') tracker.open({ kind: 'archive' });
     else if (m === 'demo') seedDemo(store);
+    else if (m === 'calendar') openCalendar(store, afterImport);
+    else if (m === 'language') toggleLocale();
   });
 
   applyTheme();

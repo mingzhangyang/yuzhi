@@ -20,5 +20,9 @@ function icsProxyDev(): Plugin {
 
 export default defineConfig({
   plugins: [icsProxyDev()],
+  build: {
+    // 字体分片一律作为独立文件：内联进 CSS 会让每个页面都背上用不到的字形。
+    assetsInlineLimit: (file) => (file.endsWith('.woff2') ? false : undefined),
+  },
   test: { environment: 'node' },
 });
