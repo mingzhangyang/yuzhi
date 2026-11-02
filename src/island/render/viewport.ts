@@ -24,6 +24,19 @@ export abstract class IslandViewport {
   protected theme: RenderTheme = { label: '#fff', ink: '#263022', line: '#dfe2d2', accent: '#4f7136', accentInk: '#fff', sea: '#a9d3dc', seaDeep: '#8cc0cc' };
   protected t = 0;
   protected calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** 画布文字与页面同一套无衬线字体（--font-sans），在 readTheme 时读取 */
+  protected fontFamily = '-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  /**
+   * 满帧到什么时候（performance.now 毫秒）。小岛平时是环境动画，30 帧足够；
+   * 拖动、缩放、场景变化和落砖光圈期间临时满帧，手感不打折。
+   */
+  protected boostUntil = 0;
+  protected boost(ms = 1500) {
+    const now = typeof performance !== 'undefined' ? performance.now() : 0;
+    this.boostUntil = Math.max(this.boostUntil, now + ms);
+  }
+  /** measureText 很贵：标签每帧都要量，按「字体 + 文本」缓存宽度 */
+  private widths = new Map<string, number>();
 
   constructor(protected canvas: HTMLCanvasElement, protected wrap: HTMLElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -43,17 +56,59 @@ export abstract class IslandViewport {
       sea: g('--sea', '#a9d3dc'),
       seaDeep: g('--sea-deep', '#8cc0cc'),
     };
+    this.fontFamily = g('--font-sans', this.fontFamily);
+    this.widths.clear();
     this.onThemeChanged();
+  }
+
+  protected font(weight: number, size: number): string {
+    return `${weight} ${size}px ${this.fontFamily}`;
+  }
+
+  protected textWidth(font: string, text: string): number {
+    const key = `${font}\u0000${text}`;
+    let w = this.widths.get(key);
+    if (w === undefined) {
+      const c = this.ctx;
+      c.save();
+      c.font = font;
+      w = c.measureText(text).width;
+      c.restore();
+      if (this.widths.size > 400) this.widths.clear();
+      this.widths.set(key, w);
+    }
+    return w;
   }
 
 
   zoomBy(f: number) {
-    this.view.zoom = clamp(this.view.zoom * f, 1, 2.8);
-    if (this.view.zoom <= 1.01) {
-      this.view.panX = 0;
-      this.view.panY = 0;
+    this.zoomAt(f);
+  }
+
+  /**
+   * 以屏幕上的一点为中心缩放（双指的中点、滚轮下的光标）：那一点下面的景物不动。
+   * 不给点时以画面中心缩放；缩回 1 倍时复位平移。
+   */
+  zoomAt(f: number, pt?: { x: number; y: number }) {
+    this.boost();
+    const v = this.view;
+    const before = { tw: v.tw, ox: v.ox, oy: v.oy };
+    v.zoom = clamp(v.zoom * f, 1, 2.8);
+    if (v.zoom <= 1.01) {
+      v.panX = 0;
+      v.panY = 0;
+      this.layout();
+      return;
     }
     this.layout();
+    if (pt && before.tw > 0) {
+      const k = v.tw / before.tw;
+      const ox = pt.x - (pt.x - before.ox) * k;
+      const oy = pt.y - (pt.y - before.oy) * k;
+      v.panX = ox - v.w / 2;
+      v.panY = oy - (v.h / 2 - ((this.map.N - 1) * v.tw) / 4);
+      this.layout();
+    }
   }
 
   resetView() {

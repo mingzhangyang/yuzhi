@@ -15,6 +15,7 @@ export const uiZh = {
   'common.history': '一生之书',
   'common.versionHistory': '版本历史',
   'common.saved': '已保存',
+  'common.undo': '撤销',
 
   'dateSelect.none': '不定日期',
   'dateSelect.nextMonday': '下周一（{date}）',
@@ -43,6 +44,7 @@ export const uiZh = {
   'settle.catchUpKick': '海雾里的一天 · 补上记录',
   'settle.eveningKick': '黄昏 · 晚间结算',
   'settle.reviewed': '已结算',
+  'settle.fogTag': '雾',
   'settle.progress': '{count} 条 · 已确认 {confirmed}',
   'settle.allDone': '全部做了',
   'settle.empty': '这一天没有排上日期的任务，也没有日历事件。',
@@ -301,6 +303,7 @@ export const uiEn: Record<UiMessageKey, string> = {
   'common.history': 'Life Book',
   'common.versionHistory': 'Version history',
   'common.saved': 'Saved',
+  'common.undo': 'Undo',
 
   'dateSelect.none': 'No date',
   'dateSelect.nextMonday': 'Next Monday ({date})',
@@ -329,6 +332,7 @@ export const uiEn: Record<UiMessageKey, string> = {
   'settle.catchUpKick': 'A day in the fog · Catch up',
   'settle.eveningKick': 'Dusk · Evening review',
   'settle.reviewed': 'Reviewed',
+  'settle.fogTag': 'fog',
   'settle.progress': '{count} {count|item|items} · {confirmed} confirmed',
   'settle.allDone': 'Mark all done',
   'settle.empty': 'No dated tasks or calendar events were scheduled for this day.',

@@ -6,13 +6,14 @@
  */
 import { dayLight } from './ambience';
 import { tileHash } from './map';
-import type { LandmarkView, VillageView, Walker } from './render/model';
+import type { Hit, LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
 import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
-import { HOUSE_SCALE, houseHash, houseVariant, personSize, SNOW, WARM } from './render/style';
+import { HOUSE_SCALE, houseHash, houseVariant, MARKER, personSize, SNOW, WARM } from './render/style';
 import { hash, mix, shade } from './render/utils';
 import { cultivationOutline, drawCultivationArea } from './render/cultivation';
+import { layoutLabels, placedLabelBounds, type LabelRequest } from './render/label-layout';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
 function rectOutline(x: number, y: number, w: number, h: number, below = 0): [number, number][] {
@@ -30,29 +31,68 @@ export { mix, shade } from './render/utils';
 export class IslandRenderer extends IslandEffectsPainter {
   private raf = 0;
   private last = 0;
+  /** start() 之后为 true；stop() 是硬停，遮挡结束也不会自己恢复 */
+  private running = false;
+  /** 画面完全不可见（滚出视口等）的原因；部分遮挡时仍要重画可交互区域。 */
+  private readonly hiddenBy = new Set<string>();
 
   constructor(canvas: HTMLCanvasElement, wrap: HTMLElement) {
     super(canvas, wrap);
     this.readTheme();
     this.bindInteraction();
     this.resize();
+    // 地图滚出视口时不必每帧重画（手机上省电、不发热）；回到视口立刻恢复。
+    if (typeof IntersectionObserver === 'function') {
+      new IntersectionObserver((entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry) this.setOccluded('offscreen', !entry.isIntersecting);
+      }).observe(canvas);
+    }
   }
 
   start() {
-    const frame = (now: number) => {
-      const dt = Math.min(0.1, (now - (this.last || now)) / 1000);
-      this.last = now;
-      this.t += dt;
-      this.step(dt);
-      this.draw();
-      this.raf = requestAnimationFrame(frame);
-    };
-    this.raf = requestAnimationFrame(frame);
+    this.running = true;
+    this.schedule();
   }
 
   stop() {
+    this.running = false;
     cancelAnimationFrame(this.raf);
+    this.raf = 0;
   }
+
+  /** 某个原因让画面看不见 / 重新看得见；所有原因都解除后才恢复动画 */
+  setOccluded(reason: string, hidden: boolean) {
+    if (hidden) this.hiddenBy.add(reason);
+    else this.hiddenBy.delete(reason);
+    if (this.hiddenBy.size) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+    } else {
+      this.schedule();
+    }
+  }
+
+  private schedule() {
+    if (!this.running || this.raf || this.hiddenBy.size) return;
+    // 暂停期间的时间不补算：恢复后的第一帧 dt 为 0，小人不会瞬移。
+    this.last = 0;
+    this.raf = requestAnimationFrame(this.frame);
+  }
+
+  private readonly frame = (now: number) => {
+    this.raf = 0;
+    if (!this.running || this.hiddenBy.size) return;
+    this.raf = requestAnimationFrame(this.frame);
+    // 平时 30 帧（减少动效时 20 帧）；交互和过渡期间满帧。
+    const gap = now < this.boostUntil ? 0 : 1000 / (this.calm ? 20 : 30);
+    if (this.last && now - this.last < gap - 4) return;
+    const dt = Math.min(0.1, (now - (this.last || now)) / 1000);
+    this.last = now;
+    this.t += dt;
+    this.step(dt);
+    this.draw();
+  };
 
   private draw() {
     const s = this.scene;
@@ -125,7 +165,7 @@ export class IslandRenderer extends IslandEffectsPainter {
       c.fillRect(pd[0] - tw * 0.015, pd[1], tw * 0.03, tw * 0.16);
       c.fillRect(pc[0] - tw * 0.015, pc[1], tw * 0.03, tw * 0.16);
       this.poly('#6b4a30', pa[0], pa[1] + tw * 0.06, pb[0], pb[1] + tw * 0.06, pc[0], pc[1] + tw * 0.06, pd[0], pd[1] + tw * 0.06);
-      this.poly(a.cover > 0.4 ? mix('#a8794a', SNOW, 0.6) : '#a8794a', pa[0], pa[1], pb[0], pb[1], pc[0], pc[1], pd[0], pd[1]);
+      this.poly(a.cover > 0.4 ? mix(MARKER.dock, SNOW, 0.6) : MARKER.dock, pa[0], pa[1], pb[0], pb[1], pc[0], pc[1], pd[0], pd[1]);
       // 木板缝
       c.strokeStyle = 'rgba(80,50,30,.35)';
       c.lineWidth = Math.max(0.5, tw * 0.012);
@@ -195,7 +235,7 @@ export class IslandRenderer extends IslandEffectsPainter {
       if (t === m.granary) put(d, () => this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy), rectOutline(x, y, tw * 0.17, tw * 0.72, tw * 0.07));
       if (t === m.chores) {
         put(d, () => {
-          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, '#8a8578', '#e3dccb', false, false, !!s.chores.live);
+          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, MARKER.chores, '#e3dccb', false, false, !!s.chores.live);
           this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
           // 即将开始：扫帚靠在门口；进行中：扫帚动起来
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
@@ -374,29 +414,44 @@ export class IslandRenderer extends IslandEffectsPainter {
       c.fillRect(0, 0, v.w, v.h);
     }
 
-    // 标签
+    // 标签：先收集，再按优先级避让，最后按优先级从低到高画（重要的压在上面）
     const sel = s.selected;
     // 手机上没放大时，标签收成小号胶囊（compactLabels），选中的那个照常显示
     const compact = this.compactLabels();
+    const labels: (LabelRequest & { hit: NonNullable<Hit>; draw: (dy: number) => void })[] = [];
+    const want = (
+      id: string, hit: NonNullable<Hit>, x: number, y: number, text: string, dot: string | null,
+      hl: boolean, muted: boolean, small: boolean, priority: number, optional = false,
+    ) => {
+      const { bw, bh } = this.labelBox(text, !!dot, small);
+      labels.push({
+        id, hit, x, y, w: bw, h: bh,
+        priority: hl ? 100 : priority,
+        optional: optional && !hl,
+        draw: (dy) => this.label(x, y + dy, text, dot, hl, muted, small),
+      });
+    };
     for (const vv of s.villages) {
-      const [x, y] = this.villageLabelAnchor(vv);
+      const [x, y] = this.villageLabelBase(vv);
       const shown = this.villageLabel(vv);
-      this.label(x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact);
+      want(`village:${vv.projectId}`,
+        this.labelIsAgendaEntry(vv) ? { kind: 'agenda', target: vv.projectId } : { kind: 'project', id: vv.projectId },
+        x, y, shown.text, vv.roof, sel?.kind === 'project' && sel.id === vv.projectId, vv.stage >= 2, shown.compact, 50);
     }
     for (const area of s.cultivation) {
       const site = m.cultivation[area.kind];
       const [x, y] = this.iso(site.i, site.j);
-      this.label(x, y - tw * 0.62, `${area.name} · ${area.level}/4`, null, false, false, compact);
+      want(`cultivation:${area.kind}`, { kind: 'cultivation', area: area.kind }, x, y - tw * 0.62, `${area.name} · ${area.level}/4`, null, false, false, compact, 20, true);
     }
     {
       const [x, y] = this.iso(m.dock.i + 0.2, m.dock.j + m.pierLen + 0.6);
-      this.label(x, y + tw * 0.2, s.dockLabel, null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock');
+      want('dock', { kind: 'dock' }, x, y + tw * 0.2, s.dockLabel, null, sel?.kind === 'dock', false, compact && sel?.kind !== 'dock', 40);
       const [gx, gy] = this.iso(m.granary.i, m.granary.j);
-      this.label(gx, gy + tw * 0.32, s.granaryLabel, '#e2ad2f', sel?.kind === 'granary', false, compact && sel?.kind !== 'granary');
+      want('granary', { kind: 'granary' }, gx, gy + tw * 0.32, s.granaryLabel, MARKER.granary, sel?.kind === 'granary', false, compact && sel?.kind !== 'granary', 40);
       const ch = s.chores;
       if (ch.count || ch.live || ch.soon || ch.later || ch.ended) {
         const [cx2, cy2] = this.iso(m.chores.i, m.chores.j);
-        this.label(cx2, cy2 + tw * 0.3, this.choresLabelText(ch), '#8a8578', sel?.kind === 'chores', true, compact && sel?.kind !== 'chores');
+        want('chores', { kind: 'chores' }, cx2, cy2 + tw * 0.3, this.choresLabelText(ch), MARKER.chores, sel?.kind === 'chores', true, compact && sel?.kind !== 'chores', 30);
       }
     }
     for (const l of s.landmarks) {
@@ -405,13 +460,21 @@ export class IslandRenderer extends IslandEffectsPainter {
       const hl = sel?.kind === 'project' && sel.id === l.projectId;
       if (!hl && v.zoom < 1.4) continue;
       const [x, y] = this.iso(site.i, site.j);
-      this.label(x, y - tw * 0.95, l.name, l.roof, hl, !hl);
+      want(`landmark:${l.projectId}`, { kind: 'project', id: l.projectId }, x, y - tw * 0.95, l.name, l.roof, hl, !hl, false, 10, true);
+    }
+    const bounds = placedLabelBounds(labels, layoutLabels(labels));
+    this.placedLabels.clear();
+    for (const q of labels.slice().sort((a, b) => a.priority - b.priority)) {
+      const placed = bounds.get(q.id);
+      if (!placed) continue;
+      this.placedLabels.set(q.id, { bounds: placed, hit: q.hit });
+      q.draw(placed.y - q.y);
     }
     if (selW) {
       const [p, x, y] = selW;
-      c.font = `600 ${tw < 30 ? 10.5 : 12}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+      c.font = this.font(600, tw < 30 ? 10.5 : 12);
       const txt = p.title.length > 16 ? p.title.slice(0, 15) + '…' : p.title;
-      const w2 = c.measureText(txt).width;
+      const w2 = this.textWidth(c.font, txt);
       const bw = w2 + 14;
       const bh = tw < 30 ? 18 : 20;
       const ly = y - s0 * 1.6 - bh / 2 - 2;

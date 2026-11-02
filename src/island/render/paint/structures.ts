@@ -899,7 +899,7 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     c.fillRect(x - w * 0.3, y + h * 0.12, w * 0.42, Math.max(1, tw * 0.018));
     const count = (agenda.soon?.length ?? 0) + agenda.later;
     c.fillStyle = '#fff6dc';
-    c.font = `700 ${Math.max(8, tw * 0.16)}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    c.font = this.font(700, Math.max(8, tw * 0.16));
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     if (count > 0) c.fillText(String(count), x + w * 0.28, y - h * 0.04);
@@ -946,7 +946,7 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     c.closePath();
     c.fill();
     c.fillStyle = '#fff4d8';
-    c.font = `600 ${Math.max(7.5, tw * 0.105)}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
+    c.font = this.font(600, Math.max(7.5, tw * 0.105));
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.fillText(title.length > 8 ? title.slice(0, 7) + '…' : title, x, y - h * 0.03);

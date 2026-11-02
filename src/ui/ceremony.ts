@@ -9,6 +9,7 @@ import * as A from '../actions';
 import { summarize, type ProjectSummary } from '../logic/summary';
 import { fmtDay } from '../lib/date';
 import { formatFullDate, t as tr } from '../i18n';
+import { isTopLayer, popLayer, pushLayer } from './layer';
 
 const fmtN = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 const fullDate = (d: string) => formatFullDate(d);
@@ -51,7 +52,11 @@ export class Ceremony {
       if (e.target === this.root) this.close();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen()) this.close();
+      if (e.key === 'Escape' && this.isOpen() && isTopLayer(this.root)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.close();
+      }
     });
   }
 
@@ -82,7 +87,7 @@ export class Ceremony {
       </div>
       <div class="cfoot"><button class="linkbtn" data-act="close">${esc(tr('ceremony.notDone'))}</button></div>`;
     this.root.hidden = false;
-    document.body.style.overflow = 'hidden';
+    pushLayer(this.root);
     this.hooks.pause(true);
     this.box.querySelector<HTMLElement>('[data-go="landmark"]')?.focus();
   }
@@ -90,7 +95,7 @@ export class Ceremony {
   close() {
     if (!this.isOpen()) return;
     this.root.hidden = true;
-    document.body.style.overflow = '';
+    popLayer(this.root);
     this.hooks.pause(false);
   }
 

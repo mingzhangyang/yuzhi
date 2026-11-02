@@ -1,5 +1,6 @@
 import { $, esc } from './dom';
 import { t } from '../i18n';
+import { isTopLayer, popLayer, pushLayer } from './layer';
 
 export interface ModalOpts {
   kick?: string;
@@ -14,7 +15,6 @@ export interface ModalOpts {
 
 let current: ModalOpts | null = null;
 let lifetime: AbortController | null = null;
-let lastFocus: Element | null = null;
 
 export function isModalOpen() {
   return !$('mdl').hidden;
@@ -25,7 +25,7 @@ export function openModal(o: ModalOpts) {
   current = o;
   const controller = new AbortController();
   lifetime = controller;
-  lastFocus = document.activeElement;
+  pushLayer($('mdl'));
   const box = $('mdlBox');
   box.innerHTML = `${o.dismissable === false ? '' : `<button class="x" data-close aria-label="${esc(t('common.close'))}">×</button>`}${o.kick ? `<div class="kick">${esc(o.kick)}</div>` : ''}<h2 id="mdlT">${esc(o.title)}</h2>${o.body}`;
   $('mdl').hidden = false;
@@ -45,7 +45,8 @@ export function closeModal(callOnClose = true) {
   // that intentionally suppresses the user-dismissal callback.
   controller?.abort();
   if (callOnClose) o?.onClose?.();
-  if (lastFocus instanceof HTMLElement) lastFocus.focus();
+  // 焦点回到打开对话框的控件；背景的 inert 一并解除。
+  popLayer($('mdl'));
 }
 
 export function initModal() {
@@ -54,7 +55,11 @@ export function initModal() {
     if (t.closest('[data-close]') || (t.id === 'mdl' && current?.dismissable !== false)) closeModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && isModalOpen() && current?.dismissable !== false) closeModal();
+    if (e.key === 'Escape' && isModalOpen() && isTopLayer($('mdl')) && current?.dismissable !== false) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeModal();
+    }
   });
 }
 

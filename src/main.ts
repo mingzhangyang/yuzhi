@@ -2,6 +2,7 @@ import './styles.css';
 import { exportBackup, parseBackup } from './db';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
+import { MARKER } from './island/render/style';
 import { $, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
@@ -24,6 +25,14 @@ import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonNam
 import { formatChronicleLine } from './history';
 import { deliverBackup, markBackupExported, SafetyNoticeBar } from './ui/safety';
 import { AutoBackup } from './ui/auto-backup';
+
+// 标题衬线字体按需异步加载：不阻塞首屏，加载完成前用系统宋体 / 衬线回退（font-display: swap）。
+void import('./fonts.css');
+
+/** 还没有任何现实输入的新岛：没有项目、任务、日历、日程、日记，也没有结算 */
+function isBlankIsland(data: { projects: unknown[]; tasks: unknown[]; sources: unknown[]; events: unknown[]; diaries: unknown[]; entries: unknown[] }): boolean {
+  return !data.projects.length && !data.tasks.length && !data.sources.length && !data.events.length && !data.diaries.length && !data.entries.length;
+}
 
 async function boot() {
   initI18n({ detectBrowser: true });
@@ -65,7 +74,7 @@ async function boot() {
       const button = document.getElementById(id) as HTMLButtonElement | null;
       if (button) button.disabled = readOnly;
     }
-    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"]')
+    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"], #menu [data-m="calendar"]')
       .forEach((button) => { button.disabled = readOnly; });
     document.body.dataset.readOnly = readOnly ? 'true' : 'false';
   };
@@ -217,13 +226,16 @@ async function boot() {
 
   const renderLegend = () => {
     $('legend').innerHTML =
-      `<span><i style="background:${ROOFS[0]}"></i>${t('legend.project')}</span><span>${t('legend.todo')}</span><span><i style="background:#a8794a"></i>${t('legend.dock')}</span><span><i style="background:#e2ad2f"></i>${t('legend.granary')}</span><span><i style="background:#d8dcdc"></i>${t('legend.fog')}</span><span>${t('legend.cultivation')}</span><span>${t('legend.agenda')}</span><span>${t('legend.drift')}</span>`;
+      `<span><i style="background:${ROOFS[0]}"></i>${t('legend.project')}</span><span>${t('legend.todo')}</span><span><i style="background:${MARKER.dock}"></i>${t('legend.dock')}</span><span><i style="background:${MARKER.granary}"></i>${t('legend.granary')}</span><span><i style="background:${MARKER.fog}"></i>${t('legend.fog')}</span><span>${t('legend.cultivation')}</span><span>${t('legend.agenda')}</span><span>${t('legend.drift')}</span>`;
   };
   const syncLanguageButton = () => {
     const button = $('langBtn');
     setText(button, t('language.switch'));
     button.setAttribute('aria-label', t('language.switchAria'));
     button.hidden = false;
+    // 菜单里的同一项（窄屏用）：文字是目标语言，lang 也跟着目标语言走，读屏才会用对发音。
+    const item = document.querySelector<HTMLElement>('#menu [data-m="language"]');
+    if (item) item.lang = getLocale() === 'zh-CN' ? 'en' : 'zh-CN';
   };
   buildStats();
   renderLegend();
@@ -247,6 +259,8 @@ async function boot() {
     onViewChange: () => update(),
   });
   tracker.bindChange();
+  // The partly exposed map remains interactive while the tracker is open;
+  // only real viewport occlusion may suspend animation.
 
   ceremony = new Ceremony(store, {
     pause: (on) => (renderer.paused = on),
@@ -364,6 +378,8 @@ async function boot() {
   const showInfo = (pt: { x: number; y: number }) => showInspection(renderer.inspect(pt));
 
   mapCanvas.addEventListener('pointerdown', hideInfo);
+  // 捏合 / Ctrl+滚轮缩放后，说明卡片的位置已经不对了。
+  mapCanvas.addEventListener('wheel', (e) => { if (e.ctrlKey || e.metaKey) hideInfo(); }, { passive: true });
   mapCanvas.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && currentInspection?.target?.kind === 'drift') {
       e.preventDefault();
@@ -431,6 +447,8 @@ async function boot() {
     }, delay);
   }
 
+  /** 上一次算指标 / 编年史时的输入；buildStats() 重建了指标卡之后要清空它 */
+  let derivedFor: { data: unknown; version: number; today: string; locale: string } = { data: null, version: -1, today: '', locale: '' };
   function update() {
     if (syncThemeDataset(store.data.settings.theme, document.documentElement.dataset)) {
       // Store notifications include persistence rollback and peer reloads.
@@ -445,7 +463,15 @@ async function boot() {
     const now = store.clock();
     const today = localDate(now);
     const agenda = agendaAt(store.data, now);
-    updateStats(store);
+    // 指标和编年史只取决于数据、日期和语言：只是换视图或到点刷新时不重算。
+    const derivedChanged = store.data !== derivedFor.data || store.dataVersion !== derivedFor.version
+      || today !== derivedFor.today || getLocale() !== derivedFor.locale;
+    if (derivedChanged) {
+      derivedFor = { data: store.data, version: store.dataVersion, today, locale: getLocale() };
+      // 一片空白的新岛上，「粮仓 9 小时、推进 0、状态 —」只是噪音：有了第一条记录再显示指标。
+      $('stats').hidden = isBlankIsland(store.data);
+      updateStats(store);
+    }
     tracker.render();
     renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now, agenda));
 
@@ -477,9 +503,11 @@ async function boot() {
     const ps = store.activeProjects().length;
     setText($('mapDesc'), ps ? t('map.descActive', { count: ps }) : t('map.descEmpty'));
 
-    const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
-    setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(formatChronicleLine(c))}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
-    setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
+    if (derivedChanged) {
+      const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
+      setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(formatChronicleLine(c))}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
+      setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
+    }
     safetyBar.sync();
     scheduleAgendaRefresh(agenda, now);
   }
@@ -524,6 +552,7 @@ async function boot() {
     const trackerDraft = tracker.captureDraftState();
     syncLanguageButton();
     buildStats();
+    derivedFor = { data: null, version: -1, today: '', locale: '' };
     renderLegend();
     update();
     tracker.restoreDraftState(trackerDraft);
@@ -631,42 +660,82 @@ async function boot() {
   }
   $('calBtn').onclick = () => openCalendar(store, afterImport);
   const menu = $('menu');
-  $('moreBtn').onclick = (e) => {
+  const moreBtn = $('moreBtn');
+  const setMenuOpen = (open: boolean) => {
+    menu.hidden = !open;
+    moreBtn.setAttribute('aria-expanded', String(open));
+  };
+  /** 菜单里此刻能用的项：窄屏才显示的项、只读时禁用的项都跳过 */
+  const menuItems = () => [...menu.querySelectorAll<HTMLButtonElement>('button[data-m]')]
+    .filter((b) => !b.disabled && b.offsetParent !== null);
+  const focusMenuItem = (index: number) => {
+    const items = menuItems();
+    if (!items.length) return;
+    items[(index + items.length) % items.length].focus();
+  };
+  moreBtn.onclick = (e) => {
     e.stopPropagation();
     if (!menu.hidden) {
-      menu.hidden = true;
+      setMenuOpen(false);
       return;
     }
-    const r = $('moreBtn').getBoundingClientRect();
-    menu.hidden = false;
+    const r = moreBtn.getBoundingClientRect();
+    setMenuOpen(true);
     menu.style.top = `${r.bottom + window.scrollY + 6}px`;
     menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.right - menu.offsetWidth))}px`;
+    // 键盘打开（Enter / 空格，detail 为 0）时焦点进入第一项；鼠标点开不抢焦点。
+    if (e.detail === 0) focusMenuItem(0);
   };
+  moreBtn.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    if (menu.hidden) moreBtn.click();
+    focusMenuItem(e.key === 'ArrowDown' ? 0 : -1);
+  });
+  menu.addEventListener('keydown', (e) => {
+    const items = menuItems();
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusMenuItem(at + (e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      focusMenuItem(e.key === 'Home' ? 0 : -1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setMenuOpen(false);
+      moreBtn.focus();
+      e.stopPropagation();
+    } else if (e.key === 'Tab') {
+      // 菜单节点在 body 末尾：放任 Tab 会跳到页面最后。收起菜单，焦点回到 ⋯。
+      e.preventDefault();
+      setMenuOpen(false);
+      moreBtn.focus();
+    }
+  });
   document.addEventListener('click', (e) => {
-    if (!menu.hidden && !menu.contains(e.target as Node)) menu.hidden = true;
+    if (!menu.hidden && !menu.contains(e.target as Node)) setMenuOpen(false);
   });
   menu.addEventListener('click', async (e) => {
     const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
     if (!m) return;
-    menu.hidden = true;
+    setMenuOpen(false);
+    // The keyboard-selected menu item is hidden now; dialogs must restore
+    // focus to the visible menu trigger rather than that hidden item.
+    moreBtn.focus({ preventScroll: true });
     if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup });
     else if (m === 'export') await exportFlow();
     else if (m === 'import') await importFlow();
     else if (m === 'archive') tracker.open({ kind: 'archive' });
     else if (m === 'demo') seedDemo(store);
+    else if (m === 'calendar') openCalendar(store, afterImport);
+    else if (m === 'language') toggleLocale();
   });
 
   applyTheme();
 
   // 第一次打开
-  if (
-    !store.isReadOnly &&
-    !store.data.projects.length &&
-    !store.data.tasks.length &&
-    !store.data.sources.length &&
-    !store.data.events.length &&
-    !store.data.diaries.length
-  ) {
+  if (!store.isReadOnly && isBlankIsland(store.data)) {
     openWelcome({
       project: () => openNew(store, 'project', openProjectAfterCreate),
       calendar: () => openCalendar(store, afterImport),

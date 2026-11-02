@@ -48,9 +48,6 @@
   "image": "https://yuzhi.orangely.xyz/brand/yuzhi-og.jpg"
 }
 </script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
 </head>
 <body>
 <div class="wrap">
@@ -70,7 +67,7 @@
       <button class="btn" id="newBtn" data-i18n="shell.new">＋ 新建</button>
       <button class="btn" id="calBtn" data-i18n="shell.calendar">日历</button>
       <button class="btn" id="langBtn" aria-label="Switch to English" hidden>EN</button>
-      <button class="btn" id="moreBtn" aria-haspopup="menu" aria-label="更多" data-i18n-aria-label="shell.more">⋯</button>
+      <button class="btn" id="moreBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="menu" aria-label="更多" data-i18n-aria-label="shell.more">⋯</button>
       <button class="btn dusk" id="settleBtn" data-i18n="shell.settle">晚间结算</button>
     </div>
   </header>
@@ -101,7 +98,7 @@
       <div class="mapwrap" id="mapwrap">
         <canvas id="map" tabindex="0" aria-describedby="mapKeyHelp" aria-label="小岛地图：点村落看项目，点小人看 Todo，点培育区看现实行为如何映射，点日程标记看安排，点漂流瓶归类事件，点码头安排新任务；键盘可浏览地图说明" data-i18n-aria-label="shell.mapAria"></canvas>
         <p class="sr-only" id="mapKeyHelp" data-i18n="shell.mapKeyboard">键盘操作：聚焦地图后，按回车或空格开始浏览景物、日程标记和漂流瓶；使用方向键切换；按 Esc 关闭说明。</p>
-        <div class="zoom"><button id="zin" aria-label="放大" data-i18n-aria-label="shell.zoomIn">+</button><button id="zout" aria-label="缩小" data-i18n-aria-label="shell.zoomOut">−</button><button id="zfit" aria-label="复位" data-i18n-aria-label="shell.zoomReset">⤢</button></div>
+        <div class="zoom"><button id="zin" aria-label="放大" data-i18n-aria-label="shell.zoomIn"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button><button id="zout" aria-label="缩小" data-i18n-aria-label="shell.zoomOut"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8h9"/></svg></button><button id="zfit" aria-label="复位" data-i18n-aria-label="shell.zoomReset"><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9.2 6.8M2.5 13.5l4.3-4.3"/></svg></button></div>
         <div class="tip" id="tip" data-i18n="shell.mapTip">点村落、小人或码头看看</div>
         <div class="mapinfo" id="mapinfo" hidden></div>
         <div class="sr-only" id="mapAnnounce" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -114,9 +111,10 @@
     </section>
 
     <aside class="card panel right" id="tracker" aria-label="追踪栏" data-i18n-aria-label="shell.tracker">
-      <button class="sheet-handle" id="sheetHandle"><span id="sheetTitle" data-i18n="shell.tracker">追踪栏</span><small id="sheetSub"></small></button>
+      <button class="sheet-handle" id="sheetHandle" aria-expanded="false" aria-controls="trackerBody"><span id="sheetTitle" data-i18n="shell.tracker">追踪栏</span><small id="sheetSub"></small></button>
       <div id="trackerBody"></div>
     </aside>
+    <div class="sheet-back" id="sheetBack" hidden></div>
   </div>
 
   <details class="card how">
@@ -134,14 +132,17 @@
 </div>
 
 <div class="settle" id="settle" hidden>
-  <div class="sbox card" role="dialog" aria-modal="true" aria-labelledby="settleT" id="settleBox"></div>
+  <div class="sbox card" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="settleT" id="settleBox"></div>
 </div>
 
 <div class="ceremony" id="ceremony" hidden>
-  <div class="cbox card" role="dialog" aria-modal="true" aria-labelledby="ceremonyT" id="ceremonyBox"></div>
+  <div class="cbox card" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="ceremonyT" id="ceremonyBox"></div>
 </div>
 
-<div class="menu card" id="menu" role="menu" hidden>
+<div class="menu card" id="menu" role="menu" aria-labelledby="moreBtn" hidden>
+  <button data-m="calendar" class="menu-compact" role="menuitem" data-i18n="menu.calendar">日历：订阅链接或上传 .ics</button>
+  <button data-m="language" class="menu-compact" role="menuitem" data-i18n="menu.language" lang="en">Switch to English</button>
+  <hr class="menu-compact">
   <button data-m="settings" role="menuitem" data-i18n="menu.settings">设置：工作时段、外观与备份</button>
   <button data-m="export" role="menuitem" data-i18n="menu.export">导出备份（JSON）</button>
   <button data-m="import" role="menuitem" data-i18n="menu.import">导入备份…</button>

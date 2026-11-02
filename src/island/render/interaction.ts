@@ -8,6 +8,7 @@ import { personSize, treeBounds } from './style';
 import { clamp } from './utils';
 import { IslandViewport } from './viewport';
 import { t as tr } from '../../i18n';
+import { labelContains, type VisibleLabelBounds } from './label-layout';
 
 /** 命中、说明和键盘浏览；不推进动画，也不绘制。 */
 export abstract class IslandInteraction extends IslandViewport {
@@ -18,33 +19,86 @@ export abstract class IslandInteraction extends IslandViewport {
   private sceneryIndex = -1;
   onTap: (hit: Hit, pt: { x: number; y: number }) => void = () => {};
 
+  /** 正在双指缩放：记下起始两指距离和当时的缩放倍数 */
+  private pinch: { dist: number; zoom: number } | null = null;
+  private touches = new Map<number, { x: number; y: number }>();
+
   protected bindInteraction() {
     this.canvas.addEventListener('pointerdown', (e) => {
+      this.boost();
+      if (e.pointerType === 'touch') this.touches.set(e.pointerId, this.localPt(e));
+      if (this.touches.size >= 2) {
+        // 第二根手指落下：从拖动 / 轻点切换到双指缩放，这次手势不再算轻点。
+        this.drag = null;
+        this.pinch = { dist: this.touchDistance(), zoom: this.view.zoom };
+        return;
+      }
       this.drag = { x: e.clientX, y: e.clientY, px: this.view.panX, py: this.view.panY, moved: false };
     });
     this.canvas.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) this.touches.set(e.pointerId, this.localPt(e));
+      if (this.pinch && this.touches.size >= 2) {
+        const dist = this.touchDistance();
+        if (this.pinch.dist > 0 && dist > 0) {
+          const target = clamp(this.pinch.zoom * (dist / this.pinch.dist), 1, 2.8);
+          this.zoomAt(target / this.view.zoom, this.touchCenter());
+        }
+        return;
+      }
       const d = this.drag;
       if (!d) return;
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
       if (Math.abs(dx) + Math.abs(dy) > 6) d.moved = true;
       if (d.moved && (this.view.zoom > 1.01 || e.pointerType === 'mouse')) {
+        this.boost();
         this.view.panX = d.px + dx;
         this.view.panY = d.py + dy;
         this.layout();
       }
     });
+    const lift = (e: PointerEvent) => {
+      this.touches.delete(e.pointerId);
+      if (this.pinch && this.touches.size < 2) this.pinch = null;
+    };
     this.canvas.addEventListener('pointerup', (e) => {
+      const pinching = this.pinch !== null;
+      lift(e);
       const d = this.drag;
       this.drag = null;
-      if (d && !d.moved) {
+      if (!pinching && d && !d.moved) {
         const pt = this.localPt(e);
         this.onTap(this.hitAt(pt), pt);
       }
     });
-    this.canvas.addEventListener('pointercancel', () => (this.drag = null));
+    this.canvas.addEventListener('pointercancel', (e) => {
+      lift(e);
+      this.drag = null;
+    });
+    // 双指时阻止浏览器把手势当成页面纵向滚动（touch-action: pan-y 只放行单指滚动）。
+    this.canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length >= 2) e.preventDefault();
+    }, { passive: false });
+    // 触控板双指捏合和 Ctrl / ⌘ + 滚轮：以光标为中心缩放；普通滚轮照常滚动页面。
+    this.canvas.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const r = this.canvas.getBoundingClientRect();
+      const step = Math.max(-0.5, Math.min(0.5, -e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025)));
+      this.zoomAt(Math.exp(step), { x: e.clientX - r.left, y: e.clientY - r.top });
+    }, { passive: false });
     new ResizeObserver(() => this.resize()).observe(this.wrap);
     window.addEventListener('resize', () => this.resize());
+  }
+
+  private touchDistance(): number {
+    const [a, b] = [...this.touches.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  }
+
+  private touchCenter(): { x: number; y: number } {
+    const [a, b] = [...this.touches.values()];
+    return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : { x: this.view.w / 2, y: this.view.h / 2 };
   }
 
   protected villageLabelText(v: VillageView): string {
@@ -62,10 +116,32 @@ export abstract class IslandInteraction extends IslandViewport {
     return `${tr('island.villagePeople', { name: v.name, count: v.openCount })}${agendaParts.map((part) => ` · ${part}`).join('')}${stageTxt}`;
   }
 
-  protected villageLabelAnchor(v: VillageView): [number, number] {
+  /** 村名标签的理想位置（避让之前） */
+  protected villageLabelBase(v: VillageView): [number, number] {
     const ctr = this.map.villages[v.slot].center;
     const [x, y] = this.iso(ctr.i, ctr.j);
     return [x, y - this.view.tw * 1.05];
+  }
+
+  /** Exact bounds of visible labels from the last paint, in paint order. */
+  protected placedLabels = new Map<string, { bounds: VisibleLabelBounds; hit: NonNullable<Hit> }>();
+
+  protected visibleLabelAnchor(id: string): [number, number] | null {
+    const bounds = this.placedLabels.get(id)?.bounds;
+    return bounds ? [bounds.x, bounds.y] : null;
+  }
+
+  protected placedLabelHitAt(pt: { x: number; y: number }): Hit {
+    // Later labels paint over earlier ones and win overlapping hits.
+    for (const label of [...this.placedLabels.values()].reverse()) {
+      if (labelContains(label.bounds, pt)) return label.hit;
+    }
+    return null;
+  }
+
+  /** Village agenda labels and keyboard browsing use the painted anchor. */
+  protected villageLabelAnchor(v: VillageView): [number, number] {
+    return this.visibleLabelAnchor(`village:${v.projectId}`) ?? this.villageLabelBase(v);
   }
 
   protected choresLabelText(ch: ChoresView): string {
@@ -89,12 +165,8 @@ export abstract class IslandInteraction extends IslandViewport {
   protected labelBox(text: string, dot: boolean, compact: boolean): { font: string; bw: number; bh: number; pad: number } {
     const tw = this.view.tw;
     const size = compact ? 9.5 : tw < 30 ? 10.5 : 12;
-    const font = `600 ${size}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
-    const c = this.ctx;
-    c.save();
-    c.font = font;
-    const w = c.measureText(text).width;
-    c.restore();
+    const font = this.font(600, size);
+    const w = this.textWidth(font, text);
     // pad：文字左边距（带圆点时让出圆点的位置）；右边距另算
     const pad = compact ? (dot ? 12.5 : 5) : dot ? 16 : 7;
     const right = compact ? 5 : dot ? 6 : 7;
@@ -284,13 +356,7 @@ export abstract class IslandInteraction extends IslandViewport {
       for (const b of banners) {
         if (this.bannerHitAt(pt, b)) return { kind: 'agenda', target: v.projectId };
       }
-      // 进行中 / 仅待结算没有额外道具；用已经画出的村名标签承载说明，
-      // 避开井和小人，保持项目点击区域不变。
-      if (!hasBoard && !banners.length) {
-        const [lx, ly] = this.villageLabelAnchor(v);
-        const { text, compact } = this.villageLabel(v);
-        if (this.labelHitAt(pt, lx, ly, text, true, compact)) return { kind: 'agenda', target: v.projectId };
-      }
+      // Village label capsules use painted geometry in placedLabelHitAt().
     }
     if ((s.chores.live || s.chores.soon) && this.broomHitAt(pt, !!s.chores.live)) {
       return { kind: 'agenda', target: CHORES };
@@ -395,7 +461,9 @@ export abstract class IslandInteraction extends IslandViewport {
     const s = this.scene;
     if (!s) return null;
 
-    // 固定命中层级：前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 宽泛区域。
+    // Preserve established foreground hit priority on cramped mobile maps.
+    // A shifted label must never steal a tap from a visible walker or bottle.
+    // 前景实体 > 精确结构 > 海上辅助目标 > 日程道具 > 标签 > 宽泛区域。
     const walker = this.walkerHitAt(pt);
     if (walker) return walker;
     if (this.dockHitAt(pt)) return { kind: 'dock' };
@@ -403,6 +471,10 @@ export abstract class IslandInteraction extends IslandViewport {
     if (drift) return drift;
     const agendaHit = this.agendaHitAt(pt);
     if (agendaHit) return agendaHit;
+    // Shared painted label bounds, after small foreground objects but
+    // before broad map regions. Hidden optional labels have no hit targets.
+    const label = this.placedLabelHitAt(pt);
+    if (label) return label;
     // 画在最前面的轮廓若带着点击目标（地标），就选它；被房子、树挡住时仍按下面的地面规则判断
     let front: (typeof this.occluders)[number] | null = null;
     for (const o of this.occluders) if ((!front || o.d >= front.d) && insidePolygon(pt, o.poly)) front = o;
@@ -475,21 +547,29 @@ export abstract class IslandInteraction extends IslandViewport {
     // Inspection and click selection intentionally have different semantics:
     // clicks obey foreground z-order, while inspection can still describe a
     // visible agenda prop or bottle even when a moving walker crosses it.
-    const inspectable = this.driftHitAt(pt) ?? this.agendaHitAt(pt);
+    const labelHit = this.placedLabelHitAt(pt);
+    // Match hitAt()'s foreground ordering for inspectable targets: a real
+    // drift bottle or agenda prop beats even a moved agenda/cultivation label.
+    // Otherwise a click can select the prop but describe a different label.
+    const inspectable = this.driftHitAt(pt)
+      ?? this.agendaHitAt(pt)
+      ?? (labelHit?.kind === 'agenda' ? labelHit : null);
     if (inspectable) return this.inspectAgenda(inspectable, pt.x, pt.y, ctx);
     const m = this.map;
     const { tw } = this.view;
-    const cultivationHit = this.cultivationHitAt(pt);
+    const cultivationHit = labelHit?.kind === 'cultivation' ? labelHit : this.cultivationHitAt(pt);
     if (cultivationHit) {
       const state = s.cultivation.find((item) => item.kind === cultivationHit.area);
       const site = m.cultivation[cultivationHit.area];
       if (state) {
         const [x, y] = this.iso(site.i, site.j);
+        const anchor = labelHit?.kind === 'cultivation'
+          ? this.visibleLabelAnchor(`cultivation:${state.kind}`) : null;
         return this.selectScenery(
           { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
           { i: site.i, j: site.j },
-          x,
-          y - tw * 0.62,
+          anchor?.[0] ?? x,
+          anchor?.[1] ?? y - tw * 0.62,
           ctx,
         );
       }
@@ -569,11 +649,12 @@ export abstract class IslandInteraction extends IslandViewport {
     for (const state of s.cultivation) {
       const site = m.cultivation[state.kind];
       const [x, y] = this.iso(site.i, site.j);
+      const [labelX, labelY] = this.visibleLabelAnchor(`cultivation:${state.kind}`) ?? [x, y - tw * 0.62];
       add(
         { kind: 'cultivation', area: state.kind, level: state.level, score: state.score, summary: state.summary },
         { i: site.i, j: site.j },
-        x,
-        y - tw * 0.62,
+        labelX,
+        labelY,
       );
     }
 
@@ -611,7 +692,7 @@ export abstract class IslandInteraction extends IslandViewport {
       add({ kind: 'agenda', target: v.projectId, targetName: v.name, ...v.agenda }, null, x, y);
     }
     if (s.chores.live || s.chores.soon) {
-      const [x, y] = this.choresAgendaAnchor();
+      const [x, y] = this.visibleLabelAnchor('chores') ?? this.choresAgendaAnchor();
       const target = this.infoTargetForHit({ kind: 'agenda', target: CHORES });
       if (target) add(target, null, x, y);
     }

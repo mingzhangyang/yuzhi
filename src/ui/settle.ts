@@ -11,6 +11,9 @@ import * as A from '../actions';
 import { itemsForDay, pendingDays, type SettleItem } from '../logic/days';
 import { fmtDay, relDay, weekday } from '../lib/date';
 import { t, type MessageKey } from '../i18n';
+import { isTopLayer, popLayer, pushLayer } from './layer';
+import { ICON } from './icons';
+import { MARKER } from '../island/render/style';
 
 const REASONS: SkipReason[] = ['interrupted', 'no_energy', 'not_important', 'postponed'];
 const REASON_KEYS: Record<SkipReason, MessageKey> = {
@@ -41,6 +44,8 @@ export class SettleSheet {
   /** 草稿里用「还做了别的事…」拉进来的任务：提交前不改动任务本身 */
   private pulled = new Map<ISODate, Set<string>>();
   private box = $('settleBox');
+  /** 上一次画的是哪一天：换天时滚动回到顶部 */
+  private renderedDate: ISODate | '' = '';
   private drag: { el: HTMLElement; key: string; x: number; y: number; dx: number; moved: boolean; locked: boolean; id: number } | null = null;
 
   constructor(private store: Store, private hooks: SettleHooks) {
@@ -54,7 +59,11 @@ export class SettleSheet {
       if (e.target === $('settle')) this.close();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen()) this.close();
+      if (e.key === 'Escape' && this.isOpen() && isTopLayer($('settle'))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.close();
+      }
     });
   }
 
@@ -70,15 +79,18 @@ export class SettleSheet {
   open(date?: ISODate) {
     const days = this.days();
     this.date = date && days.includes(date) ? date : days[0];
+    const opening = !this.isOpen();
     $('settle').hidden = false;
-    document.body.style.overflow = 'hidden';
+    pushLayer($('settle'));
     this.render();
+    // 打开时焦点进入面板（标题所在的对话框本身），读屏先读到日期；再次 open（换到下一天）不抢焦点。
+    if (opening) this.box.focus?.({ preventScroll: true });
     this.hooks.onOpenChange(true);
   }
 
   close() {
     $('settle').hidden = true;
-    document.body.style.overflow = '';
+    popLayer($('settle'));
     this.hooks.onOpenChange(false);
   }
 
@@ -127,7 +139,7 @@ export class SettleSheet {
     const confirmed = items.filter((it) => d.has(it.key)).length;
     const left = items.length - confirmed;
 
-    const tabs = days.map((x) => `<button data-day="${x}" class="${x === this.date ? 'on' : ''} ${x < today ? 'fog' : ''}">${esc(relDay(x, today))}</button>`).join('');
+    const tabs = days.map((x) => `<button type="button" data-day="${x}" class="${x === this.date ? 'on' : ''}" aria-pressed="${x === this.date}">${esc(relDay(x, today))}${x < today ? `<small class="fog-tag">${esc(t('settle.fogTag'))}</small>` : ''}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
     const extra = s.tasks().filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
     // Tasks planned for a later day stay available (doing one early is a real
@@ -148,6 +160,12 @@ export class SettleSheet {
     const extraSel = extra.length
       ? `<div class="sextra"><select data-pull aria-label="${esc(t('settle.extraAria'))}"><option value="">${esc(t(this.date === today ? 'settle.extraToday' : 'settle.extraDay'))}</option>${group('settle.extraDue', due)}${group('settle.extraAhead', ahead)}</select></div>`
       : '';
+    // 整块重写会换掉滚动容器和按钮：同一天里保留列表滚动位置和键盘焦点，
+    // 否则在长列表底部每标一条都会跳回顶部。
+    const sameDay = this.renderedDate === this.date;
+    const scroll = sameDay ? this.box.querySelector?.<HTMLElement>('.slist')?.scrollTop ?? 0 : 0;
+    const focus = this.focusSelector();
+    this.renderedDate = this.date;
     this.box.innerHTML = `
       <div class="shead">
         <div class="kick"><span>${esc(t(this.date < today ? 'settle.catchUpKick' : 'settle.eveningKick'))}</span><button class="x" data-act="close" aria-label="${esc(t('common.close'))}">×</button></div>
@@ -157,12 +175,27 @@ export class SettleSheet {
       <div class="sbar"><span>${esc(t('settle.progress', { count: items.length, confirmed }))}</span>${items.length ? `<button class="btn small" data-act="all">${esc(t('settle.allDone'))}</button>` : ''}</div>
       <div class="slist">${cards || `<div class="sempty">${esc(t('settle.empty'))}<br>${esc(t(extra.length ? 'settle.emptyExtra' : 'settle.emptyQuiet'))}</div>`}${extraSel}</div>
       <div class="sfoot"><span class="grow">${items.length ? (left ? esc(t('settle.gestureLeft', { count: left })) : esc(t('settle.allConfirmed'))) : ''}</span><button class="btn dusk" data-act="commit">${esc(t(settled ? 'settle.update' : 'settle.complete'))}</button></div>`;
+    const list = this.box.querySelector?.<HTMLElement>('.slist');
+    if (list && scroll) list.scrollTop = scroll;
+    if (focus) this.box.querySelector?.<HTMLElement>(focus)?.focus({ preventScroll: true });
+  }
+
+  /** 当前焦点在面板里的哪个控件：重绘后按同样的条目和动作找回来 */
+  private focusSelector(): string | null {
+    if (typeof HTMLElement === 'undefined') return null;
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !this.box.contains(active)) return null;
+    const attr = ['data-set', 'data-reason', 'data-day', 'data-act', 'data-pull'].find((name) => active.hasAttribute(name));
+    if (!attr) return null;
+    const own = `[${attr}="${CSS.escape(active.getAttribute(attr) ?? '')}"]`;
+    const item = active.closest<HTMLElement>('.sitem');
+    return item?.dataset.key ? `.sitem[data-key="${CSS.escape(item.dataset.key)}"] ${own}` : own;
   }
 
   private card(it: SettleItem, dec: A.Decision | undefined) {
     const s = this.store;
     const p = it.projectId && it.projectId !== CHORES ? s.project(it.projectId) : undefined;
-    const color = p ? roofOf(p.islandSlot) : it.projectId === CHORES ? '#8a8578' : 'var(--line)';
+    const color = p ? roofOf(p.islandSlot) : it.projectId === CHORES ? MARKER.chores : 'var(--line)';
     const where = p ? p.name : it.projectId === CHORES ? t('common.chores') : it.type === 'event' ? t('common.unclassified') : '';
     const meta = [it.type === 'event' && it.start ? `${timeOf(it.start)}–${timeOf(it.end!)} · ${t('settle.calendar')}` : t('settle.task'), where].filter(Boolean).join(' · ');
     const o = dec?.outcome;
@@ -173,7 +206,7 @@ export class SettleSheet {
     return `<div class="sitem ${o ? 'o-' + o : ''}" data-key="${esc(it.key)}" data-project="${esc(p?.id ?? '')}">
       <div class="swipe"><div class="under"><span class="l">${esc(t('settle.done'))} ✓</span><span class="r">${esc(t('settle.skipped'))}</span></div>
       <div class="scard"><i class="sw" style="background:${color}"></i><div class="tx"><b>${esc(it.title)}</b><span>${esc(meta)}${o === 'done' ? ' · ' + t('settle.done') : o === 'partial' ? ' · ' + t('settle.partial') : o === 'skipped' ? ' · ' + t('settle.skipped') : ''}</span></div>
-      <div class="st"><button class="d ${o === 'done' ? 'on' : ''}" data-set="done" aria-label="${esc(t('settle.done'))}" title="${esc(t('settle.done'))}">✓</button><button class="p ${o === 'partial' ? 'on' : ''}" data-set="partial" aria-label="${esc(t('settle.partial'))}" title="${esc(t('settle.partial'))}">½</button><button class="s ${o === 'skipped' ? 'on' : ''}" data-set="skipped" aria-label="${esc(t('settle.skipped'))}" title="${esc(t('settle.skipped'))}">✕</button></div></div></div>
+      <div class="st"><button class="d ${o === 'done' ? 'on' : ''}" data-set="done" aria-label="${esc(t('settle.done'))}" title="${esc(t('settle.done'))}">${ICON.check}</button><button class="p ${o === 'partial' ? 'on' : ''}" data-set="partial" aria-label="${esc(t('settle.partial'))}" title="${esc(t('settle.partial'))}">½</button><button class="s ${o === 'skipped' ? 'on' : ''}" data-set="skipped" aria-label="${esc(t('settle.skipped'))}" title="${esc(t('settle.skipped'))}">${ICON.cross}</button></div></div></div>
       ${reasons}</div>`;
   }
 

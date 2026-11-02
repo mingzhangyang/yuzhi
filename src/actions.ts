@@ -31,7 +31,9 @@ export {
   renameTask,
   repairTruncatedYearDates,
   rescheduleTask,
+  undoTaskDone,
 } from './actions/tasks';
+export type { TaskDoneUndo } from './actions/tasks';
 
 export type { Decision } from './actions/settlement';
 export {
