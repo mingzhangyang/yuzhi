@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
@@ -101,4 +101,63 @@ it('refuses to delete unowned PNGs or input screenshots when diffDir is unsafe',
   expect(unowned.status).not.toBe(0);
   expect(unowned.stderr).toContain('not owned by shot-diff');
   expect(existsSync(join(diff, 'personal.png'))).toBe(true);
+});
+
+it('owns only actually generated diff images, never every input filename', () => {
+  const { before, after } = dirs();
+  const diff = join(before, '..', 'diff');
+  mkdirSync(diff);
+  writeFileSync(join(before, 'same.png'), png(10));
+  writeFileSync(join(after, 'same.png'), png(10));
+  writeFileSync(join(before, 'changed.png'), png(20));
+  writeFileSync(join(after, 'changed.png'), png(21));
+  writeFileSync(join(before, 'missing.png'), png(20));
+
+  const run = () => spawnSync(process.execPath, [command, before, after, diff], { encoding: 'utf8' });
+  expect(run().status).toBe(1);
+  const manifestPath = join(diff, '.shot-diff-output.json');
+  const first = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  expect(first.version).toBe(2);
+  expect(first.files).toHaveLength(1);
+  expect(first.files[0].name).toBe('changed.png');
+  expect(first.files[0].sha256).toMatch(/^[0-9a-f]{64}$/);
+
+  // Once differences disappear, the ledger must become empty, even when some
+  // input images are still missing. No phantom ownership is allowed.
+  writeFileSync(join(after, 'changed.png'), png(20));
+  expect(run().status).toBe(1);
+  expect(JSON.parse(readFileSync(manifestPath, 'utf8')).files).toEqual([]);
+  expect(existsSync(join(diff, 'changed.png'))).toBe(false);
+
+  // A user-created file that has a matching input name is unowned and protected.
+  writeFileSync(join(diff, 'missing.png'), png(99));
+  const foreign = run();
+  expect(foreign.status).not.toBe(0);
+  expect(foreign.stderr).toContain('not owned by shot-diff');
+  expect(existsSync(join(diff, 'missing.png'))).toBe(true);
+});
+
+it('rejects modified generated images and legacy name-only manifests', () => {
+  const { before, after } = dirs();
+  const diff = join(before, '..', 'diff');
+  mkdirSync(diff);
+  writeFileSync(join(before, 'sample.png'), png(20));
+  writeFileSync(join(after, 'sample.png'), png(21));
+  const run = () => spawnSync(process.execPath, [command, before, after, diff], { encoding: 'utf8' });
+
+  expect(run().status).toBe(1);
+  writeFileSync(join(diff, 'sample.png'), png(99)); // Someone replaced the diff.
+  const modified = run();
+  expect(modified.status).not.toBe(0);
+  expect(modified.stderr).toContain('was modified');
+  expect(readFileSync(join(diff, 'sample.png'))).toEqual(png(99));
+
+  // Old versions declared ownership over all input names and must not be
+  // trusted to clean unknown files after upgrading to v2.
+  writeFileSync(join(diff, '.shot-diff-output.json'),
+    JSON.stringify({ version: 1, files: ['sample.png'] }));
+  const legacy = run();
+  expect(legacy.status).not.toBe(0);
+  expect(legacy.stderr).toContain('legacy shot-diff manifest');
+  expect(readFileSync(join(diff, 'sample.png'))).toEqual(png(99));
 });

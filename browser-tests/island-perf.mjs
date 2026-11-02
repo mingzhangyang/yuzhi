@@ -2,6 +2,7 @@
  * 小岛绘制性能基线（美术优化计划第 4.3 节、A4 / A5）。固定场景：8 座村落 + 3 座地标，
  * 夏季白天 10:30 与夜晚 21:30；桌面 1280×860 @2x、手机 390×844 @3x；CPU 不降速与 4 倍降速。
  *
+ *   Prerequisites: docs/art/README.md (install playwright@1.63.0 and Chromium)
  *   npm run build                                         # foreground, finish first
  *   npx vite preview --port 4173 --strictPort              # terminal A, wait for ready
  *   node browser-tests/island-perf.mjs                 # 只测整帧

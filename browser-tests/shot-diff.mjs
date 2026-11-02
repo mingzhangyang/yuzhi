@@ -4,11 +4,12 @@
  *
  *   node browser-tests/shot-diff.mjs shots/before shots/after [diffDir]
  *
- * 给出专用 diffDir 时，为有差异的截图另存差异图。输出目录带管理清单，
- * 重跑时仅清除上次自己生成的 PNG；非空的旧目录（无清单）会报错，以免误删用户文件。
+ * 给出专用 diffDir 时，仅对真正生成的差异图记录名字和 SHA-256。
+ * 重跑时只清除哈希未变化的已生成图片；非空的未知目录会报错，以免误删用户文件。
  * 非空且所有同名截图完全一致时退出码为 0；空集、有差异、缺图或尺寸不同时为 1。
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { crc32, deflateSync, inflateSync } from 'node:zlib';
 
@@ -108,8 +109,22 @@ const before = pngNames(beforeDir);
 const after = pngNames(afterDir);
 const names = [...new Set([...before, ...after])].sort();
 
-// Manage only our own previously generated diff PNGs. A manifest also makes
-// interrupted comparisons recoverable: write the candidate names before drawing.
+// The manifest is an ownership ledger for actual diff PNGs, not a list of
+// candidate input names. Verify bytes as well as filenames before deleting.
+const digest = (data) => createHash('sha256').update(data).digest('hex');
+let manifestPath;
+let generated = [];
+function persistManifest() {
+  if (!manifestPath) return;
+  const temp = manifestPath + '.' + process.pid + '.tmp';
+  try {
+    writeFileSync(temp, JSON.stringify({ version: 2, files: generated }, null, 2) + '\n', { flag: 'wx' });
+    renameSync(temp, manifestPath);
+  } catch (error) {
+    if (existsSync(temp)) unlinkSync(temp);
+    throw error;
+  }
+}
 if (diffDir) {
   mkdirSync(diffDir, { recursive: true });
   const output = realpathSync(diffDir);
@@ -121,26 +136,44 @@ if (diffDir) {
     throw new Error('diffDir must not be an input directory or a parent of one');
   }
 
-  const manifestPath = join(diffDir, '.shot-diff-output.json');
-  let priorNames = [];
+  manifestPath = join(diffDir, '.shot-diff-output.json');
+  let previous = [];
   if (existsSync(manifestPath)) {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    if (manifest.version !== 1 || !Array.isArray(manifest.files) ||
-      manifest.files.some((name) => typeof name !== 'string' || !/^[^/\\]+\.png$/.test(name))) {
-      throw new Error('Invalid shot-diff output manifest; refusing to clean directory');
+    if (!lstatSync(manifestPath).isFile()) {
+      throw new Error('shot-diff output manifest must be a regular file');
     }
-    priorNames = manifest.files;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest.version !== 2 || !Array.isArray(manifest.files) ||
+      manifest.files.some((entry) => !entry || typeof entry.name !== 'string' ||
+        !/^[^/\\]+\.png$/.test(entry.name) ||
+        typeof entry.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(entry.sha256))) {
+      throw new Error('Invalid or legacy shot-diff manifest; use a fresh dedicated diff directory');
+    }
+    previous = manifest.files;
+    if (new Set(previous.map(({ name }) => name)).size !== previous.length) {
+      throw new Error('Duplicate files in shot-diff manifest; refusing cleanup');
+    }
   }
-  const owned = new Set(priorNames);
+  const owned = new Set(previous.map(({ name }) => name));
   const foreign = [...pngNames(diffDir)].filter((name) => !owned.has(name));
   if (foreign.length) {
     throw new Error('diffDir contains PNGs not owned by shot-diff; use an empty dedicated directory: ' + foreign.join(', '));
   }
-  for (const name of owned) {
+  // Preflight every file: if a user replaced even a previously-owned PNG, never
+  // delete it. Reject symlinks so manifest entries cannot be used as pointers.
+  for (const { name, sha256 } of previous) {
+    const file = join(diffDir, name);
+    if (existsSync(file) &&
+      (!lstatSync(file).isFile() || digest(readFileSync(file)) !== sha256)) {
+      throw new Error('Previously generated diff was modified; refusing cleanup: ' + name);
+    }
+  }
+  for (const { name } of previous) {
     const file = join(diffDir, name);
     if (existsSync(file)) unlinkSync(file);
   }
-  writeFileSync(manifestPath, JSON.stringify({ version: 1, files: names }, null, 2) + '\n');
+  // Clear ownership immediately, including on runs that generate no diffs.
+  persistManifest();
 }
 
 if (!before.size || !after.size) {
@@ -181,7 +214,13 @@ for (const name of names) {
   console.log(`${name}: ${changed ? `${changed} px differ (${pct}%), max channel delta ${maxDelta}` : 'identical'}`);
   if (changed) {
     failed = true;
-    if (diff) writeFileSync(join(diffDir, name), encodePng(a.width, a.height, diff));
+    if (diff) {
+      const png = encodePng(a.width, a.height, diff);
+      // Exclusive creation avoids overwriting a foreign PNG inserted mid-run.
+      writeFileSync(join(diffDir, name), png, { flag: 'wx' });
+      generated.push({ name, sha256: digest(png) });
+      persistManifest();
+    }
   }
 }
 process.exit(failed ? 1 : 0);

@@ -13,7 +13,17 @@
 
 Canvas 小岛上的所有颜色集中在 `src/island/render/palette.ts`：方向板的 10 个基础色（`BOARD`，取样值待人工校准），按材质和物件归组的当前用色，以及季节、积雪、衰败、透明度的派生函数。绘制代码里不再写颜色字面量，`tests/palette.test.ts` 会检查；地图景物的标记色 `MARKER` 仍在 `style.ts`，与图例、追踪栏共用。
 
-改画面前后用截图矩阵对照。**每次截图都要先完成当前源码的构建**；`vite preview` 只读取已有 `dist`，不会自动重新编译。必须等预览服务器启动后再运行截图脚本，不能把 build 和 preview 一起放到后台。
+改画面前后用截图矩阵对照。先安装浏览器测试依赖（项目默认的 `npm ci` **不包含** Playwright；版本与现有 `browser-lifecycle` CI 保持一致）。以下命令在仓库根目录执行，使用 Node.js 24：
+
+```sh
+npm ci
+npm install --no-save --package-lock=false playwright@1.63.0
+npx playwright install chromium
+```
+
+如 Linux 环境缺少 Chromium 所需系统库，可改用 `npx playwright install --with-deps chromium`。以上是**本地截图 / 性能测量的可选工具安装步骤**，不会修改 `package.json` 或锁文件；每次重新运行 `npm ci` 后都需要重新安装 Playwright。脚本默认使用 Playwright 安装的 Chromium；如已有系统 Chrome，可以设置 `PW_CHANNEL=chrome` 使用它。
+
+**每次截图都要先完成当前源码的构建**；`vite preview` 只读取已有 `dist`，不会自动重新编译。必须等预览服务器启动后再运行截图脚本，不能把 build 和 preview 一起放到后台。
 
 **代码改动前**，在终端 A 依次执行（`npm run build` 完成以后才启动预览，预览保持在前台运行）：
 
@@ -44,7 +54,11 @@ SHOT_DIR=shots/after node browser-tests/island-shots.mjs
 node browser-tests/shot-diff.mjs shots/before shots/after shots/diff
 ```
 
-`SHOT_DIR` 应为专用截图目录。截图脚本会清理目录根层旧 PNG，因此 `SHOT_ONLY=...` 跑子集不会混入旧截图；其他文件、子目录不受影响。`shot-diff.mjs` 拒绝空截图集。差异图 `shots/diff` 也应使用专用目录：工具会写入 `.shot-diff-output.json` 记录自己生成的 PNG，下一次运行只清理清单中的旧差异图，不影响其他文件。若目录里已有**未被清单管理**的 PNG（包括旧版脚本留下的图片），工具会拒绝覆盖；请检查并手动归档，或改用空的差异图目录。
+`SHOT_DIR` 应为专用截图目录。截图脚本会清理目录根层旧 PNG，因此 `SHOT_ONLY=...` 跑子集不会混入旧截图；其他文件、子目录不受影响。`shot-diff.mjs` 拒绝空截图集。差异图 `shots/diff` 也应使用专用目录：工具会写入 `.shot-diff-output.json`（v2），**仅记录实际生成**的 PNG 及其 SHA-256。下次运行只清理内容未被修改的、已记录的旧差异图；若目录里有未登记或被修改的图片，或者旧版 v1 清单，工具会拒绝自动删除。请检查并手动归档，或换用空的差异图目录。
+
+
+
+性能基准也使用相同的预览服务和 Playwright/Chromium 前提。在完成上述安装、构建和服务就绪后，运行 `node browser-tests/island-perf.mjs`；需要图层成本明细时运行 `PERF_LAYERS=1 node browser-tests/island-perf.mjs`。
 
 ## 运行时环境道具
 

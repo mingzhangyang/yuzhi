@@ -3,6 +3,7 @@
  * 每期画面调整前后各跑一次，对比同名截图即可。id、Math.random 与动画时钟都已固定：
  * 截图前停掉 rAF 循环，按固定步长推进同样的帧数再画一帧，同一份代码两次运行得到同一张图。
  *
+ *   Prerequisites: docs/art/README.md (install playwright@1.63.0 and Chromium)
  *   npm run build                                  # foreground, wait for completion
  *   npx vite preview --port 4173 --strictPort       # terminal A; wait for ready
  *   SHOT_DIR=shots/after node browser-tests/island-shots.mjs # terminal B
