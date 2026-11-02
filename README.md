@@ -4,6 +4,7 @@
 
 - 产品与 MVP 交接文档：[`docs/屿志MVP交接文档.md`](docs/屿志MVP交接文档.md)
 - 现实生活培育区开放设计：[`docs/现实生活培育区设计.md`](docs/现实生活培育区设计.md)
+- 小岛美术优化计划（分期推进中）：[`docs/美术优化计划.md`](docs/美术优化计划.md)
 - Architecture v2 完结记录：[`docs/ARCHITECTURE_V2_COMPLETION.md`](docs/ARCHITECTURE_V2_COMPLETION.md)
 - 架构调整方案（已完成，维护参考）：[`docs/架构调整方案.md`](docs/架构调整方案.md)
 - 参考源码（禾境）：[`reference/hejing.html`](reference/hejing.html)，原始压缩包 `reference/hejing-repo.zip`
