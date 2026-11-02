@@ -19,6 +19,7 @@ export const MARKER = {
   fog: '#d8dcdc',
   diary: '#9b78a8',
   schedule: '#7397a7',
+  lighthouse: '#c8473a',
 } as const;
 export const FIREWORK = ['#ffd36b', '#ff7a6b', '#8fd3ff', '#c99bff', '#9dff9b', '#ffffff', '#ffb3d9'];
 

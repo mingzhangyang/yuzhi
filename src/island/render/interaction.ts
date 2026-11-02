@@ -24,6 +24,7 @@ export abstract class IslandInteraction extends IslandViewport {
 
   protected bindInteraction() {
     this.canvas.addEventListener('pointerdown', (e) => {
+      this.boost();
       if (e.pointerType === 'touch') this.touches.set(e.pointerId, this.localPt(e));
       if (this.touches.size >= 2) {
         // 第二根手指落下：从拖动 / 轻点切换到双指缩放，这次手势不再算轻点。
@@ -49,6 +50,7 @@ export abstract class IslandInteraction extends IslandViewport {
       const dy = e.clientY - d.y;
       if (Math.abs(dx) + Math.abs(dy) > 6) d.moved = true;
       if (d.moved && (this.view.zoom > 1.01 || e.pointerType === 'mouse')) {
+        this.boost();
         this.view.panX = d.px + dx;
         this.view.panY = d.py + dy;
         this.layout();

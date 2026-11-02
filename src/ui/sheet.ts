@@ -3,7 +3,7 @@
  * 桌面上它是普通的侧栏；收起 / 展开、遮罩和 inert 只在窄屏生效。
  *
  * - 点把手开关，也可以按住把手上下拖；
- * - 展开时背后有一层浅遮罩，点遮罩或按 Esc 收起；
+ * - 展开时背后有一层浅遮罩（只变暗、不挡点击），点面板外的空白处或按 Esc 收起；
  * - 收起时面板内容设为 inert，Tab 不会跳进屏幕外看不见的表单。
  */
 import { $ } from './dom';
@@ -20,6 +20,8 @@ export class BottomSheet {
   private readonly back = $('sheetBack');
   private readonly mq: MediaQueryList | undefined = window.matchMedia?.(MOBILE);
   private drag: { id: number; y: number; dy: number; moved: boolean; wasOpen: boolean } | null = null;
+  /** 窄屏上展开时整块盖住地图：地图可以暂停动画 */
+  onCoverChange?: (covering: boolean) => void;
   /** 拖动结束后浏览器还会补发一次 click（触屏上可能晚一些），这段时间内的 click 不再切换 */
   private skipClickUntil = 0;
 
@@ -31,7 +33,15 @@ export class BottomSheet {
       }
       this.toggle();
     });
-    this.back.addEventListener('click', () => this.close());
+    // 遮罩只负责变暗、不拦截点击：顶栏的「新建」「晚间结算」等按钮在面板展开时照常可用；
+    // 点在面板外的空白处（不是按钮、输入框、地图这类本身可操作的东西）才收起面板。
+    document.addEventListener('click', (e) => {
+      if (!this.mobile() || !this.isOpen()) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target || this.root.contains(target)) return;
+      if (target.closest('button, a, input, select, textarea, label, summary, canvas, [role="menu"], #toast, .dlg-back, .settle, .ceremony')) return;
+      this.close();
+    });
     this.handle.addEventListener('pointerdown', (e) => this.onDown(e));
     this.handle.addEventListener('pointermove', (e) => this.onMove(e));
     this.handle.addEventListener('pointerup', (e) => this.onUp(e));
@@ -75,6 +85,7 @@ export class BottomSheet {
     this.handle.setAttribute('aria-expanded', String(!mobile || open));
     this.body.inert = mobile && !open;
     this.back.hidden = !(mobile && open);
+    this.onCoverChange?.(mobile && open);
   }
 
   /* ---------------- 拖动 ---------------- */

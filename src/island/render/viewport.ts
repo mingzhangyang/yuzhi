@@ -26,6 +26,15 @@ export abstract class IslandViewport {
   protected calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   /** 画布文字与页面同一套无衬线字体（--font-sans），在 readTheme 时读取 */
   protected fontFamily = '-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  /**
+   * 满帧到什么时候（performance.now 毫秒）。小岛平时是环境动画，30 帧足够；
+   * 拖动、缩放、场景变化和落砖光圈期间临时满帧，手感不打折。
+   */
+  protected boostUntil = 0;
+  protected boost(ms = 1500) {
+    const now = typeof performance !== 'undefined' ? performance.now() : 0;
+    this.boostUntil = Math.max(this.boostUntil, now + ms);
+  }
   /** measureText 很贵：标签每帧都要量，按「字体 + 文本」缓存宽度 */
   private widths = new Map<string, number>();
 
@@ -81,6 +90,7 @@ export abstract class IslandViewport {
    * 不给点时以画面中心缩放；缩回 1 倍时复位平移。
    */
   zoomAt(f: number, pt?: { x: number; y: number }) {
+    this.boost();
     const v = this.view;
     const before = { tw: v.tw, ox: v.ox, oy: v.oy };
     v.zoom = clamp(v.zoom * f, 1, 2.8);

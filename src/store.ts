@@ -383,6 +383,11 @@ export class Store {
     return () => this.listeners.delete(fn);
   }
 
+  /** 数据版本：每次 changed() 加一。数据是原地修改的，界面缓存要按版本判断有没有变，不能只比对象引用。 */
+  get dataVersion(): number {
+    return this.version;
+  }
+
   /** 各村落的衰败状态（按数据版本和日期缓存） */
   villages(today: ISODate = this.today()): Map<string, VillageState> {
     const key = `${this.version}|${today}`;

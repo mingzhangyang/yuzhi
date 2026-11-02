@@ -31,29 +31,68 @@ export { mix, shade } from './render/utils';
 export class IslandRenderer extends IslandEffectsPainter {
   private raf = 0;
   private last = 0;
+  /** start() 之后为 true；stop() 是硬停，遮挡结束也不会自己恢复 */
+  private running = false;
+  /** 画面看不见的原因（滚出屏幕、被手机底部面板盖住…）；非空时不跑 rAF */
+  private readonly hiddenBy = new Set<string>();
 
   constructor(canvas: HTMLCanvasElement, wrap: HTMLElement) {
     super(canvas, wrap);
     this.readTheme();
     this.bindInteraction();
     this.resize();
+    // 地图滚出视口时不必每帧重画（手机上省电、不发热）；回到视口立刻恢复。
+    if (typeof IntersectionObserver === 'function') {
+      new IntersectionObserver((entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry) this.setOccluded('offscreen', !entry.isIntersecting);
+      }).observe(canvas);
+    }
   }
 
   start() {
-    const frame = (now: number) => {
-      const dt = Math.min(0.1, (now - (this.last || now)) / 1000);
-      this.last = now;
-      this.t += dt;
-      this.step(dt);
-      this.draw();
-      this.raf = requestAnimationFrame(frame);
-    };
-    this.raf = requestAnimationFrame(frame);
+    this.running = true;
+    this.schedule();
   }
 
   stop() {
+    this.running = false;
     cancelAnimationFrame(this.raf);
+    this.raf = 0;
   }
+
+  /** 某个原因让画面看不见 / 重新看得见；所有原因都解除后才恢复动画 */
+  setOccluded(reason: string, hidden: boolean) {
+    if (hidden) this.hiddenBy.add(reason);
+    else this.hiddenBy.delete(reason);
+    if (this.hiddenBy.size) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+    } else {
+      this.schedule();
+    }
+  }
+
+  private schedule() {
+    if (!this.running || this.raf || this.hiddenBy.size) return;
+    // 暂停期间的时间不补算：恢复后的第一帧 dt 为 0，小人不会瞬移。
+    this.last = 0;
+    this.raf = requestAnimationFrame(this.frame);
+  }
+
+  private readonly frame = (now: number) => {
+    this.raf = 0;
+    if (!this.running || this.hiddenBy.size) return;
+    this.raf = requestAnimationFrame(this.frame);
+    // 平时 30 帧（减少动效时 20 帧）；交互和过渡期间满帧。
+    const gap = now < this.boostUntil ? 0 : 1000 / (this.calm ? 20 : 30);
+    if (this.last && now - this.last < gap - 4) return;
+    const dt = Math.min(0.1, (now - (this.last || now)) / 1000);
+    this.last = now;
+    this.t += dt;
+    this.step(dt);
+    this.draw();
+  };
 
   private draw() {
     const s = this.scene;

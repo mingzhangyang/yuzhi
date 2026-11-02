@@ -52,6 +52,10 @@ export function setHTML(el: HTMLElement, html: string) {
   cache.set(el, html);
   el.innerHTML = html;
 }
+/** 忘掉 setHTML 记下的内容：下次即使字符串相同也会重写（用于把被用户改动过的控件复位） */
+export function forgetHTML(el: HTMLElement) {
+  cache.delete(el);
+}
 export function setText(el: HTMLElement, t: string) {
   if (el.textContent !== t) el.textContent = t;
 }

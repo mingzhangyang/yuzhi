@@ -12,6 +12,8 @@ import { itemsForDay, pendingDays, type SettleItem } from '../logic/days';
 import { fmtDay, relDay, weekday } from '../lib/date';
 import { t, type MessageKey } from '../i18n';
 import { isTopLayer, popLayer, pushLayer } from './layer';
+import { ICON } from './icons';
+import { MARKER } from '../island/render/style';
 
 const REASONS: SkipReason[] = ['interrupted', 'no_energy', 'not_important', 'postponed'];
 const REASON_KEYS: Record<SkipReason, MessageKey> = {
@@ -189,7 +191,7 @@ export class SettleSheet {
   private card(it: SettleItem, dec: A.Decision | undefined) {
     const s = this.store;
     const p = it.projectId && it.projectId !== CHORES ? s.project(it.projectId) : undefined;
-    const color = p ? roofOf(p.islandSlot) : it.projectId === CHORES ? '#8a8578' : 'var(--line)';
+    const color = p ? roofOf(p.islandSlot) : it.projectId === CHORES ? MARKER.chores : 'var(--line)';
     const where = p ? p.name : it.projectId === CHORES ? t('common.chores') : it.type === 'event' ? t('common.unclassified') : '';
     const meta = [it.type === 'event' && it.start ? `${timeOf(it.start)}–${timeOf(it.end!)} · ${t('settle.calendar')}` : t('settle.task'), where].filter(Boolean).join(' · ');
     const o = dec?.outcome;
@@ -200,7 +202,7 @@ export class SettleSheet {
     return `<div class="sitem ${o ? 'o-' + o : ''}" data-key="${esc(it.key)}" data-project="${esc(p?.id ?? '')}">
       <div class="swipe"><div class="under"><span class="l">${esc(t('settle.done'))} ✓</span><span class="r">${esc(t('settle.skipped'))}</span></div>
       <div class="scard"><i class="sw" style="background:${color}"></i><div class="tx"><b>${esc(it.title)}</b><span>${esc(meta)}${o === 'done' ? ' · ' + t('settle.done') : o === 'partial' ? ' · ' + t('settle.partial') : o === 'skipped' ? ' · ' + t('settle.skipped') : ''}</span></div>
-      <div class="st"><button class="d ${o === 'done' ? 'on' : ''}" data-set="done" aria-label="${esc(t('settle.done'))}" title="${esc(t('settle.done'))}">✓</button><button class="p ${o === 'partial' ? 'on' : ''}" data-set="partial" aria-label="${esc(t('settle.partial'))}" title="${esc(t('settle.partial'))}">½</button><button class="s ${o === 'skipped' ? 'on' : ''}" data-set="skipped" aria-label="${esc(t('settle.skipped'))}" title="${esc(t('settle.skipped'))}">✕</button></div></div></div>
+      <div class="st"><button class="d ${o === 'done' ? 'on' : ''}" data-set="done" aria-label="${esc(t('settle.done'))}" title="${esc(t('settle.done'))}">${ICON.check}</button><button class="p ${o === 'partial' ? 'on' : ''}" data-set="partial" aria-label="${esc(t('settle.partial'))}" title="${esc(t('settle.partial'))}">½</button><button class="s ${o === 'skipped' ? 'on' : ''}" data-set="skipped" aria-label="${esc(t('settle.skipped'))}" title="${esc(t('settle.skipped'))}">${ICON.cross}</button></div></div></div>
       ${reasons}</div>`;
   }
 

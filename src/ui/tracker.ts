@@ -5,11 +5,11 @@
 import type { Store } from '../store';
 import type { ISODate, LifeEntry, Project, SkipReason } from '../types';
 import { CHORES, LOCAL_CALENDAR_SOURCE_ID } from '../types';
-import { $, esc, setHTML, setText, toast } from './dom';
+import { $, esc, forgetHTML, setHTML, setText, toast } from './dom';
 import { closeModal, confirmModal, openModal } from './modal';
 import { roofOf, houseCount } from './scene';
 import * as A from '../actions';
-import { t as tr } from '../i18n';
+import { getLocale, t as tr } from '../i18n';
 import { formatHistoryEvent, formatLifeEntry } from '../history';
 import { addDays, dateOfStamp, diffDays, fmtDay, relDay } from '../lib/date';
 import { backlog, granary } from '../logic/metrics';
@@ -23,6 +23,8 @@ import { summaryHTML } from './ceremony';
 import { cultivationAreas, cultivationState } from '../logic/cultivation';
 import { bindDateSelects, dateSelect, readDate, restoreDateSelectValue } from './date-select';
 import { BottomSheet } from './sheet';
+import { ICON } from './icons';
+import { MARKER } from '../island/render/style';
 
 export type View =
   | { kind: 'overview' }
@@ -155,11 +157,22 @@ export class Tracker {
     }
   }
 
-  render() {
+  /** 上一次渲染的全部输入：都没变时（例如每分钟的日程刷新）不再重新拼整页 HTML */
+  private rendered: readonly unknown[] = [];
+
+  /** force：即使输入没变也重画，把用户改动过、但动作失败的控件复位 */
+  render(force = false) {
+    if (force) {
+      this.rendered = [];
+      forgetHTML(this.body);
+    }
     const s = this.store;
     let v = this.view;
     if (v.kind === 'project' && !s.project(v.id)) v = this.view = { kind: 'overview' };
     if (v.kind === 'task' && !s.task(v.id)) v = this.view = { kind: 'overview' };
+    const inputs = [s.data, s.dataVersion, JSON.stringify(v), s.today(), getLocale(), s.isReadOnly];
+    if (inputs.length === this.rendered.length && inputs.every((x, i) => x === this.rendered[i])) return;
+    this.rendered = inputs;
     let html = '';
     let title = '';
     let sub = '';
@@ -261,10 +274,10 @@ export class Tracker {
       <div class="sect">${esc(tr('tracker.cultivation'))} <small>${esc(tr('tracker.cultivationSub'))}</small></div>
       <div class="rows">${cultivationRows}</div>
       <div class="sect">${esc(tr('tracker.realInput'))} <small>${esc(tr('tracker.realInputSub'))}</small></div>
-      <button class="row" data-act="diaries"><i class="sw" style="background:#9b78a8"></i><span class="tx"><b>${esc(tr('tracker.diariesCount', { count: diaries.length }))}</b><span>${latestDiary ? `${fmtDay(latestDiary.date)} · ${esc(latestDiary.text.length > 46 ? latestDiary.text.slice(0, 45) + '…' : latestDiary.text)}` : esc(tr('tracker.diaryEmptyPreview'))}</span></span><span class="end">›</span></button>
-      <button class="row" data-act="schedules"><i class="sw" style="background:#7397a7"></i><span class="tx"><b>${esc(tr('tracker.schedulesCount', { count: localSchedules.length }))}</b><span>${nextSchedule ? `${relDay(dateOfStamp(nextSchedule.start), today)} ${timeOf(nextSchedule.start)} · ${esc(nextSchedule.title)}` : esc(tr('tracker.scheduleEmptyPreview'))}</span></span><span class="end">›</span></button>
+      <button class="row" data-act="diaries"><i class="sw" style="background:${MARKER.diary}"></i><span class="tx"><b>${esc(tr('tracker.diariesCount', { count: diaries.length }))}</b><span>${latestDiary ? `${fmtDay(latestDiary.date)} · ${esc(latestDiary.text.length > 46 ? latestDiary.text.slice(0, 45) + '…' : latestDiary.text)}` : esc(tr('tracker.diaryEmptyPreview'))}</span></span><span class="end">›</span></button>
+      <button class="row" data-act="schedules"><i class="sw" style="background:${MARKER.schedule}"></i><span class="tx"><b>${esc(tr('tracker.schedulesCount', { count: localSchedules.length }))}</b><span>${nextSchedule ? `${relDay(dateOfStamp(nextSchedule.start), today)} ${timeOf(nextSchedule.start)} · ${esc(nextSchedule.title)}` : esc(tr('tracker.scheduleEmptyPreview'))}</span></span><span class="end">›</span></button>
       <div class="sect">${esc(tr('tracker.dock'))} <small>${esc(tr('tracker.dockMeta', { ships: b.dock, overdue: b.overdue }))}</small></div>
-      <button class="row" data-act="dock"><i class="sw" style="background:#a8794a"></i><span class="tx"><b>${esc(b.dock ? tr('tracker.shipsAtDock', { count: b.dock }) : tr('tracker.dockEmpty'))}</b><span>${esc(tr(b.dock ? 'tracker.dockBusyHint' : 'tracker.dockEmptyHint'))}</span></span><span class="end">›</span></button>
+      <button class="row" data-act="dock"><i class="sw" style="background:${MARKER.dock}"></i><span class="tx"><b>${esc(b.dock ? tr('tracker.shipsAtDock', { count: b.dock }) : tr('tracker.dockEmpty'))}</b><span>${esc(tr(b.dock ? 'tracker.dockBusyHint' : 'tracker.dockEmptyHint'))}</span></span><span class="end">›</span></button>
       ${this.coastRow()}
       ${groups.length ? `<div class="sect">${esc(tr('tracker.calendar'))} <small>${esc(tr('tracker.unclassifiedCount', { count: groups.length }))}</small></div><button class="row" data-act="classify"><i class="sw" style="background:var(--dusk)"></i><span class="tx"><b>${esc(tr('tracker.unclassifiedTitle'))}</b><span>${esc(tr('tracker.unclassifiedHint'))}</span></span><span class="end">›</span></button>` : ''}
     `;
@@ -281,7 +294,7 @@ export class Tracker {
     const currentIds = new Set(entries.map((entry) => entry.id));
     const deletedIds = history.subjectIds('diary').filter((id) => !currentIds.has(id));
     const rows = entries
-      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(versionLabel(history.diaryVersions(entry.id).length))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteDiaryAria', { date: fmtDay(entry.date) }))}">✕</button></div></div>`)
+      .map((entry) => `<div class="task"><button type="button" class="tt history-link" data-act="diary" data-id="${esc(entry.id)}"><b>${esc(relDay(entry.date, today))} · ${esc(fmtDay(entry.date))}</b><span>${esc(entry.text.length > 100 ? entry.text.slice(0, 99) + '…' : entry.text)}</span></button><div class="acts"><span class="chip">${esc(versionLabel(history.diaryVersions(entry.id).length))}</span><button class="iconbtn" data-act="delete-diary" data-id="${esc(entry.id)}" title="${esc(tr('common.delete'))}" aria-label="${esc(tr('tracker.deleteDiaryAria', { date: fmtDay(entry.date) }))}">${ICON.cross}</button></div></div>`)
       .join('');
     const deletedRows = deletedIds
       .map((id) => {
@@ -316,7 +329,7 @@ export class Tracker {
       .join('');
     const html = `
       ${this.back$(tr('tracker.diaries'))}
-      <div class="who"><div class="emblem" style="background:#9b78a822">✎</div><div><div class="fname">${esc(tr('tracker.diaryOf', { date: fmtDay(snapshot.date) }))}</div><div class="fmeta">${esc(tr(current ? 'tracker.diaryAlive' : 'tracker.diaryDeletedHistory'))} · ${esc(versionLabel(versions.length))}</div></div></div>
+      <div class="who"><div class="emblem" style="background:${MARKER.diary}22">✎</div><div><div class="fname">${esc(tr('tracker.diaryOf', { date: fmtDay(snapshot.date) }))}</div><div class="fmeta">${esc(tr(current ? 'tracker.diaryAlive' : 'tracker.diaryDeletedHistory'))} · ${esc(versionLabel(versions.length))}</div></div></div>
       <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentDiary' : 'tracker.deleted'))}</span><span class="chip">${esc(tr('tracker.historyCount', { count: life.length }))}</span></div>
       <div class="journal-body">${esc(snapshot.text).replace(/\n/g, '<br>')}</div>
       ${current ? `<div class="btnrow"><button class="btn small primary" data-act="edit-diary" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-diary" data-id="${esc(id)}">${esc(tr('tracker.deleteBody'))}</button></div>` : ''}
@@ -351,7 +364,7 @@ export class Tracker {
             : tr('common.unclassified');
         const history = settled
           ? `<span class="chip">${esc(tr('tracker.keptInHistory'))}</span>`
-          : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="${esc(tr('tracker.deleteSchedule'))}" aria-label="${esc(tr('tracker.deleteScheduleAria', { title: event.title }))}">✕</button>`;
+          : `<button class="iconbtn" data-act="delete-schedule" data-id="${esc(event.id)}" title="${esc(tr('tracker.deleteSchedule'))}" aria-label="${esc(tr('tracker.deleteScheduleAria', { title: event.title }))}">${ICON.cross}</button>`;
         return `<div class="task"><button type="button" class="tt history-link" data-act="schedule" data-id="${esc(event.id)}"><b>${esc(event.title)}</b><span>${esc(relDay(date, today))} · ${timeOf(event.start)}–${timeOf(event.end)} · ${esc(where)}</span></button><div class="acts"><span class="chip">${esc(versionLabel(historyIndex.scheduleVersions(event.id).length))}</span>${history}</div></div>`;
       })
       .join('');
@@ -395,7 +408,7 @@ export class Tracker {
       .join('');
     const html = `
       ${this.back$(tr('tracker.localSchedules'))}
-      <div class="who"><div class="emblem" style="background:#7397a722">◷</div><div><div class="fname">${esc(snapshot.title)}</div><div class="fmeta">${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)} · ${esc(where)}</div></div></div>
+      <div class="who"><div class="emblem" style="background:${MARKER.schedule}22">◷</div><div><div class="fname">${esc(snapshot.title)}</div><div class="fmeta">${esc(fmtDay(snapshot.date))} · ${esc(snapshot.start)}–${esc(snapshot.end)} · ${esc(where)}</div></div></div>
       <div class="chips"><span class="chip ${current ? 'ok' : 'warn'}">${esc(tr(current ? 'tracker.currentSchedule' : 'tracker.deleted'))}</span>${settled ? `<span class="chip">${esc(tr('tracker.settledFact'))}</span>` : ''}<span class="chip">${esc(versionLabel(versions.length))}</span></div>
       ${current && !settled ? `<div class="btnrow"><button class="btn small primary" data-act="edit-schedule" data-id="${esc(id)}">${esc(tr('common.edit'))}</button><button class="btn small danger" data-act="delete-schedule" data-id="${esc(id)}">${esc(tr('tracker.deleteSchedule'))}</button></div>` : ''}
       <div class="sect">${esc(tr('common.versionHistory'))} <small>${versions.length}</small></div>
@@ -430,7 +443,7 @@ export class Tracker {
       .map((t) => {
         const late = t.scheduledFor && t.scheduledFor < today;
         const meta = [t.scheduledFor ? relDay(t.scheduledFor, today) + (late ? ' · ' + tr('tracker.overdue') : '') : tr('tracker.noDate'), t.postponeCount ? tr('tracker.postponedCount', { count: t.postponeCount }) : '', stage === 3 ? tr('tracker.mayAbandon') : ''].filter(Boolean).join(' · ');
-        return `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></button>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="${esc(tr('tracker.doneToday'))}" aria-label="${esc(tr('tracker.doneToday'))}">✓</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="${esc(tr('tracker.reschedule'))}" aria-label="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="${esc(tr('tracker.notImportant'))}" aria-label="${esc(tr('tracker.notImportant'))}">✕</button></div>` : ''}</div>`;
+        return `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="${late ? 'late' : ''}">${esc(meta)}</span></button>${active ? `<div class="acts"><button class="iconbtn" data-act="done" data-id="${esc(t.id)}" title="${esc(tr('tracker.doneToday'))}" aria-label="${esc(tr('tracker.doneToday'))}">${ICON.check}</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" title="${esc(tr('tracker.reschedule'))}" aria-label="${esc(tr('tracker.reschedule'))}">${ICON.calendar}</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" title="${esc(tr('tracker.notImportant'))}" aria-label="${esc(tr('tracker.notImportant'))}">${ICON.cross}</button></div>` : ''}</div>`;
       })
       .join('');
     const life = lifeBookEntries(s.data, { type: 'project', id: p.id }, stageLifeEntries(s.data, today));
@@ -515,7 +528,7 @@ export class Tracker {
         overdue
           .map((t) => {
             const p = s.project(t.projectId);
-            return `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · ${esc(tr('tracker.originally', { date: relDay(t.scheduledFor!, today) }))}</span></button><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">${esc(tr('tracker.toToday'))}</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.reschedule'))}" title="${esc(tr('tracker.reschedule'))}">📅</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.notImportant'))}" title="${esc(tr('tracker.notImportant'))}">✕</button></div></div>`;
+            return `<div class="task"><button type="button" class="tt history-link" data-act="task" data-id="${esc(t.id)}"><b>${esc(t.title)}</b><span class="late">${esc(p?.name ?? '')} · ${esc(tr('tracker.originally', { date: relDay(t.scheduledFor!, today) }))}</span></button><div class="acts"><button class="btn small" data-act="to-today" data-id="${esc(t.id)}">${esc(tr('tracker.toToday'))}</button><button class="iconbtn" data-act="resched" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.reschedule'))}" title="${esc(tr('tracker.reschedule'))}">${ICON.calendar}</button><button class="iconbtn" data-act="drop" data-id="${esc(t.id)}" aria-label="${esc(tr('tracker.notImportant'))}" title="${esc(tr('tracker.notImportant'))}">${ICON.cross}</button></div></div>`;
           })
           .join('') || `<p class="empty">${esc(tr('tracker.noOverdue'))}</p>`
       }
@@ -546,7 +559,7 @@ export class Tracker {
     const marks = s.data.projects.filter((p) => p.status === 'done' && p.resting === 'landmark').length;
     const books = s.data.projects.filter((p) => (p.status === 'done' && p.resting !== 'landmark') || p.status === 'closed').length;
     if (!marks && !books) return '';
-    return `<div class="sect">${esc(tr('tracker.coastLighthouse'))}</div><button class="row" data-act="archive"><i class="sw" style="background:#c8473a"></i><span class="tx"><b>${esc(tr('tracker.coastMeta', { marks, books }))}</b><span>${esc(tr('tracker.coastHint'))}</span></span><span class="end">›</span></button>`;
+    return `<div class="sect">${esc(tr('tracker.coastLighthouse'))}</div><button class="row" data-act="archive"><i class="sw" style="background:${MARKER.lighthouse}"></i><span class="tx"><b>${esc(tr('tracker.coastMeta', { marks, books }))}</b><span>${esc(tr('tracker.coastHint'))}</span></span><span class="end">›</span></button>`;
   }
 
   /** 档案馆：山顶的灯塔。地标、落成之书（按年份）、未竟之书 */
@@ -644,7 +657,7 @@ export class Tracker {
 
   /** 「不重要了」的两步确认：按钮先变成「确认？」，几秒内不再点就恢复原样 */
   private armDrop(el: HTMLElement, title: string) {
-    const text = el.textContent ?? '';
+    const markup = el.innerHTML;
     const label = el.getAttribute('aria-label') ?? '';
     el.dataset.armed = 'true';
     el.classList.add('armed');
@@ -654,7 +667,7 @@ export class Tracker {
       if (!el.isConnected || el.dataset.armed !== 'true') return;
       delete el.dataset.armed;
       el.classList.remove('armed');
-      el.textContent = text;
+      el.innerHTML = markup;
       el.setAttribute('aria-label', label);
     }, 3500);
   }
@@ -842,7 +855,7 @@ export class Tracker {
       } catch (err) {
         if (err instanceof A.ActionError) {
           toast(err.message, true);
-          this.render();
+          this.render(true);
         } else {
           throw err;
         }

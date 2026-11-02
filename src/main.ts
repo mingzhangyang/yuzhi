@@ -2,6 +2,7 @@ import './styles.css';
 import { exportBackup, parseBackup } from './db';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
+import { MARKER } from './island/render/style';
 import { $, esc, pickFile, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
@@ -27,6 +28,11 @@ import { AutoBackup } from './ui/auto-backup';
 
 // 标题衬线字体按需异步加载：不阻塞首屏，加载完成前用系统宋体 / 衬线回退（font-display: swap）。
 void import('./fonts.css');
+
+/** 还没有任何现实输入的新岛：没有项目、任务、日历、日程、日记，也没有结算 */
+function isBlankIsland(data: { projects: unknown[]; tasks: unknown[]; sources: unknown[]; events: unknown[]; diaries: unknown[]; entries: unknown[] }): boolean {
+  return !data.projects.length && !data.tasks.length && !data.sources.length && !data.events.length && !data.diaries.length && !data.entries.length;
+}
 
 async function boot() {
   initI18n({ detectBrowser: true });
@@ -220,7 +226,7 @@ async function boot() {
 
   const renderLegend = () => {
     $('legend').innerHTML =
-      `<span><i style="background:${ROOFS[0]}"></i>${t('legend.project')}</span><span>${t('legend.todo')}</span><span><i style="background:#a8794a"></i>${t('legend.dock')}</span><span><i style="background:#e2ad2f"></i>${t('legend.granary')}</span><span><i style="background:#d8dcdc"></i>${t('legend.fog')}</span><span>${t('legend.cultivation')}</span><span>${t('legend.agenda')}</span><span>${t('legend.drift')}</span>`;
+      `<span><i style="background:${ROOFS[0]}"></i>${t('legend.project')}</span><span>${t('legend.todo')}</span><span><i style="background:${MARKER.dock}"></i>${t('legend.dock')}</span><span><i style="background:${MARKER.granary}"></i>${t('legend.granary')}</span><span><i style="background:${MARKER.fog}"></i>${t('legend.fog')}</span><span>${t('legend.cultivation')}</span><span>${t('legend.agenda')}</span><span>${t('legend.drift')}</span>`;
   };
   const syncLanguageButton = () => {
     const button = $('langBtn');
@@ -253,6 +259,8 @@ async function boot() {
     onViewChange: () => update(),
   });
   tracker.bindChange();
+  // 手机上追踪栏展开时整块盖住地图，暂停地图动画。
+  tracker.sheet.onCoverChange = (covering) => renderer.setOccluded('sheet', covering);
 
   ceremony = new Ceremony(store, {
     pause: (on) => (renderer.paused = on),
@@ -439,6 +447,8 @@ async function boot() {
     }, delay);
   }
 
+  /** 上一次算指标 / 编年史时的输入；buildStats() 重建了指标卡之后要清空它 */
+  let derivedFor: { data: unknown; version: number; today: string; locale: string } = { data: null, version: -1, today: '', locale: '' };
   function update() {
     if (syncThemeDataset(store.data.settings.theme, document.documentElement.dataset)) {
       // Store notifications include persistence rollback and peer reloads.
@@ -453,7 +463,15 @@ async function boot() {
     const now = store.clock();
     const today = localDate(now);
     const agenda = agendaAt(store.data, now);
-    updateStats(store);
+    // 指标和编年史只取决于数据、日期和语言：只是换视图或到点刷新时不重算。
+    const derivedChanged = store.data !== derivedFor.data || store.dataVersion !== derivedFor.version
+      || today !== derivedFor.today || getLocale() !== derivedFor.locale;
+    if (derivedChanged) {
+      derivedFor = { data: store.data, version: store.dataVersion, today, locale: getLocale() };
+      // 一片空白的新岛上，「粮仓 9 小时、推进 0、状态 —」只是噪音：有了第一条记录再显示指标。
+      $('stats').hidden = isBlankIsland(store.data);
+      updateStats(store);
+    }
     tracker.render();
     renderer.setScene(buildScene(store, selectionOf(tracker.view), dusk, now, agenda));
 
@@ -485,9 +503,11 @@ async function boot() {
     const ps = store.activeProjects().length;
     setText($('mapDesc'), ps ? t('map.descActive', { count: ps }) : t('map.descEmpty'));
 
-    const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
-    setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(formatChronicleLine(c))}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
-    setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
+    if (derivedChanged) {
+      const lines = store.data.chronicle.map((c, i) => [c, i] as const).sort((a, b) => b[0].date.localeCompare(a[0].date) || b[1] - a[1]);
+      setHTML($('chron'), lines.length ? lines.slice(0, 80).map(([c]) => `<li class="k-${c.kind}"><time>${esc(relDay(c.date, today))}</time><span>${esc(formatChronicleLine(c))}</span></li>`).join('') : `<li class="empty">${esc(t('chron.empty'))}</li>`);
+      setText($('chronCount'), t('chron.count', { count: store.data.chronicle.length }));
+    }
     safetyBar.sync();
     scheduleAgendaRefresh(agenda, now);
   }
@@ -532,6 +552,7 @@ async function boot() {
     const trackerDraft = tracker.captureDraftState();
     syncLanguageButton();
     buildStats();
+    derivedFor = { data: null, version: -1, today: '', locale: '' };
     renderLegend();
     update();
     tracker.restoreDraftState(trackerDraft);
@@ -710,14 +731,7 @@ async function boot() {
   applyTheme();
 
   // 第一次打开
-  if (
-    !store.isReadOnly &&
-    !store.data.projects.length &&
-    !store.data.tasks.length &&
-    !store.data.sources.length &&
-    !store.data.events.length &&
-    !store.data.diaries.length
-  ) {
+  if (!store.isReadOnly && isBlankIsland(store.data)) {
     openWelcome({
       project: () => openNew(store, 'project', openProjectAfterCreate),
       calendar: () => openCalendar(store, afterImport),

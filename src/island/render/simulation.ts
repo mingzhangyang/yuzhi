@@ -67,6 +67,7 @@ export abstract class IslandSimulation extends IslandInteraction {
   }
 
   setScene(s: Scene) {
+    if (s !== this.scene) this.boost();
     const suppress = this.suppressCuesOnce || this.cueSuppressionDepth > 0;
     const prev = suppress ? null : this.scene;
     this.suppressCuesOnce = false;
@@ -205,6 +206,7 @@ export abstract class IslandSimulation extends IslandInteraction {
 
   /** 一块砖飞进村落后，让村落亮一下 */
   pulse(projectId: string) {
+    this.boost();
     this.triggerPulse(projectId);
   }
 
