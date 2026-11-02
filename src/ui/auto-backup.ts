@@ -63,12 +63,14 @@ export class AutoBackup {
   onChange: () => void = () => {};
   private record: AutoBackupRecord | undefined;
   private readonly ready: Promise<void>;
+  private readonly supported: boolean;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly store: Store) {
     const supported = Boolean(picker())
       && typeof FileSystemFileHandle !== 'undefined'
       && 'createWritable' in FileSystemFileHandle.prototype;
+    this.supported = supported;
     this.status = supported ? { kind: 'off' } : { kind: 'unsupported' };
     this.ready = supported ? this.load() : Promise.resolve();
   }
@@ -158,13 +160,25 @@ export class AutoBackup {
     else this.setStatus({ kind: 'ready', ...base });
   }
 
-  private async saveRecord(record: AutoBackupRecord | undefined) {
+  /** Returns false when device storage refused the write. */
+  private async saveRecord(record: AutoBackupRecord | undefined): Promise<boolean> {
     this.record = record;
     try {
       if (record) await devicePut(RECORD_KEY, record);
       else await deviceDelete(RECORD_KEY);
+      return true;
     } catch {
-      // Device storage unavailable: the choice lasts for this page only.
+      return false;
+    }
+  }
+
+  /** Device storage that can be read at all (as opposed to refusing writes, e.g. a full quota). */
+  private async deviceReadable(): Promise<boolean> {
+    try {
+      await deviceGet(RECORD_KEY);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -174,6 +188,9 @@ export class AutoBackup {
    */
   run(reason: AutoBackupReason): Promise<boolean> {
     return this.enqueue(async () => {
+      // Without folder access there is nothing to run, and the "unsupported"
+      // status (with its guidance) must not be replaced by "off".
+      if (!this.supported) return false;
       await this.ready;
       const context = this.writeContext();
       if (!context) return false;
@@ -184,7 +201,11 @@ export class AutoBackup {
         return false;
       }
       const today = this.store.today();
-      if (!autoBackupDue(record.lastDate, today, reason)) return false;
+      if (!autoBackupDue(record.lastDate, today, reason)) {
+        // Reconciling may have loaded a choice made in another tab.
+        await this.refreshStatus();
+        return false;
+      }
 
       let permission: PermissionState = 'granted';
       try {
@@ -267,7 +288,17 @@ export class AutoBackup {
       }
       if (!context.isCurrent()) return false;
       const record: AutoBackupRecord = { handle, folder: handle.name };
-      await this.saveRecord(record);
+      const previous = this.record;
+      if (!(await this.saveRecord(record)) && await this.deviceReadable()) {
+        // Storage can be read but refused this write (for example a full
+        // quota): the next reconcile would silently drop the choice, so say
+        // the setup failed instead of pretending it was remembered. When
+        // device storage is unavailable altogether, the choice simply lasts
+        // for this page.
+        this.record = previous;
+        this.setStatus({ kind: 'error', folder: record.folder, lastDate: previous?.lastDate, message: t('auto.notRemembered') });
+        return false;
+      }
       return this.write(record, this.store.today(), context);
     });
   }

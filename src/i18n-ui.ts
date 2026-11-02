@@ -279,6 +279,7 @@ export const uiZh = {
   'auto.allow': '允许并备份',
   'auto.failed': '自动备份到「{folder}」失败：{error}',
   'auto.rechoose': '重新选择文件夹',
+  'auto.notRemembered': '浏览器没能记住这个文件夹（本地存储可能已满），请清理空间后再选一次',
 } as const;
 
 export type UiMessageKey = keyof typeof uiZh;
@@ -564,4 +565,5 @@ export const uiEn: Record<UiMessageKey, string> = {
   'auto.allow': 'Allow and back up',
   'auto.failed': 'Automatic backup to “{folder}” failed: {error}',
   'auto.rechoose': 'Choose folder again',
+  'auto.notRemembered': 'the browser couldn’t remember this folder (local storage may be full). Free up space and choose it again',
 };

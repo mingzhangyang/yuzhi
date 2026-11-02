@@ -25,7 +25,15 @@ import type { AutoBackup } from './auto-backup';
 /** 按浏览器保存：要提醒的正是这个浏览器里的这一份数据。 */
 export const SAFETY_STATE_KEY = 'yuzhi:data-safety';
 
+/**
+ * Set when localStorage refused a write (blocked storage, full quota). The
+ * page then keeps using its own copy, so "Later", "Got it", "Not today" and
+ * a successful export still take effect for this page.
+ */
+let pageOnlyState: BackupReminderState | undefined;
+
 export function readSafetyState(): BackupReminderState {
+  if (pageOnlyState) return pageOnlyState;
   try {
     const raw = localStorage.getItem(SAFETY_STATE_KEY);
     return raw ? parseBackupReminderState(JSON.parse(raw)) : {};
@@ -38,8 +46,9 @@ export function readSafetyState(): BackupReminderState {
 function writeSafetyState(state: BackupReminderState) {
   try {
     localStorage.setItem(SAFETY_STATE_KEY, JSON.stringify(state));
+    pageOnlyState = undefined;
   } catch {
-    // Reminders are a convenience; failing to remember a snooze is harmless.
+    pageOnlyState = state;
   }
 }
 
