@@ -8,6 +8,18 @@ export const BEACH = '#e9d9ae';
 export const SNOW_SHADE = '#d6e0e8';
 export const WARM = '255,206,110';
 export const LANTERN = '255,120,70';
+/**
+ * 地图景物的标记色：画布、图例、追踪栏的色块和结算卡片共用同一份，
+ * 改一处不会出现「图例说粮仓是黄色，标签却是另一种黄」。
+ */
+export const MARKER = {
+  dock: '#a8794a',
+  granary: '#e2ad2f',
+  chores: '#8a8578',
+  fog: '#d8dcdc',
+  diary: '#9b78a8',
+  schedule: '#7397a7',
+} as const;
 export const FIREWORK = ['#ffd36b', '#ff7a6b', '#8fd3ff', '#c99bff', '#9dff9b', '#ffffff', '#ffb3d9'];
 
 /** 村落房屋相对地块宽度的比例。 */

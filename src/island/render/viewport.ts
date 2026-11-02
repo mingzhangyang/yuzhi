@@ -24,6 +24,10 @@ export abstract class IslandViewport {
   protected theme: RenderTheme = { label: '#fff', ink: '#263022', line: '#dfe2d2', accent: '#4f7136', accentInk: '#fff', sea: '#a9d3dc', seaDeep: '#8cc0cc' };
   protected t = 0;
   protected calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** 画布文字与页面同一套无衬线字体（--font-sans），在 readTheme 时读取 */
+  protected fontFamily = '-apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  /** measureText 很贵：标签每帧都要量，按「字体 + 文本」缓存宽度 */
+  private widths = new Map<string, number>();
 
   constructor(protected canvas: HTMLCanvasElement, protected wrap: HTMLElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -43,7 +47,28 @@ export abstract class IslandViewport {
       sea: g('--sea', '#a9d3dc'),
       seaDeep: g('--sea-deep', '#8cc0cc'),
     };
+    this.fontFamily = g('--font-sans', this.fontFamily);
+    this.widths.clear();
     this.onThemeChanged();
+  }
+
+  protected font(weight: number, size: number): string {
+    return `${weight} ${size}px ${this.fontFamily}`;
+  }
+
+  protected textWidth(font: string, text: string): number {
+    const key = `${font}\u0000${text}`;
+    let w = this.widths.get(key);
+    if (w === undefined) {
+      const c = this.ctx;
+      c.save();
+      c.font = font;
+      w = c.measureText(text).width;
+      c.restore();
+      if (this.widths.size > 400) this.widths.clear();
+      this.widths.set(key, w);
+    }
+    return w;
   }
 
 

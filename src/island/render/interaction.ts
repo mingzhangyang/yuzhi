@@ -62,10 +62,23 @@ export abstract class IslandInteraction extends IslandViewport {
     return `${tr('island.villagePeople', { name: v.name, count: v.openCount })}${agendaParts.map((part) => ` · ${part}`).join('')}${stageTxt}`;
   }
 
-  protected villageLabelAnchor(v: VillageView): [number, number] {
+  /** 村名标签的理想位置（避让之前） */
+  protected villageLabelBase(v: VillageView): [number, number] {
     const ctr = this.map.villages[v.slot].center;
     const [x, y] = this.iso(ctr.i, ctr.j);
     return [x, y - this.view.tw * 1.05];
+  }
+
+  /**
+   * 上一帧标签避让给每个标签的纵向偏移（按标签 id）。存偏移而不是绝对坐标：
+   * 平移、缩放后到下一帧之前，点击判定仍落在画出来的位置附近。
+   */
+  protected labelShift = new Map<string, number>();
+
+  /** 村名标签实际画在哪里：点击判定、键盘浏览和绘制共用 */
+  protected villageLabelAnchor(v: VillageView): [number, number] {
+    const [x, y] = this.villageLabelBase(v);
+    return [x, y + (this.labelShift.get(`village:${v.projectId}`) ?? 0)];
   }
 
   protected choresLabelText(ch: ChoresView): string {
@@ -89,12 +102,8 @@ export abstract class IslandInteraction extends IslandViewport {
   protected labelBox(text: string, dot: boolean, compact: boolean): { font: string; bw: number; bh: number; pad: number } {
     const tw = this.view.tw;
     const size = compact ? 9.5 : tw < 30 ? 10.5 : 12;
-    const font = `600 ${size}px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif`;
-    const c = this.ctx;
-    c.save();
-    c.font = font;
-    const w = c.measureText(text).width;
-    c.restore();
+    const font = this.font(600, size);
+    const w = this.textWidth(font, text);
     // pad：文字左边距（带圆点时让出圆点的位置）；右边距另算
     const pad = compact ? (dot ? 12.5 : 5) : dot ? 16 : 7;
     const right = compact ? 5 : dot ? 6 : 7;

@@ -39,6 +39,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 #map:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
 [hidden] { display: none !important; }
+html.layer-open { overflow: hidden; }
 
 .wrap { max-width: 1360px; margin: 0 auto; padding: 18px clamp(12px, 2.4vw, 28px) 36px; }
 header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
@@ -203,7 +204,8 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 
 /* 对话框 */
 .dlg-back { position: fixed; inset: 0; z-index: 50; background: rgba(22,28,16,.42); display: flex; align-items: center; justify-content: center; padding: 20px; }
-.dlg { outline: none; width: 100%; max-width: 480px; max-height: 86vh; overflow: auto; padding: 20px 20px 18px; border-radius: 16px; }
+.dlg, .sbox, .cbox { outline: none; }
+.dlg { width: 100%; max-width: 480px; max-height: 86vh; overflow: auto; padding: 20px 20px 18px; border-radius: 16px; }
 .dlg .kick { font-size: 12px; color: var(--warn); font-weight: 600; }
 .dlg h2 { font-family: var(--font-display); font-size: 21px; margin: 4px 0 8px; line-height: 1.35; }
 .dlg p { margin: 0 0 8px; line-height: 1.7; }
@@ -251,7 +253,7 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .daytabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
 .daytabs button { flex: none; border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 3px 11px; font-size: 12px; cursor: pointer; color: var(--muted); }
 .daytabs button.on { border-color: var(--dusk); color: var(--dusk); background: var(--dusk-soft); font-weight: 600; }
-.daytabs button.fog::after { content: " 雾"; font-size: 10.5px; color: var(--faint); }
+.daytabs .fog-tag { margin-left: 4px; font-size: 10.5px; color: var(--faint); }
 .sbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 18px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .slist { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 14px 6px; -webkit-overflow-scrolling: touch; }
 .sitem { margin-bottom: 8px; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
