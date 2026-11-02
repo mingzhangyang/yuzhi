@@ -489,11 +489,13 @@ async function boot() {
     if (store.isReadOnly) return;
     // Replay missed time-passage boundaries before archive lines advance the
     // chronicle boundary used for legacy compatibility.
-    const archived = store.batch(() => {
+    const { archived, repaired } = store.batch(() => {
+      const repaired = A.repairTruncatedYearDates(store);
       A.refreshStages(store);
-      return A.archiveOldDays(store);
+      return { archived: A.archiveOldDays(store), repaired };
     });
     if (archived.length) toast(t('daily.archived', { days: archived.map(fmtDay).join(getLocale() === 'zh-CN' ? '、' : ', ') }));
+    else if (repaired.length) toast(t('daily.repairedDates', { count: repaired.length }));
   }
 
   function resumeWriterDuties() {

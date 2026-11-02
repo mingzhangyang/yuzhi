@@ -5,7 +5,7 @@ import type { Store } from '../store';
 import { uid } from '../lib/id';
 import { localDate, startOfLocalDay } from '../lib/date';
 import { historyEvent } from '../history-types';
-import { ActionError, operation, semanticLife } from './shared';
+import { ActionError, assertPickedDate, operation, semanticLife } from './shared';
 import { entryId } from '../logic/days';
 import { applyRules, matchRule } from '../logic/classify';
 
@@ -173,6 +173,7 @@ function buildLocalSchedule(
   const title = input.title.trim();
   if (!title) throw new ActionError('error.scheduleTitleRequired');
   if (!LOCAL_YMD.test(input.date)) throw new ActionError('error.scheduleDateFormat');
+  assertPickedDate(input.date);
   if (!LOCAL_HM.test(input.start) || !LOCAL_HM.test(input.end)) {
     throw new ActionError('error.scheduleTimeFormat');
   }

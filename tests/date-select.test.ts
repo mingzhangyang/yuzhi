@@ -55,5 +55,11 @@ describe('shared date select', () => {
     expect(readDate({ value: 'other' } as HTMLSelectElement)).toBeUndefined();
     expect(readDate({ value: '' } as HTMLSelectElement)).toBeUndefined();
     expect(readDate({ value: '2026-10-08' } as HTMLSelectElement)).toBe('2026-10-08');
+    expect(readDate({ value: '0002-11-03' } as HTMLSelectElement)).toBeUndefined();
+  });
+
+  it('labels a custom date in another year with its year', () => {
+    expect(dateSelect('date', today, { current: '2027-01-05', withNone: true, mode: 'task' }))
+      .toContain('<option value="2027-01-05" selected>2027年1月5日</option>');
   });
 });

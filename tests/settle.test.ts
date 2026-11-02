@@ -164,6 +164,16 @@ describe('指标', () => {
     // c 没做且没改期 → 过期；码头 1 件
     expect(backlog(h.store.data, h.today)).toEqual({ dock: 1, overdue: 1, total: 2 });
   });
+
+  it('YZ-F4：结算了但当天没有条目，状态卡知道这一天结算过', () => {
+    const h = makeStore('2026-11-01', '2026-11-01');
+    expect(condition(h.store.data, h.today)).toEqual({ ratio: null, settled: 0, good: 0, days: 0 });
+    settleDay(h.store, h.today, new Map());
+    expect(condition(h.store.data, h.today)).toEqual({ ratio: null, settled: 0, good: 0, days: 1 });
+    // 一周之后不再计入近 7 天
+    h.advance(7);
+    expect(condition(h.store.data, h.today).days).toBe(0);
+  });
 });
 
 describe('日历归类', () => {

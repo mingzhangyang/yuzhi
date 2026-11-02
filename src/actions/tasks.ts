@@ -2,12 +2,14 @@
 import type { ISODate, Task } from '../types';
 import type { Store } from '../store';
 import { uid } from '../lib/id';
+import { isPlausibleDate } from '../lib/date';
 import { historyEvent } from '../history-types';
-import { ActionError, operation, putSettlementEntry, q, semanticLife } from './shared';
+import { ActionError, assertPickedDate, operation, putSettlementEntry, q, semanticLife } from './shared';
 
 function createTaskImpl(store: Store, o: { title: string; projectId?: string; scheduledFor?: ISODate }): Task {
   const title = o.title.trim();
   if (!title) throw new ActionError('error.taskRequired');
+  assertPickedDate(o.scheduledFor);
   const today = store.today();
   const projectId = o.projectId && store.project(o.projectId)?.status === 'active' ? o.projectId : undefined;
   const t: Task = { id: uid('t'), title, projectId, scheduledFor: projectId ? o.scheduledFor : undefined, status: 'open', createdAt: today };
@@ -30,6 +32,7 @@ function arrangeTaskImpl(store: Store, taskId: string, projectId: string, date?:
   const t = store.task(taskId);
   const p = store.project(projectId);
   if (!t || !p || p.status !== 'active') return;
+  assertPickedDate(date);
   const today = store.today();
   operation(store, {
     date: today,
@@ -59,6 +62,7 @@ function declineTaskImpl(store: Store, taskId: string) {
 function rescheduleTaskImpl(store: Store, taskId: string, date: ISODate | undefined) {
   const t = store.task(taskId);
   if (!t || t.status !== 'open') return;
+  assertPickedDate(date);
   const today = store.today();
   operation(store, {
     date: today,
@@ -102,6 +106,7 @@ function moveTaskImpl(store: Store, taskId: string, projectId: string | undefine
 function editTaskPlanImpl(store: Store, taskId: string, projectId: string | undefined, date: ISODate | undefined) {
   const before = store.task(taskId);
   if (!before || before.status !== 'open') return;
+  assertPickedDate(date);
 
   if (projectId !== before.projectId) {
     if (!before.projectId && projectId) arrangeTaskImpl(store, taskId, projectId, date);
@@ -211,6 +216,32 @@ function pullIntoDayImpl(store: Store, taskId: string, date: ISODate) {
   }
 }
 
+/**
+ * 旧版日期框在逐位输入年份时会提交 0002-11-03 这类日期（YZ-F1），任务因此被算作过期。
+ * 1900 年以前的日期不可能是用户本意：月日是用户选的，年份按任务创建那年补回。
+ * 只修正这一种可以确定的错误，不碰其它日期。返回修正过的任务 id。
+ */
+function repairTruncatedYearDatesImpl(store: Store): string[] {
+  const repaired: string[] = [];
+  for (const task of store.tasks()) {
+    const bad = task.scheduledFor;
+    if (task.status !== 'open' || !bad || isPlausibleDate(bad)) continue;
+    const m = /^(\d{4})-(\d{2}-\d{2})$/.exec(bad);
+    if (!m || Number(m[1]) >= 1900) continue;
+    const fixed = `${task.createdAt.slice(0, 4)}-${m[2]}`;
+    if (!isPlausibleDate(fixed)) continue;
+    operation(store, {
+      date: store.today(),
+      kind: 'task-rescheduled',
+      projectId: task.projectId,
+      taskId: task.id,
+      payload: { fromDate: bad, toDate: fixed, source: 'repair-truncated-year' },
+    });
+    repaired.push(task.id);
+  }
+  return repaired;
+}
+
 export const createTask = (...args: Parameters<typeof createTaskImpl>): ReturnType<typeof createTaskImpl> =>
   args[0].batch(() => createTaskImpl(...args));
 
@@ -237,6 +268,9 @@ export const dropTask = (...args: Parameters<typeof dropTaskImpl>): ReturnType<t
 
 export const markTaskDone = (...args: Parameters<typeof markTaskDoneImpl>): ReturnType<typeof markTaskDoneImpl> =>
   args[0].batch(() => markTaskDoneImpl(...args));
+
+export const repairTruncatedYearDates = (...args: Parameters<typeof repairTruncatedYearDatesImpl>): ReturnType<typeof repairTruncatedYearDatesImpl> =>
+  args[0].batch(() => repairTruncatedYearDatesImpl(...args));
 
 export const pullIntoDay = (...args: Parameters<typeof pullIntoDayImpl>): ReturnType<typeof pullIntoDayImpl> =>
   args[0].batch(() => pullIntoDayImpl(...args));
