@@ -340,6 +340,31 @@ describe('原子批次写入', () => {
     expect((await persistence.load()).projects.map((project) => project.name)).toEqual(['恢复后']);
   });
 
+  it('恢复重连与生命周期 close() 交错时，close 永远胜出', async () => {
+    const project = { id: 'p1', name: '挂起后', createdAt: '2026-10-01', status: 'active', islandSlot: 0 };
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    // Sweep every interleaving point: close() may start before, during or
+    // after the recovery triggered by the failed transaction start.
+    for (let delay = 0; delay < 24; delay++) {
+      const persistence = new IdbPersistence(dbName(`idb-close-race-${delay}`));
+      await persistence.load();
+      (await underlyingConnection(persistence)).close();
+
+      const racing = persistence.batch([{ kind: 'put', coll: 'projects', item: project }]).catch(() => undefined);
+      for (let i = 0; i < delay; i++) await Promise.resolve();
+      await persistence.close();
+      await racing;
+      await tick();
+
+      // No connection may survive a deliberate close, and nothing may write
+      // through one until an explicit reopen().
+      await expect(persistence.batch([{ kind: 'put', coll: 'projects', item: project }]), `delay ${delay}`)
+        .rejects.toMatchObject({ name: 'InvalidStateError' });
+      await expect(underlyingConnection(persistence).then((db) => { db.transaction('projects'); }), `delay ${delay}`)
+        .rejects.toMatchObject({ name: 'InvalidStateError' });
+    }
+  });
+
   it('中途写入失败时 IndexedDB 整批回滚', async () => {
     const name = dbName('idb-rollback');
     const persistence = new IdbPersistence(name);

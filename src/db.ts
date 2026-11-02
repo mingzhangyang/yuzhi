@@ -542,6 +542,8 @@ export class IdbPersistence implements Persistence {
    * connection that closed for any other reason is reopened on next use.
    */
   private closeRequested = false;
+  /** Bumped by every deliberate close(); a recovery that started earlier is stale. */
+  private closeGeneration = 0;
   constructor(name = DB_NAME, writeAccess = true, options: { onVersionChange?: () => void } = {}) {
     this.name = name;
     this.writeAccess = writeAccess;
@@ -587,6 +589,7 @@ export class IdbPersistence implements Persistence {
     // Publish the intent before yielding so a racing transaction does not
     // treat this deliberate close as an unexpected one and reopen it.
     this.closeRequested = true;
+    this.closeGeneration++;
     await this.accessTail.catch(() => {});
     this.closeRequested = true;
     try { (await this.dbp).close(); } catch { /* already failed or closed */ }
@@ -613,14 +616,29 @@ export class IdbPersistence implements Persistence {
     }
   }
 
-  private async recoverClosedConnection(stale: IDBPDatabase) {
-    await this.accessTail.catch(() => {});
-    if (this.closeRequested) return;
-    let current: IDBPDatabase | undefined;
-    try { current = await this.dbp; } catch { /* reopen below */ }
-    // A queued reconnect may already have replaced the stale connection.
-    if (current && current !== stale) return;
-    await this.queueReconnect(this.writeAccess);
+  /**
+   * Recovery is one step on the serialized access chain, and it re-checks the
+   * close intent with no await between that check and replacing the
+   * connection. A deliberate close() therefore either waits for this step and
+   * then closes whatever it opened, or has already published its intent and
+   * the step does nothing. Unlike an explicit reopen(), recovery never clears
+   * closeRequested, so it cannot revive a session the lifecycle shut down.
+   */
+  private recoverClosedConnection(stale: IDBPDatabase): Promise<void> {
+    const generation = this.closeGeneration;
+    const stillWanted = () => !this.closeRequested && generation === this.closeGeneration;
+    const recovery = this.accessTail.catch(() => {}).then(async () => {
+      if (!stillWanted()) return;
+      let current: IDBPDatabase | undefined;
+      try { current = await this.dbp; } catch { /* reopen below */ }
+      // close() may have started while we awaited, and a queued reconnect may
+      // already have replaced the stale connection.
+      if (!stillWanted() || (current && current !== stale)) return;
+      this.dbp = this.writeAccess ? this.openWritableDatabase() : this.openDatabase(undefined, false);
+      await this.dbp;
+    });
+    this.accessTail = recovery;
+    return recovery;
   }
 
   onVersionChange(fn: () => void) {
