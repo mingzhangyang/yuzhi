@@ -52,9 +52,9 @@ class HitHarness extends IslandInteraction {
     return this.cultivationHitAt(pt);
   }
 
-  placeWalkerUnderPointer(pt: { x: number; y: number }) {
+  placeWalkerUnderPointer(pt: { x: number; y: number }, feetY?: number) {
     const s0 = personSize(this.view.tw);
-    const { fi, fj } = this.tileCoords({ x: pt.x, y: pt.y + s0 * 0.7 });
+    const { fi, fj } = this.tileCoords({ x: pt.x, y: feetY ?? pt.y + s0 * 0.7 });
     this.walkers.set('visible-walker', { id: 'visible-walker', x: fi, y: fj } as Walker);
   }
 }
@@ -156,12 +156,16 @@ describe('作物、篱笆和粮仓门扇的真实遮挡范围', () => {
     const { x, y, tw } = stocked.installGranary(0.6);
     // First sack at P(-0.11, 0.39): top of the bag in front of the walls.
     const sack = { x: x - tw * 0.25, y: y + tw * 0.025 };
-    stocked.placeWalkerUnderPointer(sack);
+    // Place the walker's feet behind the barn (lower scene depth), while its
+    // visible head remains within the tap radius at this sack silhouette.
+    // The old test placed the feet in FRONT of the barn, so no occlusion was valid.
+    const behindFeetY = sack.y - tw * 0.07;
+    stocked.placeWalkerUnderPointer(sack, behindFeetY);
     expect(stocked.hitAt(sack)).toEqual({ kind: 'granary' });
 
     const empty = new HitHarness();
     empty.installGranary(0.1);
-    empty.placeWalkerUnderPointer(sack);
+    empty.placeWalkerUnderPointer(sack, behindFeetY);
     expect(empty.hitAt(sack)).toEqual({ kind: 'task', id: 'visible-walker' });
   });
 });
