@@ -8,6 +8,7 @@ import { dayLight } from './ambience';
 import { tileHash } from './map';
 import type { Hit, LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
+import { granaryHitOutline, granaryOcclusionOutlines } from './render/paint/structures';
 import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { AGENDA, CUE, decayRoof, decayWall, GLOW, LAMP, PIER, PLASTER, SNOW, WHITE, withAlpha } from './render/palette';
@@ -221,7 +222,7 @@ export class IslandRenderer extends IslandEffectsPainter {
         const depth = d + 0.08;
         queue.push({ d: depth, draw: () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t, this.calm) });
         // 不透明遮挡用实际画出来的地块和高物轮廓；宽松旧点击范围不能挡住可见小人。
-        for (const poly of cultivationOcclusionOutlines(cultivation, x, y, tw)) {
+        for (const poly of cultivationOcclusionOutlines(cultivation, x, y, tw, a.cover > 0.6)) {
           occluders.push({ d: depth, poly });
         }
         // 与遮挡轮廓同深度，放最后：点击/检查仍优先命中整个培育区目标。
@@ -241,10 +242,14 @@ export class IslandRenderer extends IslandEffectsPainter {
         });
       }
       if (t === m.granary) {
-        queue.push({ d, draw: () => this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy) });
-        // 只有实际仓房轮廓不透明。旧圆仓的矩形点击范围在 hitAt() 中兜底，
-        // 不放进遮挡列表，否则上方空白会错误地挡住可见的小人。
-        occluders.push({ d, poly: this.granaryOutline(x, y, tw), hit: { kind: 'granary' } });
+        const ratio = this.shownGranaryRatio(s);
+        queue.push({ d, draw: () => this.drawGranary(x, y, tw, ratio, s.granaryBusy) });
+        // Opaque faces depend on the displayed door / sack state. The old larger
+        // outline and rectangle remain click-only, never walker occluders.
+        for (const poly of granaryOcclusionOutlines(x, y, tw, ratio, s.granaryBusy)) {
+          occluders.push({ d, poly });
+        }
+        occluders.push({ d, poly: granaryHitOutline(x, y, tw), hit: { kind: 'granary' }, hitOnly: true });
       }
       if (t === m.chores) {
         put(d, () => {

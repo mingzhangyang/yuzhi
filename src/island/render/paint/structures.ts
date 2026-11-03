@@ -45,6 +45,89 @@ const GRANARY_SACK_SLOTS: readonly [number, number][] = [
   [0.1, 1],
 ];
 
+type BarnPoint = [number, number];
+
+/** Broad historical click target; never use this envelope as walker occlusion. */
+export function granaryHitOutline(x: number, y: number, tw: number): BarnPoint[] {
+  const P = (pi: number, pj: number, z: number): BarnPoint =>
+    [x + ((pi - pj) * tw) / 2, y + ((pi + pj) * tw) / 4 - z];
+  const { wi, wj, eave: o } = BARN;
+  const H = tw * BARN.H, rh = tw * BARN.rh;
+  return [
+    P(-wi - 0.02, wj + 0.2, 0),
+    P(wi + 0.02, wj + 0.2, 0),
+    P(wi + 0.17, 0.16, 0),
+    P(wi + 0.17, -wj, 0),
+    P(wi + o, -wj - o, H),
+    P(wi + o, 0, H + rh),
+    P(-wi - o, 0, H + rh),
+    P(-wi - o, wj + o, H),
+  ];
+}
+
+/**
+ * Opaque barn silhouettes come from the faces actually drawn in drawGranary().
+ * The historical click envelope remains separate: a stocked barn must not hide
+ * a walker beside the CLOSED door where open-door leaves would have extended.
+ */
+export function granaryOcclusionOutlines(x: number, y: number, tw: number, ratio: number, busy = false): BarnPoint[][] {
+  const P = (pi: number, pj: number, z: number): BarnPoint =>
+    [x + ((pi - pj) * tw) / 2, y + ((pi + pj) * tw) / 4 - z];
+  const { wi, wj, eave: o } = BARN;
+  const H = tw * BARN.H, rh = tw * BARN.rh, fb = tw * 0.05;
+  const roofLow = H - tw * 0.02;
+  const e1 = P(-wi - o, wj + o, roofLow), e2 = P(wi + o, wj + o, roofLow);
+  const b1 = P(-wi - o, -wj - o, roofLow), b2 = P(wi + o, -wj - o, roofLow);
+  const k1 = P(-wi - o, 0, H + rh), k2 = P(wi + o, 0, H + rh);
+  const outlines: BarnPoint[][] = [
+    // The two painted stone/plank faces and the three roof/gable faces.
+    [P(-wi, wj, 0), P(wi, wj, 0), P(wi, wj, H), P(-wi, wj, H)],
+    [P(wi, wj, 0), P(wi, -wj, 0), P(wi, -wj, H), P(wi, wj, H)],
+    [b1, b2, k2, k1],
+    [e1, e2, k2, k1],
+    [P(wi, wj, H), P(wi, -wj, H), P(wi, 0, H + rh * 0.94)],
+    [e1, e2, [e2[0], e2[1] + tw * 0.03], [e1[0], e1[1] + tw * 0.03]],
+  ];
+  if (granaryEmpty(ratio)) {
+    const dj = 0.12, zt = H * 0.84;
+    // These two leaves are drawn only when the doors are open.
+    outlines.push(
+      [P(wi, -dj, fb), P(wi + 0.17, -dj - 0.04, fb), P(wi + 0.17, -dj - 0.04, zt), P(wi, -dj, zt)],
+      [P(wi, dj, fb), P(wi + 0.17, dj + 0.04, fb), P(wi + 0.17, dj + 0.04, zt), P(wi, dj, zt)],
+    );
+  }
+  // Sacks are only drawn when stocked. Use the same positions and sizes as drawGranary().
+  const sack = (sx: number, sy: number, u: number): BarnPoint[] => [
+    [sx - u * 0.95, sy], [sx + u * 0.95, sy],
+    [sx + u * 1.15, sy - u * 0.6], [sx + u * 0.55, sy - u * 1.5],
+    [sx - u * 0.55, sy - u * 1.5], [sx - u * 1.15, sy - u * 0.6],
+  ];
+  const u = tw * 0.06;
+  for (const [pi, row] of GRANARY_SACK_SLOTS.slice(0, granarySacks(ratio))) {
+    const [sx, sy] = P(pi, wj + 0.12, row * u * 1.1);
+    outlines.push(sack(sx, sy, u));
+  }
+  if (busy) {
+    const z = H + rh * 0.72;
+    const [hx, hy] = P(wi, 0, z), [ex, ey] = P(wi + 0.17, 0, z);
+    const width = Math.max(0.8, tw * 0.02);
+    const dx = ex - hx, dy = ey - hy, len = Math.hypot(dx, dy) || 1;
+    const nx = (-dy / len) * width / 2, ny = (dx / len) * width / 2;
+    outlines.push([[hx + nx, hy + ny], [ex + nx, ey + ny],
+      [ex - nx, ey - ny], [hx - nx, hy - ny]]);
+    // Narrow hoist rope and hanging sack; 0.012 tw margin accommodates bobbing.
+    const ropeX = ex - tw * 0.01, sy = ey + tw * 0.2;
+    outlines.push([
+      [ropeX - tw * 0.009, ey], [ropeX + tw * 0.009, ey],
+      [ropeX + tw * 0.009, ey + tw * 0.15], [ropeX - tw * 0.009, ey + tw * 0.15],
+    ]);
+    outlines.push(sack(ropeX, sy + tw * 0.012, tw * 0.045));
+    outlines.push(sack(ropeX, sy - tw * 0.012, tw * 0.045));
+  }
+  return outlines;
+}
+
+
 /** Buildings and tangible island props. */
 export abstract class IslandStructurePainter extends IslandTerrainPainter {
   protected facePoly(fill: string, x0: number, y0: number, w: number, h: number, slope: number) {
@@ -1114,24 +1197,6 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
       c.ellipse(x - u * 0.1, y - u * 1.22, u * 0.55, u * 0.18, 0, 0, Math.PI * 2);
       c.fill();
     }
-  }
-
-  /** 粮仓的屏幕轮廓：仓身、草顶、敞开的门扇和门口的麻袋都在里面；也是点粮仓的范围 */
-  protected granaryOutline(x: number, y: number, tw: number): [number, number][] {
-    const P = this.isoAt(x, y, tw);
-    const { wi, wj, eave: o } = BARN;
-    const H = tw * BARN.H;
-    const rh = tw * BARN.rh;
-    return [
-      P(-wi - 0.02, wj + 0.2, 0),
-      P(wi + 0.02, wj + 0.2, 0),
-      P(wi + 0.17, 0.16, 0),
-      P(wi + 0.17, -wj, 0),
-      P(wi + o, -wj - o, H),
-      P(wi + o, 0, H + rh),
-      P(-wi - o, 0, H + rh),
-      P(-wi - o, wj + o, H),
-    ];
   }
 
   protected drawWeeds(x: number, y: number, tw: number, seed: number) {

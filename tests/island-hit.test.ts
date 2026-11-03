@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { IslandInteraction } from '../src/island/render/interaction';
 import { cultivationOcclusionOutlines, cultivationOutline } from '../src/island/render/cultivation';
+import { granaryHitOutline, granaryOcclusionOutlines } from '../src/island/render/paint/structures';
 import type { CultivationAreaState, CultivationKind } from '../src/logic/cultivation';
 import type { Ambience, Scene, Walker } from '../src/island/render/model';
 import { personSize } from '../src/island/render/style';
@@ -24,17 +25,26 @@ class HitHarness extends IslandInteraction {
     return { x, y: y - this.view.tw * 0.70 };
   }
 
-  installCultivation(kind: CultivationKind, level: number) {
+  installCultivation(kind: CultivationKind, level: number, snow = false) {
     const area = { kind, level } as CultivationAreaState;
     const site = this.map.cultivation[kind];
     const [x, y] = this.iso(site.i, site.j);
     const tw = this.view.tw;
     const d = site.i + site.j + 0.08;
-    this.occluders = cultivationOcclusionOutlines(area, x, y, tw).map((poly) => ({ d, poly }));
+    this.occluders = cultivationOcclusionOutlines(area, x, y, tw, snow).map((poly) => ({ d, poly }));
     this.occluders.push({
       d, poly: cultivationOutline(area, x, y, tw),
       hit: { kind: 'cultivation', area: kind }, hitOnly: true,
     });
+    return { x, y, tw };
+  }
+
+  installGranary(ratio: number, busy = false) {
+    const site = this.map.granary;
+    const [x, y] = this.iso(site.i, site.j);
+    const tw = this.view.tw, d = site.i + site.j;
+    this.occluders = granaryOcclusionOutlines(x, y, tw, ratio, busy).map((poly) => ({ d, poly }));
+    this.occluders.push({ d, poly: granaryHitOutline(x, y, tw), hit: { kind: 'granary' }, hitOnly: true });
     return { x, y, tw };
   }
 
@@ -88,5 +98,70 @@ describe('培育区点击范围与不透明物体分离', () => {
     const onArchPost = { x: x - tw * 0.148, y: y - tw * 0.3 };
     h.placeWalkerUnderPointer(onArchPost);
     expect(h.hitAt(onArchPost)).toEqual({ kind: 'cultivation', area: 'garden' });
+  });
+});
+
+
+describe('作物、篱笆和粮仓门扇的真实遮挡范围', () => {
+  it('4 级农田的外围成熟穗会挡住后方任务；0 级和冬季高处不应误挡', () => {
+    for (const level of [3, 4]) {
+      const h = new HitHarness();
+      const { x, y, tw } = h.installCultivation('field', level);
+      const outerEar = { x: x + tw * 0.306, y: y - tw * (level === 4 ? 0.125 : 0.115) };
+      h.placeWalkerUnderPointer(outerEar);
+      expect(h.hitAt(outerEar)).toEqual({ kind: 'cultivation', area: 'field' });
+    }
+
+    for (const [level, snow] of [[0, false], [4, true]] as const) {
+      const h = new HitHarness();
+      const { x, y, tw } = h.installCultivation('field', level, snow);
+      const upperGap = { x: x + tw * 0.306, y: y - tw * 0.125 };
+      h.placeWalkerUnderPointer(upperGap);
+      expect(h.hitAt(upperGap)).toEqual({ kind: 'task', id: 'visible-walker' });
+    }
+  });
+
+  it('0 级花园篱笆的后立柱能挡住任务，空隙仍能点到可见行人', () => {
+    const h = new HitHarness();
+    const { x, y, tw } = h.installCultivation('garden', 0);
+    // Back fence post: P(-0.1148, -0.41, 0.06 tw).
+    const post = { x: x + tw * 0.1476, y: y - tw * 0.1912 };
+    h.placeWalkerUnderPointer(post);
+    expect(h.hitAt(post)).toEqual({ kind: 'cultivation', area: 'garden' });
+
+    const gapHarness = new HitHarness();
+    const p = gapHarness.installCultivation('garden', 0);
+    const gap = { x: p.x + p.tw * 0.37, y: p.y - p.tw * 0.24 };
+    gapHarness.placeWalkerUnderPointer(gap);
+    expect(gapHarness.hitAt(gap)).toEqual({ kind: 'task', id: 'visible-walker' });
+  });
+
+  it('stocked barn door-adjacent empty space allows walker taps; open door actually occludes', () => {
+    const stocked = new HitHarness();
+    const pos = stocked.installGranary(0.6);
+    const doorSide = { x: pos.x + pos.tw * 0.255, y: pos.y - pos.tw * 0.15 };
+    expect(stocked.hitAt(doorSide)).toEqual({ kind: 'granary' }); // broad click target
+    stocked.placeWalkerUnderPointer(doorSide);
+    expect(stocked.hitAt(doorSide)).toEqual({ kind: 'task', id: 'visible-walker' });
+
+    const empty = new HitHarness();
+    const p = empty.installGranary(0.1);
+    const doorLeaf = { x: p.x + p.tw * 0.255, y: p.y - p.tw * 0.15 };
+    empty.placeWalkerUnderPointer(doorLeaf);
+    expect(empty.hitAt(doorLeaf)).toEqual({ kind: 'granary' });
+  });
+
+  it('only stocked barn sacks occlude; empty doorway has no invisible sacks', () => {
+    const stocked = new HitHarness();
+    const { x, y, tw } = stocked.installGranary(0.6);
+    // First sack at P(-0.11, 0.39): top of the bag in front of the walls.
+    const sack = { x: x - tw * 0.25, y: y + tw * 0.025 };
+    stocked.placeWalkerUnderPointer(sack);
+    expect(stocked.hitAt(sack)).toEqual({ kind: 'granary' });
+
+    const empty = new HitHarness();
+    empty.installGranary(0.1);
+    empty.placeWalkerUnderPointer(sack);
+    expect(empty.hitAt(sack)).toEqual({ kind: 'task', id: 'visible-walker' });
   });
 });

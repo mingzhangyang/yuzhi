@@ -61,6 +61,17 @@ function dots(c: CanvasRenderingContext2D, pts: readonly [number, number, number
 /** 以 (pi, pj) 为中心、半对角线 r 的菱形 */
 const diamond = (P: Iso, r: number, ci = 0, cj = 0): Pt[] => [P(ci - r, cj - r), P(ci + r, cj - r), P(ci + r, cj + r), P(ci - r, cj + r)];
 
+/** A narrow stroked path as a four-point opaque silhouette (width in CSS pixels). */
+function strokeOutline(a: Pt, b: Pt, width: number): Pt[] {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = (-dy / len) * width / 2, ny = (dx / len) * width / 2;
+  return [
+    [a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny],
+    [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny],
+  ];
+}
+
 /** 稳定的小随机数：同一区域、同一序号每帧都一样 */
 const rnd = (k: number, salt: number) => {
   const v = Math.sin(k * 127.1 + salt * 311.7) * 43758.5453;
@@ -96,13 +107,28 @@ function drawField(A: Area) {
   }
   c.stroke();
 
-  const crop = has.has('crop-gold') ? 'gold' : has.has('crop-ripe') ? 'ripe' : has.has('crop-half') ? 'half' : has.has('sprouts') ? 'sprout' : null;
+  const crop = fieldCrop(has);
   if (crop) drawCropRows(A, crop);
   if (has.has('scarecrow')) drawScarecrow(A, ...P(0.06, -0.12));
   if (has.has('haystack')) drawHaystack(A, ...P(0.43, 0.12), tw * 0.11);
 }
 
 type Crop = 'sprout' | 'half' | 'ripe' | 'gold';
+const CROP_HEIGHT: Record<Crop, number> = { sprout: 0.035, half: 0.08, ripe: 0.12, gold: 0.13 };
+const CROP_BAND: Record<Crop, number> = { sprout: 0.022, half: 0.065, ripe: 0.075, gold: 0.08 };
+
+function fieldCrop(has: ReadonlySet<string>): Crop | null {
+  return has.has('crop-gold') ? 'gold' : has.has('crop-ripe') ? 'ripe'
+    : has.has('crop-half') ? 'half' : has.has('sprouts') ? 'sprout' : null;
+}
+
+/** Exact crop height and band thickness shared by painting and hit occlusion. */
+function cropMetrics(crop: Crop, tw: number, snow: boolean) {
+  return {
+    height: CROP_HEIGHT[crop] * tw * (snow ? 0.55 : 1),
+    band: CROP_BAND[crop] * tw * (snow ? 0.5 : 1),
+  };
+}
 
 /**
  * 一行行作物：先画一条从上面看到的作物带（全景下就是这一条条的颜色在变），再画一株株的茎和穗。
@@ -110,8 +136,7 @@ type Crop = 'sprout' | 'half' | 'ripe' | 'gold';
  */
 function drawCropRows(A: Area, crop: Crop) {
   const { c, P, tw, snow } = A;
-  const H = { sprout: 0.035, half: 0.08, ripe: 0.12, gold: 0.13 }[crop] * tw * (snow ? 0.55 : 1);
-  const band = { sprout: 0.022, half: 0.065, ripe: 0.075, gold: 0.08 }[crop] * tw * (snow ? 0.5 : 1);
+  const { height: H, band } = cropMetrics(crop, tw, snow);
   const top = snow ? (crop === 'sprout' ? F.sproutSnow : crop === 'gold' ? F.stubbleGold : F.stubble) : F[crop];
   const stalk = snow ? shade(top, -0.2) : crop === 'gold' ? F.stalkGold : crop === 'ripe' ? F.stalkRipe : F.stalk;
   // 三遍各合成一条路径：先是一条条作物带，再是一株株的茎，最后是穗；后排的茎往上长，不会压到前排的作物带
@@ -670,14 +695,19 @@ const FENCE_R = 0.41;
 /** 后面两道篱笆从这里画起，正后方的角留作门口 */
 const FENCE_GATE = 0.36;
 
-function drawFence(A: Area, part: 'back' | 'front') {
-  const { c, P, tw, snow } = A;
+type FenceSide = [Pt, Pt, number, number];
+/** Share post/rail endpoints between drawFence() and the walker opaque masks. */
+function gardenFenceSides(part: 'back' | 'front'): FenceSide[] {
   const r = FENCE_R;
-  const h = tw * 0.07;
-  // 四条边：[起点, 终点]，后两条在后面
-  const sides: [Pt, Pt, number, number][] = part === 'back'
+  return part === 'back'
     ? [[[-r, -r], [r, -r], FENCE_GATE, 1], [[-r, -r], [-r, r], FENCE_GATE, 1]]
     : [[[r, -r], [r, r], 0, 1], [[-r, r], [r, r], 0, 1]];
+}
+
+function drawFence(A: Area, part: 'back' | 'front') {
+  const { c, P, tw, snow } = A;
+  const h = tw * 0.07;
+  const sides = gardenFenceSides(part);
   c.lineCap = 'round';
   // 两道边的横杆、木桩、积雪各合成一条路径
   const rails = new Path2D();
@@ -924,6 +954,7 @@ export function cultivationOcclusionOutlines(
   x: number,
   y: number,
   tw: number,
+  snow = false,
 ): Pt[][] {
   const P: Iso = (pi, pj, z = 0) => [x + ((pi - pj) * tw) / 2, y + ((pi + pj) * tw) / 4 - z];
   const box = (cx: number, cy: number, half: number, above: number, below = 0): Pt[] => [
@@ -946,6 +977,31 @@ export function cultivationOcclusionOutlines(
 
   const outlines: Pt[][] = [diamond(P, area.kind === 'field' ? 0.47 : 0.46)];
   if (area.kind === 'field') {
+    const crop = fieldCrop(has);
+    if (crop) {
+      const { height, band } = cropMetrics(crop, tw, snow);
+      const withStalks = crop !== 'sprout' || snow;
+      // Painted rows use a continuous colour band, with narrow individual stems/ears above it.
+      // An entire raised rectangle would block walkers visible in the gaps between rows.
+      for (const pj of FIELD_ROWS) {
+        outlines.push(strokeOutline(
+          P(-0.31, pj, height * 0.55),
+          P(0.31, pj, height * 0.55),
+          Math.max(0.8, band) + tw * 0.006,
+        ));
+        if (!withStalks) continue;
+        for (let pi = -0.3; pi <= 0.31; pi += 0.075) {
+          const [px, py] = P(pi, pj);
+          const ear = !snow && (crop === 'ripe' || crop === 'gold');
+          const lean = ear && crop === 'gold' ? tw * 0.016 : 0;
+          outlines.push(strokeOutline(
+            [px, py],
+            [px + lean, py - height - (ear ? tw * 0.014 : 0)],
+            tw * (ear ? 0.05 : 0.047),
+          ));
+        }
+      }
+    }
     if (has.has('scarecrow')) {
       const [sx, sy] = P(0.06, -0.12);
       outlines.push(box(sx, sy, tw * 0.115, tw * 0.38));
@@ -988,6 +1044,32 @@ export function cultivationOcclusionOutlines(
         [Math.max(ax, bx) + pad, Math.min(ay, by) - pad],
         [Math.min(ax, bx) - pad, Math.min(ay, by) - pad],
       ]);
+    }
+  }
+
+  if (area.kind === 'garden') {
+    // Fence exists at EVERY level (not just level 4 with an arch).
+    // Match the four painted sides, each pair of rails and each of six posts,
+    // rather than marking the empty air above the whole garden as opaque.
+    const h = tw * 0.07;
+    for (const part of ['back', 'front'] as const) {
+      for (const [[ai, aj], [bi, bj], u0, u1] of gardenFenceSides(part)) {
+        const at = (u: number, z = 0): Pt =>
+          P(ai + (bi - ai) * u, aj + (bj - aj) * u, z);
+        for (const z of [h * 0.45, h * 0.85]) {
+          outlines.push(strokeOutline(
+            at(u0, z), at(u1, z),
+            Math.max(0.6, tw * 0.012) + tw * 0.004,
+          ));
+        }
+        for (let k = 0; k <= 5; k++) {
+          const u = u0 + ((u1 - u0) * k) / 5;
+          outlines.push(strokeOutline(
+            at(u), at(u, h),
+            Math.max(0.7, tw * 0.016) + tw * 0.004,
+          ));
+        }
+      }
     }
   }
   return outlines;
