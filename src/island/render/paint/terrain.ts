@@ -1,4 +1,4 @@
-import type { Scene } from '../model';
+import type { Scene, VillageView } from '../model';
 import { tileHash, type Tile } from '../../map';
 import { BEACH, CROP, DECAY_GROUND, FESTIVE, GLOW, GROUND, MEADOW, ROCK, seasonField, seasonGrass, snowBlend, SNOW, TREE, WHITE, withAlpha } from '../palette';
 import { pineTiers, roundLobes } from '../style';
@@ -21,6 +21,11 @@ export function smoothNoise(i: number, j: number, scale: number, salt = 7): numb
   const c = tileHash(i0, j0 + 1, salt);
   const d = tileHash(i0 + 1, j0 + 1, salt);
   return a + (b - a) * su + (c - a) * sw + (a - b - c + d) * su * sw;
+}
+
+/** 村落的项目身份也决定衰败褪色区的位置；换项目必须重建地面缓存。 */
+export function groundVillageCacheKey(villages: readonly Pick<VillageView, 'slot' | 'projectId' | 'houses' | 'stage'>[]): string {
+  return JSON.stringify(villages.map(({ slot, projectId, houses, stage }) => [slot, projectId, houses, stage]));
 }
 
 /** Ground cache, sea, vegetation, mountains, and water-bound scenery. */
@@ -70,7 +75,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const occupied = new Set(s.villages.map((x) => x.slot));
     const stageOf = new Map(s.villages.map((x) => [x.slot, x.stage]));
     // 衰败阶段也画进地面（广场缺砖、褪色区、小路长草），缓存键里要有它
-    const key = [v.w, v.h, v.dpr, v.tw, v.ox, v.oy, m.rings, a.season, a.progress.toFixed(2), a.cover.toFixed(2), a.weather, s.villages.map((x) => `${x.slot}:${x.houses}:${x.stage}`).join(','), this.theme.sea].join('|');
+    const key = [v.w, v.h, v.dpr, v.tw, v.ox, v.oy, m.rings, a.season, a.progress.toFixed(2), a.cover.toFixed(2), a.weather, groundVillageCacheKey(s.villages), this.theme.sea].join('|');
     if (key === this.groundKey) return;
     this.groundKey = key;
     const g = this.ground;

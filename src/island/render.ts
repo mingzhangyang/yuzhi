@@ -236,9 +236,9 @@ export class IslandRenderer extends IslandEffectsPainter {
       }
       if (t === m.granary) {
         queue.push({ d, draw: () => this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy) });
-        // 仓房的轮廓既挡人，也是点粮仓的范围；再并上原来圆仓的那一块，点击范围只大不小
+        // 只有实际仓房轮廓不透明。旧圆仓的矩形点击范围在 hitAt() 中兜底，
+        // 不放进遮挡列表，否则上方空白会错误地挡住可见的小人。
         occluders.push({ d, poly: this.granaryOutline(x, y, tw), hit: { kind: 'granary' } });
-        occluders.push({ d, poly: rectOutline(x, y, tw * 0.17, tw * 0.72, tw * 0.07), hit: { kind: 'granary' } });
       }
       if (t === m.chores) {
         put(d, () => {

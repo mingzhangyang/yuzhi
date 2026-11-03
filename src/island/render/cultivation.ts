@@ -893,7 +893,7 @@ export function cultivationExtent(kind: CultivationKind, level: number): { half:
   const has = cultivationElements(kind, level);
   if (kind === 'field') return { half: 0.5, above: has.has('scarecrow') ? 0.4 : has.has('crop-half') || has.has('crop-gold') ? 0.3 : 0.26, below: 0.24 };
   if (kind === 'orchard') return { half: 0.47, above: has.has('grown-trees') ? 0.47 : 0.34, below: 0.24 };
-  if (kind === 'pond') return { half: 0.47, above: 0.3, below: 0.25 };
+  if (kind === 'pond') return { half: 0.49, above: 0.3, below: 0.25 };
   return { half: 0.47, above: has.has('arch') ? 0.56 : 0.28, below: 0.24 };
 }
 

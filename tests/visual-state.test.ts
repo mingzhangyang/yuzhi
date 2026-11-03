@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { cultivationExtent } from '../src/island/render/cultivation';
+import { cultivationExtent, cultivationOutline } from '../src/island/render/cultivation';
+import { groundVillageCacheKey } from '../src/island/render/paint/terrain';
 import {
   collapsedSlot,
   CULTIVATION_STEPS,
@@ -146,11 +147,36 @@ describe('B2 培育区等级的画面元素', () => {
       for (let level = 0; level <= 4; level++) {
         const e = cultivationExtent(kind, level);
         // 外框不比原来的更窄、更矮（原来是半宽 0.47–0.49、上 0.23–0.4、下 0.23–0.24）
-        expect(e.half).toBeGreaterThanOrEqual(0.47);
+        expect(e.half).toBeGreaterThanOrEqual(kind === 'pond' ? 0.49 : 0.47);
         expect(e.above).toBeGreaterThanOrEqual(0.26);
         expect(e.below).toBeGreaterThanOrEqual(0.24);
       }
     }
+  });
+
+  it('鱼塘 0–4 级保留旧版 0.49 半宽，左右边缘仍可点击和检查', () => {
+    for (let level = 0; level <= 4; level++) {
+      expect(cultivationExtent('pond', level).half).toBe(0.49);
+      const outline = cultivationOutline(
+        { kind: 'pond', level } as Parameters<typeof cultivationOutline>[0],
+        100, 200, 100,
+      );
+      expect(outline[0][0]).toBeCloseTo(51);
+      expect(outline[1][0]).toBeCloseTo(149);
+    }
+  });
+});
+
+describe('B1 衰败地面的缓存身份', () => {
+  it('同一占位和衰败阶段更换项目也要重绘，输入不变则命中缓存', () => {
+    const oldVillage = { slot: 0, projectId: 'old-project', houses: 6, stage: 2 as const };
+    const key = groundVillageCacheKey([oldVillage]);
+    expect(groundVillageCacheKey([{ ...oldVillage }])).toBe(key);
+    expect(groundVillageCacheKey([{ ...oldVillage, projectId: 'new-project' }])).not.toBe(key);
+    expect(groundVillageCacheKey([{ ...oldVillage, houses: 7 }])).not.toBe(key);
+    expect(groundVillageCacheKey([{ ...oldVillage, stage: 3 }])).not.toBe(key);
+    // 长短和分隔符不影响编码的唯一性
+    expect(groundVillageCacheKey([{ ...oldVillage, projectId: 'old|project:2' }])).not.toBe(key);
   });
 });
 
