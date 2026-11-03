@@ -18,6 +18,8 @@
  *   season   春 4 月、秋 10 月、冬 1 月（积雪）白天             桌面、手机
  *   decay    四座村落，最近一次推进在 0 / 8 / 15 / 29 天前      手机（不放大），另出遮住标签的 -blind 版
  *   cult     四个培育区同时处于 0–4 级（构造结算、日记事实）     手机，另出 -blind 版；桌面 2.8 倍每区一张
+ *   cult-winter  同上，冬 1 月积雪（B2 的雪里版本）              手机（含 -blind）、桌面 2.8 倍每区一张
+ *   granary  粮仓余量一成 / 五成 / 满仓、此刻正在用时间（画面层给定比例）  桌面 2.8 倍；另有一张手机全景的见底粮仓
  *   close    2.8 倍：一座村落、码头、一座地标                   桌面
  *   theme    暗色主题下的白天与夜晚                             桌面
  *   cover    补充覆盖（不在计划矩阵里）：八种地标的昼 / 夜 / 雪、日程进行中、雨天、下雪、
@@ -60,6 +62,20 @@ const SCENES = [
     { name: `cult-l${level}`, date: SUMMER, hm: '10:30', vps: ['phone'], seed: `cult${level}`, blind: true },
     ...['field', 'orchard', 'pond', 'garden'].map((area) => ({ name: `cult-l${level}-${area}`, date: SUMMER, hm: '10:30', vps: ['desktop'], seed: `cult${level}`, zoom: area })),
   ]),
+  // B2：积雪时各级培育区的样子（农田留茬、鱼塘结冰但岸边还在……）
+  ...[0, 1, 2, 3, 4].flatMap((level) => [
+    { name: `cult-winter-l${level}`, date: WINTER, hm: '10:30', vps: ['phone'], seed: `cult${level}`, blind: true },
+    ...['field', 'orchard', 'pond', 'garden'].map((area) => ({ name: `cult-winter-l${level}-${area}`, date: WINTER, hm: '10:30', vps: ['desktop'], seed: `cult${level}`, zoom: area })),
+  ]),
+  // B3：粮仓的余量与「此刻正在用时间」。余量由时间账本算出，难以只靠铺数据凑到某个比例，
+  // 这里在画面层直接给定 granaryRatio / granaryBusy（只改这一帧的画法输入，不碰规则）。
+  ...[
+    ['empty', 0.1, false],
+    ['half', 0.5, false],
+    ['full', 1, false],
+    ['busy', 0.6, true],
+  ].map(([label, ratio, busy]) => ({ name: `granary-${label}`, date: SUMMER, hm: '10:30', vps: ['desktop'], seed: 'base', zoom: 'granary', granary: { ratio, busy } })),
+  { name: 'granary-pano-empty', date: SUMMER, hm: '10:30', vps: ['phone'], seed: 'base', granary: { ratio: 0.1, busy: false } },
   { name: 'close-village', date: SUMMER, hm: '10:30', vps: ['desktop'], seed: 'base', zoom: 'village' },
   { name: 'close-dock', date: SUMMER, hm: '10:30', vps: ['desktop'], seed: 'base', zoom: 'dock' },
   { name: 'close-landmark', date: SUMMER, hm: '10:30', vps: ['desktop'], seed: 'base', zoom: 'landmark' },
@@ -220,6 +236,8 @@ async function zoomTo(page, target) {
       at = { i: m.dock.i + m.pierDir[0] * 0.5, j: m.dock.j + m.pierDir[1] * 0.5 };
     } else if (target === 'landmark') {
       at = m.landmarks[s.landmarks[0].index];
+    } else if (target === 'granary') {
+      at = m.granary;
     } else {
       at = m.cultivation[target];
     }
@@ -314,6 +332,13 @@ async function shoot(browser, scene, vpName) {
     }
     // 关掉欢迎页、「搬离」询问之类的对话框
     for (let k = 0; k < 3; k++) await page.keyboard.press('Escape');
+    if (scene.granary) {
+      await page.evaluate((g) => {
+        const r = window.yuzhi.renderer;
+        r.scene = { ...r.scene, granaryRatio: g.ratio, granaryBusy: g.busy };
+        r.granaryTransition = null;
+      }, scene.granary);
+    }
     if (scene.zoom) await zoomTo(page, scene.zoom);
     // 道具贴图在第一次绘制时才开始加载；先画一帧，等它们都解码完，截图里才不会缺道具
     await page.evaluate(async () => {

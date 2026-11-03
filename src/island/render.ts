@@ -8,12 +8,14 @@ import { dayLight } from './ambience';
 import { tileHash } from './map';
 import type { Hit, LandmarkView, VillageView, Walker } from './render/model';
 import { IslandEffectsPainter } from './render/paint/effects';
+import { granaryHitOutline, granaryOcclusionOutlines } from './render/paint/structures';
 import { islandProps, propOutline } from './render/props-layout';
 import { isDeterioratingStageCue } from './render/simulation';
 import { AGENDA, CUE, decayRoof, decayWall, GLOW, LAMP, PIER, PLASTER, SNOW, WHITE, withAlpha } from './render/palette';
-import { HOUSE_SCALE, houseHash, houseVariant, MARKER, personSize } from './render/style';
+import { HOUSE_SCALE, houseVariant, MARKER, personSize } from './render/style';
+import { collapsedSlot, decayLook, houseBoarded, houseLit, houseSmokes, wallMaterial } from './render/visual-state';
 import { hash, mix } from './render/utils';
-import { cultivationOutline, drawCultivationArea } from './render/cultivation';
+import { cultivationOcclusionOutlines, cultivationOutline, drawCultivationArea } from './render/cultivation';
 import { layoutLabels, placedLabelBounds, type LabelRequest } from './render/label-layout';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
@@ -218,11 +220,17 @@ export class IslandRenderer extends IslandEffectsPainter {
       const cultivation = cultivationAt.get(`${t.i},${t.j}`);
       if (cultivation) {
         const depth = d + 0.08;
-        queue.push({ d: depth, draw: () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t) });
+        queue.push({ d: depth, draw: () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t, this.calm) });
+        // 不透明遮挡用实际画出来的地块和高物轮廓；宽松旧点击范围不能挡住可见小人。
+        for (const poly of cultivationOcclusionOutlines(cultivation, x, y, tw, a.cover > 0.6)) {
+          occluders.push({ d: depth, poly });
+        }
+        // 与遮挡轮廓同深度，放最后：点击/检查仍优先命中整个培育区目标。
         occluders.push({
           d: depth,
           poly: cultivationOutline(cultivation, x, y, tw),
           hit: { kind: 'cultivation', area: cultivation.kind },
+          hitOnly: true,
         });
       }
       if (t === m.lighthouse) {
@@ -233,10 +241,19 @@ export class IslandRenderer extends IslandEffectsPainter {
           }
         });
       }
-      if (t === m.granary) put(d, () => this.drawGranary(x, y, tw, this.shownGranaryRatio(s), s.granaryBusy), rectOutline(x, y, tw * 0.17, tw * 0.72, tw * 0.07));
+      if (t === m.granary) {
+        const ratio = this.shownGranaryRatio(s);
+        queue.push({ d, draw: () => this.drawGranary(x, y, tw, ratio, s.granaryBusy) });
+        // Opaque faces depend on the displayed door / sack state. The old larger
+        // outline and rectangle remain click-only, never walker occluders.
+        for (const poly of granaryOcclusionOutlines(x, y, tw, ratio, s.granaryBusy)) {
+          occluders.push({ d, poly });
+        }
+        occluders.push({ d, poly: granaryHitOutline(x, y, tw), hit: { kind: 'granary' }, hitOnly: true });
+      }
       if (t === m.chores) {
         put(d, () => {
-          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, MARKER.chores, PLASTER.chores, false, false, !!s.chores.live);
+          this.drawHouse(x + hw * 0.2, y - hh * 0.2, tw * 0.3, MARKER.chores, { wall: PLASTER.chores, deco: false, smoke: false, lamp: !!s.chores.live });
           this.drawWoodpile(x + hw * 0.55, y + hh * 0.22, tw, s.chores.woodpile);
           // 即将开始：扫帚靠在门口；进行中：扫帚动起来
           if (s.chores.live || s.chores.soon) this.drawBroom(x + hw * 0.72, y + hh * 0.12, tw, !!s.chores.live);
@@ -271,17 +288,29 @@ export class IslandRenderer extends IslandEffectsPainter {
           const g = this.grow.get(vv.projectId);
           const isNew = g && g.anim < 1 && t.slotIdx === vv.houses - 1;
           const k = isNew ? 0.3 + 0.7 * g!.anim : 1;
+          // 衰败阶段的画法都在 visual-state.ts 的 DECAY_LOOK：屋顶褪色、炊烟减半、封窗、塌顶、杂草
           const roof = decayRoof(vv.roof, vv.stage, t.v);
-          const boarded = vv.stage === 3 && t.slotIdx % 2 === 1;
-          const wall = decayWall(vv.stage, boarded);
-          // 越冷清的村落，夜里亮灯的人家越少
-          const litFrac = [0.9, 0.5, 0.25, 0.12][vv.stage];
+          const collapsed = t.slotIdx === collapsedSlot(vv.projectId, vv.houses, vv.stage);
+          const boarded = collapsed || houseBoarded(t.slotIdx, vv.stage);
+          const material = wallMaterial(vv.projectId);
+          const wall = decayWall(vv.stage, boarded, material);
           // 房屋样式：四坡顶居多，夹几座双坡顶、两层和带披屋的
           const variant = houseVariant(vv.projectId, t.slotIdx);
+          const size = tw * HOUSE_SCALE * k;
           put(d, () => {
-            this.drawHouse(x, y, tw * HOUSE_SCALE * k, roof, wall, boarded, vv.stage < 2, houseHash(vv.projectId, t.slotIdx, 2) < litFrac, variant);
-            if (vv.stage >= 2 && t.slotIdx % 2 === 0) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
-          }, ...this.houseOutline(x, y, tw * HOUSE_SCALE * k, variant));
+            this.drawHouse(x, y, size, roof, {
+              wall,
+              material,
+              boarded,
+              deco: vv.stage < 2,
+              // 越冷清的村落，夜里亮灯、冒炊烟的人家越少
+              lamp: houseLit(vv.projectId, t.slotIdx, vv.stage),
+              smoke: houseSmokes(vv.projectId, t.slotIdx, vv.stage),
+              variant,
+              collapsed,
+            });
+            if (decayLook(vv.stage).weeds) this.drawWeeds(x - hw * 0.4, y + hh * 0.2, tw, t.i * 17 + t.j);
+          }, ...this.houseOutline(x, y, size, variant, collapsed));
         }
       }
       const lm = t.landmark >= 0 ? lmAt.get(t.landmark) : undefined;

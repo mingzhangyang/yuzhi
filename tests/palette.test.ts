@@ -3,8 +3,10 @@ import * as palette from '../src/island/render/palette';
 import {
   BOARD,
   DECAY_DUST,
+  decayFlag,
   decayRoof,
   decayWall,
+  desaturate,
   GROUND,
   HOUSE,
   PLASTER,
@@ -13,9 +15,10 @@ import {
   seasonGrass,
   SNOW,
   snowBlend,
+  WALL,
   withAlpha,
 } from '../src/island/render/palette';
-import { mix } from '../src/island/render/utils';
+import { luma, mix } from '../src/island/render/utils';
 
 const islandSources = import.meta.glob('../src/island/**/*.ts', {
   eager: true,
@@ -100,6 +103,36 @@ describe('island palette', () => {
     expect(decayWall(2, false)).toBe(PLASTER.wallDusty);
     expect(decayWall(3, false)).toBe(PLASTER.wallDusty);
     expect(decayWall(3, true)).toBe(PLASTER.wallBoarded);
+    // 木板、石砌的墙按同样三档变化
+    for (const m of ['timber', 'stone'] as const) {
+      expect(decayWall(0, false, m)).toBe(WALL[m].wall);
+      expect(decayWall(2, false, m)).toBe(WALL[m].dusty);
+      expect(decayWall(3, true, m)).toBe(WALL[m].boarded);
+    }
+    expect(WALL.plaster.wall).toBe(PLASTER.wall);
+  });
+
+  it('drains roof colour first: a quiet village is clearly greyer before it gets dusty', () => {
+    const sat = (hex: string) => {
+      const [r, g, b] = rgbOf(hex).split(',').map(Number);
+      return Math.max(r, g, b) - Math.min(r, g, b);
+    };
+    for (const roof of ['#b5553d', '#4c6a84', '#3f7a86', '#8656a6', '#c08a2a', '#5d8a4a', '#a8622a', '#6b5ca5']) {
+      const s0 = sat(decayRoof(roof, 0, 0.5));
+      const s1 = sat(decayRoof(roof, 1, 0.5));
+      expect(s1).toBeLessThan(s0 * 0.5);
+      expect(sat(decayRoof(roof, 2, 0.5))).toBeLessThanOrEqual(s1);
+      expect(decayFlag(roof, 2)).toBe(decayRoof(roof, 2, 0.5));
+    }
+  });
+
+  it('desaturates toward the grey of the same brightness', () => {
+    expect(desaturate('#c8473a', 1)).toBe('#c8473a');
+    const grey = desaturate('#c8473a', 0);
+    const [r, g, b] = rgbOf(grey).split(',').map(Number);
+    expect(r).toBe(g);
+    expect(g).toBe(b);
+    expect(Math.abs(luma(grey) - luma('#c8473a'))).toBeLessThan(1.5);
   });
 
   it('formats alpha colors from palette hex', () => {

@@ -444,7 +444,7 @@ export abstract class IslandInteraction extends IslandViewport {
    */
   protected occludedAt(p: Walker, pt: { x: number; y: number }): boolean {
     const d = p.x + p.y;
-    return this.occluders.some((o) => o.d > d && insidePolygon(pt, o.poly));
+    return this.occluders.some((o) => !o.hitOnly && o.d > d && insidePolygon(pt, o.poly));
   }
 
   /** Frontmost cultivation artwork under this screen point, using the same outline as drawing/occlusion. */
@@ -479,8 +479,15 @@ export abstract class IslandInteraction extends IslandViewport {
     let front: (typeof this.occluders)[number] | null = null;
     for (const o of this.occluders) if ((!front || o.d >= front.d) && insidePolygon(pt, o.poly)) front = o;
     if (front?.hit) return front.hit;
-    const { fi, fj } = this.tileCoords(pt);
     const m = this.map;
+    // 兼容旧圆仓较高的点击范围，但不把那块空白视作不透明：小人、
+    // 实物、日程和标签都已经在上面优先判定，旧范围只在此处兜底。
+    const [gx, gy] = this.iso(m.granary.i, m.granary.j);
+    const tw = this.view.tw;
+    if (Math.abs(pt.x - gx) < tw * 0.17 && pt.y > gy - tw * 0.72 && pt.y < gy + tw * 0.07) {
+      return { kind: 'granary' };
+    }
+    const { fi, fj } = this.tileCoords(pt);
     const near = (t: Tile, r: number) => Math.hypot(t.i - fi, t.j - fj) < r;
     if (fj > m.dock.j - 0.6 && Math.abs(fi - m.dock.i) < 1.8 && fj < m.dock.j + m.pierLen + 1) return { kind: 'dock' };
     if (near(m.granary, 0.9)) return { kind: 'granary' };

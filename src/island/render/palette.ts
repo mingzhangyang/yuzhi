@@ -11,7 +11,8 @@
  *
  * 地图景物的标记色 MARKER（图例、追踪栏色块共用）不在这里，仍在 style.ts，保持独立。
  */
-import { clamp, mix, shade } from './utils';
+import { clamp, luma, mix, rgb, shade } from './utils';
+import { decayLook, DECAY_LOOK, type WallMaterial } from './visual-state';
 
 /* ================================================================
  * 1. 方向板的 10 个基础色
@@ -192,6 +193,23 @@ export const PLASTER = {
   towerShade: '#d3c8b1',
 } as const;
 
+/**
+ * 村落的墙面材质（B4，按项目 id 哈希分配，见 visual-state.ts 的 wallMaterial）：
+ * 白灰沿用 PLASTER；木板偏暖的浅木色；石砌偏冷的浅灰。每种都有平时、蒙灰、封窗三档，
+ * line 是木板缝 / 砌缝的颜色。
+ */
+export const WALL = {
+  plaster: { wall: PLASTER.wall, dusty: PLASTER.wallDusty, boarded: PLASTER.wallBoarded, line: '#c8bba0' },
+  timber: { wall: '#dcbf96', dusty: '#cfb795', boarded: '#b49e7e', line: '#9a7552' },
+  stone: { wall: '#d6d0c2', dusty: '#cbc5b7', boarded: '#b3ad9e', line: '#9a9282' },
+} as const;
+
+/** 村落衰败（B1）：地面褪色区的两种色调（蒙灰的灰褐、搬离的枯黄） */
+export const DECAY_GROUND = {
+  dust: '#b4b09c',
+  dry: '#d6b968',
+} as const;
+
 /** 窗（灯火金族）：夜里点灯、白天的玻璃、封窗 */
 export const GLASS = {
   lit: '#ffd677',
@@ -299,19 +317,32 @@ export const WEEDS = {
   winter: '#8a835f',
 } as const;
 
-/** 粮仓（秋麦黄 + 温润木）：木板仓身渐变、存量、铁箍、尖顶、门 */
+/**
+ * 粮仓（秋麦黄 + 温润木，B3）：石基上的木板仓房，金黄的草顶（和标记色 MARKER.granary 同一族），
+ * 门口的麻袋，仓门、阁楼小门和吊杆。
+ */
 export const GRANARY = {
-  body: ['#f2e6c8', '#dccaa0', '#b9a47a'],
-  /** 木板缝（rgb 120,90,50） */
+  wall: '#c49466',
+  wallShade: '#a07650',
+  gable: '#b3855a',
+  /** 竖向木板缝（rgb 120,90,50） */
   plank: '#785a32',
-  grain: '#e2ad2f',
-  grainLow: '#c98a4a',
-  hoop: '#6b5a44',
-  cap: '#9c6a35',
-  roof: '#b07a40',
-  roofShade: '#8a5a2c',
-  door: '#6e4d32',
+  /** 檐下、门框的深色木条 */
+  trim: '#6e4d32',
+  thatch: '#dcb35a',
+  thatchShade: '#b8913f',
+  thatchBack: '#9e7a34',
+  thatchLine: '#8a6a2c',
+  door: '#7b5a3c',
+  doorBrace: '#5a4030',
+  /** 敞开的仓门里黑洞洞的、空的 */
   doorway: '#3f3025',
+  doorwayFloor: '#5a4636',
+  sack: '#d8c08c',
+  sackShade: '#b49c6a',
+  sackTie: '#8a6a3c',
+  rope: '#c8ab72',
+  beam: '#6b4a30',
 } as const;
 
 /** 日程：告示牌、聚会、落下来的砖、条幅 */
@@ -495,52 +526,121 @@ export const PAVILION = {
   lantern: '#c8473a',
 } as const;
 
-/** 培育区（cultivation.ts）：每一区平时与积雪两套 */
+/** 培育区（cultivation.ts，B2）：每一区平时与积雪两套；各级元素见 visual-state.ts 的 CULTIVATION_STEPS */
 export const CULTIVATION = {
   field: {
+    /** 田埂、翻好的土、垄背、垄沟 */
+    bund: '#7d6142',
+    bundSnow: '#d6e0e8',
     soil: '#9d7244',
-    soilSnow: '#d9d4c6',
-    edge: '#72543b',
-    furrow: '#715037',
-    furrowSnow: '#aaa79d',
+    soilSnow: '#eceff1',
+    ridge: '#b2865a',
+    ridgeSnow: '#f8fafb',
+    furrow: '#6f4e34',
+    furrowSnow: '#c3ced8',
+    /** 作物从上面看到的一条条：嫩芽、半高、成熟、金黄 */
+    sprout: '#93c860',
+    half: '#5f9a3e',
+    ripe: '#a8a43c',
+    gold: '#e2b13c',
     stalk: '#4f7c3d',
-    stalkRipe: '#81762f',
-    stalkSnow: '#7f8274',
-    stalkRipeSnow: '#9a8756',
-    ear: '#78a84f',
-    earRipe: '#d3ab4b',
-    earSnow: '#a8ad98',
-    earRipeSnow: '#c4aa73',
+    stalkRipe: '#8a7a2f',
+    stalkGold: '#b88a2a',
+    ear: '#cdb94e',
+    earGold: '#f2c650',
+    /** 雪里：冒头的麦苗、留茬 */
+    sproutSnow: '#78a656',
+    stubble: '#a88a5a',
+    stubbleGold: '#c4a066',
+    /** 稻草人：杆、衣服、草扎的头、草帽 */
+    scarecrowPole: '#6b4a30',
+    scarecrowShirt: '#4c6a84',
+    scarecrowStraw: '#e2c26a',
+    scarecrowHat: '#a87a3c',
+    /** 地头的草垛 */
+    hay: '#e0b552',
+    hayShade: '#b8913f',
+    hayBand: '#8a6a32',
   },
   orchard: {
     grass: '#8ead62',
-    grassSnow: '#d8d5c8',
+    grassSnow: '#e2e4e0',
     edge: '#668048',
+    /** 树坑 */
+    well: '#8f6c45',
+    wellSnow: '#c9cfd4',
     trunk: '#6f5035',
+    /** 树苗的支架与绑绳 */
+    stake: '#b08c60',
+    tie: '#e2d3a8',
+    leaf: '#93c860',
+    young: '#78b04c',
     crown: '#4f833f',
-    crownBare: '#9b8f72',
-    blossom: '#f0d8cf',
-    fruit: '#c95a3b',
+    crownLit: '#679f4c',
+    blossom: '#f8dbe2',
+    blossomDeep: '#ee9fb4',
+    fruit: '#d9483a',
+    /** 冬天树干刷白、光秃的枝条 */
+    whitewash: '#f2f0ea',
+    branch: '#7a5d42',
+    basket: '#b8864a',
+    basketWeave: '#8a6232',
   },
   pond: {
     water: '#6aaeb6',
+    waterDeep: '#56a0ab',
     ice: '#cbd8dc',
+    iceShade: '#b2c5cc',
     bank: '#4c7e79',
+    stone: '#a49c8e',
+    stoneShade: '#7f786c',
     /** 涟漪：水面上是白的（rgb 255,255,255），冰面上是灰蓝的裂纹（rgb 91,118,126） */
     ripple: '#ffffff',
     crack: '#5b767e',
     reed: '#557f48',
-    reedSnow: '#768071',
-    fish: '#355f69',
+    reedSnow: '#9aa290',
+    cattail: '#7a5232',
+    lily: '#5f9a48',
+    lilyIce: '#7f9c8c',
+    lilyFlower: '#f2a6c0',
+    koi: '#e8823a',
+    koiSpot: '#f6efe2',
     fishIce: '#6d8790',
+    duck: '#f7f4ec',
+    duckShade: '#d9d3c4',
+    duckHead: '#3f7a4a',
+    beak: '#e8a53a',
+    /** 冰面上凿开的冰洞 */
+    hole: '#4f8796',
+    deck: '#a77b52',
+    deckShade: '#7d5a3a',
+    post: '#5a4030',
+    rod: '#6b4a30',
+    line: '#ece6d4',
+    bobber: '#d8473a',
   },
   garden: {
     grass: '#8eb470',
-    grassSnow: '#ddd7ca',
+    grassSnow: '#e4e6e2',
     edge: '#66814e',
+    /** 花床：土、抬高的床沿、积雪 */
+    bed: '#8a6440',
+    bedEdge: '#a8805a',
+    bedSnow: '#f0f3f5',
+    fence: '#c19a6a',
+    fenceShade: '#7d5e3c',
+    sprout: '#93c860',
     stem: '#557e45',
-    petals: ['#d65b79', '#e6ad45', '#8659a6', '#f2e7ca'],
+    leaf: '#4f8a3f',
+    petals: ['#d65b79', '#e6ad45', '#8659a6', '#f2e7ca', '#e8823a'],
     heart: '#d8a947',
+    /** 雪里枯掉的花茎和籽头 */
+    dry: '#9a7a52',
+    dryHead: '#6f5236',
+    arch: '#7a5a3c',
+    archLeaf: '#4f8a3f',
+    archBloom: ['#e85a7a', '#f2a6c0', '#f6d36b'],
+    butterfly: ['#f6d36b', '#f4f0ff', '#ee9fb4'],
   },
 } as const;
 
@@ -631,15 +731,32 @@ export function snowBlend(col: string, cover: number, n: number): string {
   return mix(col, SNOW, clamp(cover * (0.86 + 0.18 * n), 0, 0.92));
 }
 
-/** 衰败阶段 0–3 时屋顶混进的灰（正常 / 安静 / 蒙灰 / 搬离） */
-export const DECAY_DUST = [0, 0.1, 0.45, 0.6] as const;
+/** 衰败阶段 0–3 时屋顶混进的灰（正常 / 安静 / 蒙灰 / 搬离），见 visual-state.ts 的 DECAY_LOOK */
+export const DECAY_DUST: readonly number[] = DECAY_LOOK.map((look) => look.roofDust);
 
-/** 村里一户的屋顶色：村色按户的随机数 v（0–1）略作深浅，再按阶段混灰 */
-export function decayRoof(roof: string, stage: number, v: number): string {
-  return mix(shade(roof, (v - 0.5) * 0.25), HOUSE.roofDust, DECAY_DUST[stage] ?? 0);
+/** 去饱和：向同亮度的灰靠拢，keep 为保留的饱和度（1 原样，0 全灰） */
+export function desaturate(hex: string, keep: number): string {
+  if (keep >= 1) return hex;
+  const l = luma(hex);
+  return mix(rgb([l, l, l]), hex, clamp(keep, 0, 1));
 }
 
-/** 村里一户的墙色：封窗的最暗，蒙灰以后褪色 */
-export function decayWall(stage: number, boarded: boolean): string {
-  return boarded ? PLASTER.wallBoarded : stage >= 2 ? PLASTER.wallDusty : PLASTER.wall;
+/**
+ * 村里一户的屋顶色：村色按户的随机数 v（0–1）略作深浅，再按阶段褪色、混灰。
+ * 安静时饱和度就明显降下来，手机上不放大也看得出和正常的村子不一样。
+ */
+export function decayRoof(roof: string, stage: number, v: number): string {
+  const look = decayLook(stage);
+  return mix(desaturate(shade(roof, (v - 0.5) * 0.25), look.roofSaturation), HOUSE.roofDust, look.roofDust);
+}
+
+/** 村色的旗：和屋顶一起褪色，但不按户变深浅 */
+export function decayFlag(roof: string, stage: number): string {
+  return decayRoof(roof, stage, 0.5);
+}
+
+/** 村里一户的墙色：封窗的最暗，蒙灰以后褪色；material 为村落的墙面材质 */
+export function decayWall(stage: number, boarded: boolean, material: WallMaterial = 'plaster'): string {
+  const w = WALL[material];
+  return boarded ? w.boarded : stage >= 2 ? w.dusty : w.wall;
 }
