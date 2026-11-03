@@ -1,6 +1,7 @@
 import type { IslandMap, Tile } from '../map';
 import { PROP_SPRITES, type PropId } from '../prop-sprites';
 import { houseHash, houseVariant } from './style';
+import { decayLook } from './visual-state';
 
 /** 一件摆在地上的道具：落地点 (i, j)，绘制宽度 w 以地块宽为单位 */
 export interface PlacedProp {
@@ -158,18 +159,26 @@ const SIDES: [number, number][] = [
   [-0.38, 0.38],
 ];
 
-/** 院落：每户按种子决定摆不摆、摆什么、摆在哪一侧；旁边那格有房子或别的东西时换一侧或不摆 */
+/** 一户院子里摆道具的概率 */
+const YARD_CHANCE = 0.36;
+
+/** 院落里的生活道具（晾衣绳、花盆、菜箱……） */
+const YARD_POOL: readonly PropId[] = ['clothesline', 'potted-flowers', 'vegetable-planter', 'water-jar', 'barrel', 'handcart', 'stump-seating', 'haystack'];
+
+/**
+ * 院落：每户按种子决定摆不摆、摆什么、摆在哪一侧；旁边那格有房子或别的东西时换一侧或不摆。
+ * 衰败只减少、不调换（B1）：正常和安静的村子摆得一样齐全，蒙灰的只留一半（隔一件撤一件），搬离的全撤走。
+ */
 function yardProps(g: Ground, v: PropVillage): PlacedProp[] {
-  if (v.stage >= 3) return [];
+  const keep = decayLook(v.stage).yardProps;
+  if (keep <= 0) return [];
   const m = g.m;
   const site = m.villages[v.slot];
-  const chance = [0.36, 0.26, 0.14][v.stage];
-  const pool: readonly PropId[] =
-    v.stage < 2 ? ['clothesline', 'potted-flowers', 'vegetable-planter', 'water-jar', 'barrel', 'handcart', 'stump-seating', 'haystack'] : ['stacked-crates', 'handcart', 'barrel'];
   const out: PlacedProp[] = [];
   const n = Math.min(v.houses, site.slots.length);
-  for (let k = 0; k < n && out.length < 3; k++) {
-    if (houseHash(v.projectId, k, 20) >= chance) continue;
+  let found = 0;
+  for (let k = 0; k < n && found < 3; k++) {
+    if (houseHash(v.projectId, k, 20) >= YARD_CHANCE) continue;
     const t = site.slots[k];
     // 带披屋的房子左侧已经占满
     const sides = houseVariant(v.projectId, k) === 3 ? [SIDES[0]] : houseHash(v.projectId, k, 21) < 0.5 ? SIDES : [SIDES[1], SIDES[0]];
@@ -177,7 +186,10 @@ function yardProps(g: Ground, v: PropVillage): PlacedProp[] {
       // 斜邻的那格要是空地，免得道具挤在两座房子中间
       const nb = m.at(t.i + Math.sign(di), t.j + Math.sign(dj));
       if (!freeTile(g, nb) || inAgendaZone(t.i + di, t.j + dj, g.agenda)) continue;
-      out.push(prop(pick(pool, houseHash(v.projectId, k, 22)), t.i + di, t.j + dj));
+      // 撤走的那几件也占着位置：同一座村子的道具不会因为阶段变化挪到别家门口
+      const shown = keep >= 1 || found % Math.round(1 / keep) === 0;
+      found++;
+      if (shown) out.push(prop(pick(YARD_POOL, houseHash(v.projectId, k, 22)), t.i + di, t.j + dj));
       g.taken.add(nb);
       break;
     }

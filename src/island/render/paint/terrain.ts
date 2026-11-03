@@ -1,8 +1,9 @@
 import type { Scene } from '../model';
 import { tileHash, type Tile } from '../../map';
-import { BEACH, CROP, FESTIVE, GLOW, GROUND, MEADOW, ROCK, seasonField, seasonGrass, snowBlend, SNOW, TREE, WHITE, withAlpha } from '../palette';
+import { BEACH, CROP, DECAY_GROUND, FESTIVE, GLOW, GROUND, MEADOW, ROCK, seasonField, seasonGrass, snowBlend, SNOW, TREE, WHITE, withAlpha } from '../palette';
 import { pineTiers, roundLobes } from '../style';
 import { clamp, hash, mix, shade } from '../utils';
+import { decayLook, missingSlabs } from '../visual-state';
 import { IslandPaintBase } from './base';
 
 /** 双线性插值的格点噪声，返回 0–1；scale 越大起伏越缓。 */
@@ -67,7 +68,9 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     const m = this.map;
     const a = this.amb;
     const occupied = new Set(s.villages.map((x) => x.slot));
-    const key = [v.w, v.h, v.dpr, v.tw, v.ox, v.oy, m.rings, a.season, a.progress.toFixed(2), a.cover.toFixed(2), a.weather, s.villages.map((x) => `${x.slot}:${x.houses}`).join(','), this.theme.sea].join('|');
+    const stageOf = new Map(s.villages.map((x) => [x.slot, x.stage]));
+    // 衰败阶段也画进地面（广场缺砖、褪色区、小路长草），缓存键里要有它
+    const key = [v.w, v.h, v.dpr, v.tw, v.ox, v.oy, m.rings, a.season, a.progress.toFixed(2), a.cover.toFixed(2), a.weather, s.villages.map((x) => `${x.slot}:${x.houses}:${x.stage}`).join(','), this.theme.sea].join('|');
     if (key === this.groundKey) return;
     this.groundKey = key;
     const g = this.ground;
@@ -111,6 +114,7 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       gc.fillStyle = grd;
       gc.fill();
       this.tileDetail(t, t.type === 'plaza' && t.village >= 0 && !occupied.has(t.village) ? 'grass' : t.type, x, y, col, lw);
+      if (t.type === 'plaza' && t.village >= 0 && occupied.has(t.village)) this.plazaDecay(t, x, y, stageOf.get(t.village) ?? 0, occupied);
       if (beach || (t.type === 'grass' && this.sandNeighbour(t))) this.drawBeach(t, x, y, beach);
     }
     // 岛前面的礁石压在崖脚的水线上
@@ -122,7 +126,9 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
     for (const vv of s.villages) {
       const site = m.villages[vv.slot];
       const [cx, cy] = this.iso(site.center.i, site.center.j);
-      gc.strokeStyle = a.cover > 0.3 ? mix(path, SNOW, 0.45) : path;
+      // 冷清的村子没人走，小路慢慢被草吃掉
+      const worn = mix(path, this.palette().grass, decayLook(vv.stage).pathGrass);
+      gc.strokeStyle = a.cover > 0.3 ? mix(worn, SNOW, 0.45) : worn;
       gc.lineWidth = tw * 0.09;
       gc.beginPath();
       for (const sl of site.slots.slice(0, vv.houses)) {
@@ -132,7 +138,120 @@ export abstract class IslandTerrainPainter extends IslandPaintBase {
       }
       gc.stroke();
     }
+    this.villageFade(s);
     this.ctx = main;
+  }
+
+  /**
+   * 衰败村落的褪色区（B1）：以村中心为圆心，整片地面蒙上一层灰褐（蒙灰）或枯黄（搬离），
+   * 越往外越淡。只盖地块顶面（不盖崖壁和小溪），画进地面缓存，每帧不重画。积雪时淡一些。
+   */
+  protected villageFade(s: Scene) {
+    const m = this.map;
+    const c = this.ctx;
+    const { tw } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    const cover = clamp(this.amb.cover, 0, 1);
+    for (const vv of s.villages) {
+      const look = decayLook(vv.stage);
+      const k = look.groundFade * (1 - 0.7 * cover);
+      const site = m.villages[vv.slot];
+      if (k <= 0.01 || !site) continue;
+      const ci = site.center.i;
+      const cj = site.center.j;
+      const R = 2.9;
+      c.save();
+      c.beginPath();
+      for (const t of m.all) {
+        if (t.type === 'water' || Math.hypot(t.i - ci, t.j - cj) > R + 0.8) continue;
+        const [x, y] = this.iso(t.i, t.j);
+        c.moveTo(x, y - hh - 0.5);
+        c.lineTo(x + hw + 0.5, y);
+        c.lineTo(x, y + hh + 0.5);
+        c.lineTo(x - hw - 0.5, y);
+        c.closePath();
+      }
+      c.clip();
+      const col = mix(DECAY_GROUND.dust, DECAY_GROUND.dry, look.groundDry);
+      // 一大两小三团，边缘不是规整的椭圆
+      const blobs: [number, number, number, number][] = [
+        [0, 0, R, 1],
+        [(hash(`fade:${vv.projectId}:a`) - 0.5) * 1.6, (hash(`fade:${vv.projectId}:b`) - 0.5) * 1.6, R * 0.6, 0.55],
+        [(hash(`fade:${vv.projectId}:c`) - 0.5) * 1.6, (hash(`fade:${vv.projectId}:d`) - 0.5) * 1.6, R * 0.5, 0.5],
+      ];
+      for (const [di, dj, r, w] of blobs) {
+        const [x, y] = this.iso(ci + di, cj + dj);
+        const rx = r * tw * Math.SQRT1_2;
+        c.save();
+        c.translate(x, y);
+        c.scale(1, 0.5);
+        const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+        g.addColorStop(0, withAlpha(col, k * w));
+        g.addColorStop(0.5, withAlpha(col, k * w * 0.8));
+        g.addColorStop(1, withAlpha(col, 0));
+        c.fillStyle = g;
+        c.fillRect(-rx, -rx, rx * 2, rx * 2);
+        c.restore();
+      }
+      c.restore();
+    }
+  }
+
+  /**
+   * 衰败村落的广场（B1）：安静起草从石板边缘长进来，蒙灰以后缺几块石板、露出土和草。
+   * 正常的村子广场铺地完整，什么也不画。
+   */
+  protected plazaDecay(t: Tile, x: number, y: number, stage: number, occupied: Set<number>) {
+    const look = decayLook(stage);
+    if (!look.plazaGrass && !look.plazaMissing) return;
+    const c = this.ctx;
+    const { tw } = this.view;
+    const hw = tw / 2;
+    const hh = tw / 4;
+    const grass = this.tileTop({ ...t, type: 'grass' }, occupied);
+    const T: [number, number] = [x, y - hh];
+    const R: [number, number] = [x + hw, y];
+    const L: [number, number] = [x - hw, y];
+    // 地块内 (u, w) ∈ [0, 1]²：u 沿上→右，w 沿上→左
+    const at = (u: number, w: number): [number, number] => [T[0] + (R[0] - T[0]) * u + (L[0] - T[0]) * w, T[1] + (R[1] - T[1]) * u + (L[1] - T[1]) * w];
+    for (const k of missingSlabs(t.i, t.j, stage)) {
+      const a0 = (k % 3) / 3;
+      const b0 = Math.floor(k / 3) / 3;
+      const e = 0.03;
+      const q = [at(a0 + e, b0 + e), at(a0 + 1 / 3 - e, b0 + e), at(a0 + 1 / 3 - e, b0 + 1 / 3 - e), at(a0 + e, b0 + 1 / 3 - e)];
+      this.poly(mix(grass, GROUND.path, 0.35), ...q.flat());
+      const [mx, my] = at(a0 + 1 / 6, b0 + 1 / 6);
+      c.strokeStyle = shade(grass, -0.18);
+      c.lineWidth = Math.max(0.5, tw * 0.018);
+      c.beginPath();
+      for (const d of [-1, 0, 1]) {
+        c.moveTo(mx, my + hh * 0.08);
+        c.lineTo(mx + d * tw * 0.03, my + hh * 0.08 - tw * 0.06 * (d ? 0.75 : 1));
+      }
+      c.stroke();
+    }
+    // 四条边上长进来的草：宽窄不一，内侧是波浪形
+    const B: [number, number] = [x, y + hh];
+    const edges: [[number, number], [number, number], [number, number], number][] = [
+      [L, B, [hw, -hh], 0],
+      [B, R, [-hw, -hh], 1],
+      [L, T, [hw, hh], 2],
+      [T, R, [-hw, hh], 3],
+    ];
+    c.fillStyle = grass;
+    c.beginPath();
+    for (const [p0, p1, [ix, iy], k] of edges) {
+      const w0 = look.plazaGrass * (0.4 + tileHash(t.i, t.j, 160 + k) * 1.2);
+      const w1 = look.plazaGrass * (0.4 + tileHash(t.i, t.j, 164 + k) * 1.2);
+      const mid = (w0 + w1) / 2 + look.plazaGrass * 0.5;
+      c.moveTo(p0[0], p0[1]);
+      c.lineTo(p1[0], p1[1]);
+      c.lineTo(p1[0] + ix * w1, p1[1] + iy * w1);
+      c.quadraticCurveTo((p0[0] + p1[0]) / 2 + ix * mid, (p0[1] + p1[1]) / 2 + iy * mid, p0[0] + ix * w0, p0[1] + iy * w0);
+      c.closePath();
+    }
+    c.fill();
   }
 
   /** 沙滩：外圈的草地里，低频噪声挑出几段连续的岸线铺沙，避开村落、地标和码头 */

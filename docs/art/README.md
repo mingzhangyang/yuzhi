@@ -13,6 +13,8 @@
 
 Canvas 小岛上的所有颜色集中在 `src/island/render/palette.ts`：方向板的 10 个基础色（`BOARD`，取样值待人工校准），按材质和物件归组的当前用色，以及季节、积雪、衰败、透明度的派生函数。绘制代码里不再写颜色字面量，`tests/palette.test.ts` 会检查；地图景物的标记色 `MARKER` 仍在 `style.ts`，与图例、追踪栏共用。
 
+「同一件事实画成什么样」集中在 `src/island/render/visual-state.ts`（美术优化计划 B 期）：衰败四个阶段的画法（`DECAY_LOOK`）、培育区每一级多出的元素（`CULTIVATION_STEPS`）、粮仓门口的麻袋数和见底的门、村落墙面材质。改这些映射时同步看 `tests/visual-state.test.ts` 和截图矩阵里的 `decay`、`cult`、`cult-winter`、`granary` 组。
+
 改画面前后用截图矩阵对照。先安装浏览器测试依赖（项目默认的 `npm ci` **不包含** Playwright；版本与现有 `browser-lifecycle` CI 保持一致）。以下命令在仓库根目录执行，使用 Node.js 24：
 
 ```sh

@@ -1,10 +1,49 @@
 import type { AgendaView, Scene, VillageView } from '../model';
 import type { Tile } from '../../map';
 import { PROP_LAMPS, propBox, type PlacedProp } from '../props-layout';
-import { AGENDA, BOAT, BOTTLE, CHORES_YARD, CLOCK, FESTIVE, GLASS, GLOW, GRANARY, HOUSE, LAMP, LANDMARK, LIBRARY, LIGHTHOUSE, PLASTER, SNOW, SNOW_SHADE, STONE, WEEDS, WELL, WHITE, WINDMILL, withAlpha, WOOD } from '../palette';
+import { AGENDA, BOAT, BOTTLE, CHORES_YARD, CLOCK, decayFlag, FESTIVE, GLASS, GLOW, GRANARY, HOUSE, LAMP, LANDMARK, LIBRARY, LIGHTHOUSE, PLASTER, SNOW, SNOW_SHADE, STONE, WALL, WEEDS, WELL, WHITE, WINDMILL, withAlpha, WOOD } from '../palette';
 import type { HouseVariant } from '../style';
 import { clamp, hash, shade } from '../utils';
+import { granaryEmpty, granarySacks, type WallMaterial } from '../visual-state';
 import { IslandTerrainPainter } from './terrain';
+
+/** 一户房子的样子：墙色与材质、封窗、节日装饰、夜里点灯、炊烟、样式、塌顶 */
+export interface HouseLook {
+  wall?: string;
+  /** 墙面材质（B4）：白灰、木板、石砌；只影响放大后的纹理，墙色由 wall 给出 */
+  material?: WallMaterial;
+  boarded?: boolean;
+  /** 节日装饰（对联、灯笼、花环） */
+  deco?: boolean;
+  /** 夜里这一户亮不亮灯 */
+  lamp?: boolean;
+  /** 冒不冒炊烟（还要看天冷、阴雨或傍晚） */
+  smoke?: boolean;
+  variant?: HouseVariant;
+  /** 搬离的村子里塌了顶的那一户（B1）：没有屋顶，只剩断墙、一角残顶和几根椽子 */
+  collapsed?: boolean;
+}
+
+/** 村旗的尺寸（地块宽的倍数）：杆高是它的一半 */
+export const VILLAGE_FLAG = 0.72;
+
+/**
+ * 屏幕上小于这个尺寸（CSS 像素）的房子不画瓦垄、墙面纹理。默认缩放下（桌面房子约 22px、手机约 9px）
+ * 这些细线只会变成噪点，却要给每户多光栅化几十段抗锯齿线；放大以后屏幕上房子少了，再画出来。
+ */
+export const FINE_DETAIL = 26;
+
+/** 粮仓的尺寸（地块宽的倍数）：仓身半宽 wi × 半深 wj，墙高 H，屋脊再高 rh。绘制和轮廓共用 */
+export const BARN = { wi: 0.2, wj: 0.27, H: 0.34, rh: 0.25, eave: 0.05 } as const;
+
+/** 门口麻袋的摆法 [pi, 第几层]：先在长墙前摆三袋，再往上码两袋，由后往前画 */
+const GRANARY_SACK_SLOTS: readonly [number, number][] = [
+  [-0.11, 0],
+  [0.03, 0],
+  [0.17, 0],
+  [-0.04, 1],
+  [0.1, 1],
+];
 
 /** Buildings and tangible island props. */
 export abstract class IslandStructurePainter extends IslandTerrainPainter {
@@ -16,12 +55,14 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
    * 小房子：石基、两面墙、带框的窗、门、四坡屋顶（有瓦线和屋脊），
    * 冬天屋顶积雪，冷天和傍晚烟囱冒烟，节日挂灯笼贴对联。返回窗户位置，供夜里点灯。
    */
-
-  protected drawHouse(x: number, y: number, s: number, roof: string, wall: string = PLASTER.wall, boarded = false, deco = true, lamp = true, variant: HouseVariant = 0): [number, number] {
+  protected drawHouse(x: number, y: number, s: number, roof: string, look: HouseLook = {}): [number, number] {
+    const { wall = PLASTER.wall, material = 'plaster', boarded = false, deco = true, lamp = true, smoke = deco, variant = 0, collapsed = false } = look;
+    if (collapsed) return this.drawCollapsedHouse(x, y, s, roof, wall, material);
     const c = this.ctx;
     const a = this.amb;
     const hw = s / 2;
     const hh = s / 4;
+    const fine = s >= FINE_DETAIL;
     // 门窗按一层的高度排布；两层的房子墙更高，楼上再开一扇窗
     const H0 = s * 0.5;
     const H = variant === 2 ? s * 0.8 : H0;
@@ -34,6 +75,7 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     this.poly(shade(wall, -0.14), x, y + hh, x + hw, y, x + hw, y - H, x, y + hh - H);
     // 石基
     const fb = H * 0.14;
+    if (fine) this.wallTexture(x, y, s, fb, H, material);
     this.poly(STONE.footing, x - hw, y, x, y + hh, x, y + hh - fb, x - hw, y - fb);
     this.poly(STONE.footingShade, x, y + hh, x + hw, y, x + hw, y - fb, x, y + hh - fb);
     // 墙角的木柱
@@ -126,6 +168,8 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
       c.lineTo(R[0] + (x - R[0]) * f, R[1] + (ay - R[1]) * f);
     }
     c.stroke();
+    if (fine) this.roofTiles([L, F], [x, ay], roof, s);
+    if (fine) this.roofTiles([F, R], [x, ay], shade(roof, -0.22), s);
     c.strokeStyle = shade(roof, 0.25);
     c.beginPath();
     c.moveTo(F[0], F[1]);
@@ -149,7 +193,7 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     }
     }
     // 炊烟：冷天、阴雨天和傍晚
-    if (!boarded && deco && (a.season === 3 || a.weather !== 'clear' || this.day.warm > 0.4 || this.lit)) {
+    if (!boarded && smoke && (a.season === 3 || a.weather !== 'clear' || this.day.warm > 0.4 || this.lit)) {
       for (let k = 0; k < 3; k++) {
         const ph = (this.t * 0.35 + k / 3 + (x * 0.013) % 1) % 1;
         const r = s * (0.05 + ph * 0.1);
@@ -210,6 +254,18 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
       c.lineTo(r[0], r[1]);
     }
     c.stroke();
+    if (s >= FINE_DETAIL) {
+      // 瓦垄：顺着坡往下的一道道
+      c.strokeStyle = withAlpha(shade(roof, -0.3), 0.4);
+      c.lineWidth = Math.max(0.4, s * 0.012);
+      c.beginPath();
+      for (let k = 1; k < 7; k++) {
+        const u = k / 7;
+        c.moveTo(e1[0] + (e2[0] - e1[0]) * u, e1[1] + (e2[1] - e1[1]) * u);
+        c.lineTo(k1[0] + (k2[0] - k1[0]) * u, k1[1] + (k2[1] - k1[1]) * u);
+      }
+      c.stroke();
+    }
     c.strokeStyle = shade(roof, 0.25);
     c.beginPath();
     c.moveTo(k1[0], k1[1]);
@@ -262,6 +318,141 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
       c.lineTo(bx, by);
     }
     c.stroke();
+  }
+
+  /**
+   * 四坡顶一面的瓦垄：从檐口往屋顶尖收拢的几道线（eave 是这一面的檐口两端，apex 是顶点）。
+   * 只在放大以后画，全景下不加噪点。
+   */
+  protected roofTiles(eave: [[number, number], [number, number]], apex: [number, number], face: string, s: number) {
+    const c = this.ctx;
+    const [[ax, ay], [bx, by]] = eave;
+    c.strokeStyle = withAlpha(shade(face, -0.3), 0.4);
+    c.lineWidth = Math.max(0.4, s * 0.012);
+    c.beginPath();
+    for (let k = 1; k < 6; k++) {
+      const u = k / 6;
+      const ex = ax + (bx - ax) * u;
+      const ey = ay + (by - ay) * u;
+      c.moveTo(ex, ey);
+      c.lineTo(ex + (apex[0] - ex) * 0.7, ey + (apex[1] - ey) * 0.7);
+    }
+    c.stroke();
+  }
+
+  /** 墙面材质的纹理（B4）：木板是一道道横缝，石砌是错缝的石块；白灰保持素面 */
+  protected wallTexture(x: number, y: number, s: number, z0: number, z1: number, material: WallMaterial) {
+    if (material === 'plaster') return;
+    const c = this.ctx;
+    const hw = s / 2;
+    const hh = s / 4;
+    c.strokeStyle = withAlpha(WALL[material].line, material === 'timber' ? 0.7 : 0.55);
+    c.lineWidth = Math.max(0.4, s * (material === 'timber' ? 0.014 : 0.012));
+    c.beginPath();
+    const rows = material === 'timber' ? 6 : 4;
+    for (let k = 1; k < rows; k++) {
+      const z = z0 + ((z1 - z0) * k) / rows;
+      c.moveTo(x - hw, y - z);
+      c.lineTo(x, y + hh - z);
+      c.lineTo(x + hw, y - z);
+    }
+    if (material === 'stone') {
+      // 竖缝：相邻两层错开半块
+      for (let k = 0; k < rows; k++) {
+        const za = z0 + ((z1 - z0) * k) / rows;
+        const zb = z0 + ((z1 - z0) * (k + 1)) / rows;
+        for (let u = (k % 2 ? 0.25 : 0.5); u < 1; u += 0.5) {
+          for (const side of [-1, 1]) {
+            const px = x + side * hw * (1 - u);
+            const py = y + hh * u - za;
+            c.moveTo(px, py);
+            c.lineTo(px, py - (zb - za));
+          }
+        }
+      }
+    }
+    c.stroke();
+  }
+
+  /**
+   * 塌了顶的房子（B1，搬离阶段的一户）：屋顶塌进屋里，只剩左后角一片残顶和几根椽子，
+   * 前面两堵墙的墙头参差。剪影比完整的房子矮一截，手机不放大也看得出少了一个屋顶。
+   */
+  protected drawCollapsedHouse(x: number, y: number, s: number, roof: string, wall: string, material: WallMaterial): [number, number] {
+    const c = this.ctx;
+    const a = this.amb;
+    const H = s * 0.5;
+    const fine = s >= FINE_DETAIL;
+    const P = (pi: number, pj: number, z: number): [number, number] => [x + ((pi - pj) * s) / 2, y + ((pi + pj) * s) / 4 - z];
+    const pts = (...q: [number, number][]) => q.flat();
+    this.shadow(x + s * 0.1, y + s * 0.1, s * 0.58, s * 0.23);
+    // 屋里：两堵后墙的内侧
+    this.poly(shade(wall, -0.42), ...pts(P(-0.5, -0.5, 0), P(-0.5, 0.5, 0), P(-0.5, 0.5, H * 0.92), P(-0.5, 0, H * 0.8), P(-0.5, -0.5, H)));
+    this.poly(shade(wall, -0.28), ...pts(P(-0.5, -0.5, 0), P(0.5, -0.5, 0), P(0.5, -0.5, H * 0.9), P(0.1, -0.5, H * 0.72), P(-0.5, -0.5, H)));
+    // 塌下来的屋面斜躺在屋里
+    const fallen = shade(roof, -0.18);
+    this.poly(fallen, ...pts(P(-0.45, -0.45, H * 0.95), P(0.45, -0.45, H * 0.7), P(0.4, 0.2, H * 0.3), P(-0.4, 0.25, H * 0.42)));
+    // 左后角还挂着一片残顶
+    this.poly(roof, ...pts(P(-0.57, 0.57, H - s * 0.04), P(-0.57, -0.57, H + s * 0.02), P(-0.15, -0.3, H + s * 0.24), P(-0.2, 0.05, H + s * 0.18), P(-0.32, 0.3, H + s * 0.06)));
+    this.poly(shade(roof, -0.3), ...pts(P(-0.57, 0.57, H - s * 0.04), P(-0.32, 0.3, H + s * 0.06), P(-0.32, 0.3, H + s * 0.02), P(-0.57, 0.57, H - s * 0.075)));
+    // 几根椽子斜支着
+    c.strokeStyle = WOOD.dark;
+    c.lineCap = 'round';
+    c.lineWidth = Math.max(0.6, s * 0.03);
+    c.beginPath();
+    c.moveTo(...P(0.25, -0.5, H * 0.95));
+    c.lineTo(...P(0.05, 0.05, H + s * 0.17));
+    c.moveTo(...P(0.5, -0.1, H * 0.85));
+    c.lineTo(...P(0.25, 0.2, H + s * 0.1));
+    c.stroke();
+    // 前面两堵墙：墙头参差
+    const left = [P(-0.5, 0.5, H), P(-0.2, 0.5, H * 0.9), P(0, 0.5, H * 0.66), P(0.25, 0.5, H * 0.76), P(0.5, 0.5, H * 0.6)];
+    const right = [P(0.5, 0.5, H * 0.6), P(0.5, 0.2, H * 0.8), P(0.5, -0.1, H * 0.64), P(0.5, -0.5, H * 0.92)];
+    this.poly(wall, ...pts(P(-0.5, 0.5, 0), P(0.5, 0.5, 0), ...left.slice().reverse()));
+    this.poly(shade(wall, -0.14), ...pts(P(0.5, 0.5, 0), P(0.5, -0.5, 0), ...right.slice().reverse()));
+    const fb = H * 0.14;
+    if (fine) {
+      c.save();
+      c.beginPath();
+      c.moveTo(...P(-0.5, 0.5, 0));
+      for (const p of [P(0.5, 0.5, 0), P(0.5, -0.5, 0), ...right.slice().reverse().slice(1), ...left.slice().reverse()]) c.lineTo(...p);
+      c.closePath();
+      c.clip();
+      this.wallTexture(x, y, s, fb, H, material);
+      c.restore();
+    }
+    this.poly(STONE.footing, ...pts(P(-0.5, 0.5, 0), P(0.5, 0.5, 0), P(0.5, 0.5, fb), P(-0.5, 0.5, fb)));
+    this.poly(STONE.footingShade, ...pts(P(0.5, 0.5, 0), P(0.5, -0.5, 0), P(0.5, -0.5, fb), P(0.5, 0.5, fb)));
+    // 墙头的雪
+    if (a.cover > 0.15) {
+      c.strokeStyle = SNOW;
+      c.lineWidth = Math.max(0.6, s * 0.04);
+      c.beginPath();
+      c.moveTo(...left[0]);
+      for (const p of [...left.slice(1), ...right.slice(1)]) c.lineTo(...p);
+      c.stroke();
+    }
+    // 封死的窗和门
+    const hw = s / 2;
+    const hh = s / 4;
+    const ww = hw * 0.34;
+    const wh = H * 0.32;
+    const wx = x - hw * 0.7;
+    const wy = y + hh * 0.3 - H * 0.36;
+    this.facePoly(WOOD.frame, wx - s * 0.02, wy + s * 0.02, ww + s * 0.04, wh + s * 0.04, 0.5);
+    this.facePoly(GLASS.boarded, wx, wy, ww, wh, 0.5);
+    const dx0 = x + hw * 0.3;
+    const dy0 = y + hh - hh * 0.3;
+    this.facePoly(HOUSE.doorFrame, dx0, dy0, hw * 0.3, H * 0.6 * 0.8, -0.5);
+    c.strokeStyle = GLASS.boards;
+    c.lineWidth = Math.max(0.6, s * 0.03);
+    c.beginPath();
+    c.moveTo(wx, wy - wh);
+    c.lineTo(wx + ww, wy + ww * 0.5);
+    c.moveTo(dx0, dy0 - H * 0.3);
+    c.lineTo(dx0 + hw * 0.3, dy0 - hw * 0.15 - H * 0.1);
+    c.stroke();
+    return [wx + ww / 2, wy + ww * 0.25 - wh / 2];
   }
 
   protected houseFestival(x: number, y: number, s: number, hh: number, H: number, dx0: number, dy0: number, dw: number, dh: number) {
@@ -587,14 +778,15 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     return lw;
   }
 
-  protected drawFlag(x: number, y: number, s: number, color: string, seed: number, star = false) {
+  /** 旗：杆高 0.5s，旗面 0.26s × 0.16s 挂在杆顶右侧；still 时不飘（减弱动态效果） */
+  protected drawFlag(x: number, y: number, s: number, color: string, seed: number, star = false, still = false) {
     const c = this.ctx;
     c.fillStyle = LANDMARK.flagPole;
     c.fillRect(x - Math.max(0.5, s * 0.012), y - s * 0.5, Math.max(1, s * 0.025), s * 0.5);
     const w = s * 0.26;
     const h = s * 0.16;
     const top = y - s * 0.5;
-    const wave = (k: number) => Math.sin(this.t * 3 + seed + k * 2.2) * s * 0.018;
+    const wave = (k: number) => (still ? Math.sin(seed + k * 2.2) * 0.5 : Math.sin(this.t * 3 + seed + k * 2.2)) * s * 0.018;
     c.fillStyle = color;
     c.beginPath();
     c.moveTo(x, top);
@@ -669,9 +861,14 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
    * 房子的屏幕轮廓（地面三角 + 墙 + 出檐屋顶），与 drawHouse 各样式的比例一致。
    * 带披屋的再加一块：披屋朝前的墙和单坡顶，取 drawLeanTo 的同一组局部坐标。
    */
-  protected houseOutline(x: number, y: number, s: number, variant: HouseVariant = 0): [number, number][][] {
+  protected houseOutline(x: number, y: number, s: number, variant: HouseVariant = 0, collapsed = false): [number, number][][] {
     const hw = s / 2;
     const P = (pi: number, pj: number, z: number): [number, number] => [x + ((pi - pj) * s) / 2, y + ((pi + pj) * s) / 4 - z];
+    if (collapsed) {
+      // 塌顶：与 drawCollapsedHouse 同一组角点，比完整的房子矮一截
+      const H = s * 0.5;
+      return [[[x - hw * 1.14, y], [x, y + s / 4], [x + hw, y], P(0.5, -0.5, H * 0.92), P(-0.5, -0.5, H), P(-0.15, -0.3, H + s * 0.24), P(-0.57, 0.57, H - s * 0.04)]];
+    }
     if (variant === 1) {
       // 双坡顶：与 drawGableRoof 同一组角点（出檐 0.08，屋脊高 0.36s，檐口下沉 0.04s）
       const H = s * 0.5;
@@ -700,9 +897,19 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     return outlines;
   }
 
-  /** 井：井身和井顶是实心的，两根立柱之间是空的；圣诞节井边那棵松树也算（drawWell 里画在 x + 0.24tw） */
+  /** 村旗的落地点：井的左边 */
+  protected villageFlagFoot(x: number, y: number, tw: number): [number, number] {
+    return [x - tw * 0.27, y - tw * 0.03];
+  }
+
+  /**
+   * 井：井身和井顶是实心的，两根立柱之间是空的；圣诞节井边那棵松树也算（drawWell 里画在 x + 0.24tw）。
+   * 井左边的村旗：一根细杆加杆顶的旗面。
+   */
   protected wellOutline(x: number, y: number, tw: number): [number, number][][] {
     const r = tw * 0.1;
+    const [fx, fy] = this.villageFlagFoot(x, y, tw);
+    const fs = tw * VILLAGE_FLAG;
     const outlines: [number, number][][] = [
       [
         [x - r, y + r * 0.5],
@@ -714,6 +921,14 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
         [x - r * 1.3, y - r * 1.9],
         [x, y - r * 2.7],
         [x + r * 1.3, y - r * 1.9],
+      ],
+      [
+        [fx - fs * 0.02, fy],
+        [fx + fs * 0.03, fy],
+        [fx + fs * 0.03, fy - fs * 0.32],
+        [fx + fs * 0.28, fy - fs * 0.32],
+        [fx + fs * 0.28, fy - fs * 0.53],
+        [fx - fs * 0.02, fy - fs * 0.53],
       ],
     ];
     if (this.amb.fest.has('christmas')) outlines.push(...this.treeOutline(x + tw * 0.24, y - tw * 0.02, tw * 0.4, 'pine', 0.1));
@@ -734,64 +949,189 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     return a.from + (a.to - a.from) * k;
   }
 
+  /**
+   * 粮仓（B3）：石基上的木板仓房，金黄的草顶，山墙朝右前方开一扇大门。
+   * 余量看门口的麻袋（0–5 袋，granarySacks）；余量低于两成时仓门大开、里面空着（granaryEmpty），
+   * 不再用警示色。「此刻正在用时间」画成山墙上的阁楼小门打开、吊杆上吊着一袋，和余量互不相干。
+   */
   protected drawGranary(x: number, y: number, tw: number, ratio: number, busy = false) {
     const c = this.ctx;
-    const s = tw * 0.46;
-    const r = s * 0.34;
-    const h = s * 0.95;
-    this.shadow(x + s * 0.1, y + s * 0.06, s * 0.6, s * 0.25);
-    const g = c.createLinearGradient(x - r, 0, x + r, 0);
-    g.addColorStop(0, GRANARY.body[0]);
-    g.addColorStop(0.55, GRANARY.body[1]);
-    g.addColorStop(1, GRANARY.body[2]);
-    c.fillStyle = g;
-    c.fillRect(x - r, y - h, r * 2, h);
-    c.beginPath();
-    c.ellipse(x, y, r, r * 0.45, 0, 0, Math.PI);
-    c.fill();
-    // 木板
-    c.strokeStyle = withAlpha(GRANARY.plank, 0.28);
-    c.lineWidth = Math.max(0.5, s * 0.02);
-    c.beginPath();
-    for (const f of [-0.6, -0.2, 0.2, 0.6]) {
-      c.moveTo(x + r * f, y - h);
-      c.lineTo(x + r * f, y + r * 0.45 * Math.sqrt(1 - f * f));
+    const a = this.amb;
+    const P = this.isoAt(x, y, tw);
+    const f = (...q: [number, number][]) => q.flat();
+    const { wi, wj, eave: o } = BARN;
+    const H = tw * BARN.H;
+    const rh = tw * BARN.rh;
+    const d = tw * 0.02;
+    const fb = tw * 0.05;
+    const fine = tw * 0.4 >= FINE_DETAIL;
+    const empty = granaryEmpty(ratio);
+    this.shadow(x + tw * 0.08, y + tw * 0.07, tw * 0.4, tw * 0.16);
+    // 石基与木板墙
+    this.isoBox(P, -wi, wi, -wj, wj, 0, fb, STONE.footing, STONE.footingShade);
+    this.isoBox(P, -wi, wi, -wj, wj, fb, H, GRANARY.wall, GRANARY.wallShade);
+    if (fine) {
+      c.strokeStyle = withAlpha(GRANARY.plank, 0.35);
+      c.lineWidth = Math.max(0.5, tw * 0.008);
+      c.beginPath();
+      for (let k = 1; k < 7; k++) {
+        const pi = -wi + (2 * wi * k) / 7;
+        c.moveTo(...P(pi, wj, fb));
+        c.lineTo(...P(pi, wj, H));
+      }
+      for (let k = 1; k < 9; k++) {
+        const pj = wj - (2 * wj * k) / 9;
+        if (Math.abs(pj) < 0.14) continue;
+        c.moveTo(...P(wi, pj, fb));
+        c.lineTo(...P(wi, pj, H));
+      }
+      c.stroke();
     }
-    c.stroke();
-    // 存量：金黄的一截
-    const fh = h * clamp(ratio, 0, 1);
-    c.fillStyle = ratio < 0.25 ? GRANARY.grainLow : GRANARY.grain;
-    c.fillRect(x - r * 0.55, y - fh, r * 1.1, fh);
-    // 铁箍
-    c.strokeStyle = GRANARY.hoop;
-    c.lineWidth = Math.max(0.7, s * 0.035);
+    // 山墙下的大门
+    const dj = 0.12;
+    const zt = H * 0.84;
+    this.poly(GRANARY.trim, ...f(P(wi, dj + 0.02, fb), P(wi, -dj - 0.02, fb), P(wi, -dj - 0.02, zt + tw * 0.025), P(wi, dj + 0.02, zt + tw * 0.025)));
+    if (empty) {
+      // 仓门大开，里面黑洞洞、空空的
+      this.poly(GRANARY.doorway, ...f(P(wi, dj, fb), P(wi, -dj, fb), P(wi, -dj, zt), P(wi, dj, zt)));
+      this.poly(GRANARY.doorwayFloor, ...f(P(wi, dj, fb), P(wi, -dj, fb), P(wi - 0.12, -dj, fb), P(wi - 0.12, dj, fb)));
+      this.poly(shade(GRANARY.door, -0.12), ...f(P(wi, -dj, fb), P(wi + 0.17, -dj - 0.04, fb), P(wi + 0.17, -dj - 0.04, zt), P(wi, -dj, zt)));
+      this.poly(GRANARY.door, ...f(P(wi, dj, fb), P(wi + 0.17, dj + 0.04, fb), P(wi + 0.17, dj + 0.04, zt), P(wi, dj, zt)));
+    } else {
+      this.poly(GRANARY.door, ...f(P(wi, dj, fb), P(wi, -dj, fb), P(wi, -dj, zt), P(wi, dj, zt)));
+      c.strokeStyle = GRANARY.doorBrace;
+      c.lineWidth = Math.max(0.6, tw * 0.014);
+      c.beginPath();
+      c.moveTo(...P(wi, 0, fb));
+      c.lineTo(...P(wi, 0, zt));
+      if (fine) {
+        // 两扇门上各一道斜撑
+        c.moveTo(...P(wi, dj, fb));
+        c.lineTo(...P(wi, 0.01, zt));
+        c.moveTo(...P(wi, -0.01, fb));
+        c.lineTo(...P(wi, -dj, zt));
+      }
+      c.stroke();
+    }
+    // 草顶：后坡（大半被挡住）、山墙、前坡
+    const e1 = P(-wi - o, wj + o, H - d);
+    const e2 = P(wi + o, wj + o, H - d);
+    const k1 = P(-wi - o, 0, H + rh);
+    const k2 = P(wi + o, 0, H + rh);
+    const b1 = P(-wi - o, -wj - o, H - d);
+    const b2 = P(wi + o, -wj - o, H - d);
+    this.poly(GRANARY.thatchBack, ...f(b1, b2, k2, k1));
+    this.poly(GRANARY.wallShade, ...f(P(wi, wj, H), P(wi, -wj, H), P(wi, 0, H + rh * 0.94)));
+    // 阁楼小门：此刻正在用时间时打开，吊杆上吊着一袋
+    const hz0 = H + rh * 0.12;
+    const hz1 = H + rh * 0.5;
+    this.poly(GRANARY.gable, ...f(P(wi, 0.075, hz0 - tw * 0.012), P(wi, -0.075, hz0 - tw * 0.012), P(wi, -0.075, hz1 + tw * 0.012), P(wi, 0.075, hz1 + tw * 0.012)));
+    this.poly(busy ? GRANARY.doorway : GRANARY.door, ...f(P(wi, 0.06, hz0), P(wi, -0.06, hz0), P(wi, -0.06, hz1), P(wi, 0.06, hz1)));
+    this.poly(GRANARY.thatch, ...f(e1, e2, k2, k1));
+    this.poly(GRANARY.thatchShade, ...f(e1, e2, [e2[0], e2[1] + tw * 0.03], [e1[0], e1[1] + tw * 0.03]));
+    c.strokeStyle = GRANARY.thatchShade;
+    c.lineWidth = Math.max(0.8, tw * 0.03);
+    c.lineCap = 'round';
     c.beginPath();
-    c.ellipse(x, y - h * 0.3, r, r * 0.45, 0, 0, Math.PI);
+    c.moveTo(...e2);
+    c.lineTo(...k2);
+    c.lineTo(...b2);
     c.stroke();
-    c.fillStyle = GRANARY.cap;
-    c.beginPath();
-    c.ellipse(x, y - h, r * 1.15, r * 0.5, 0, 0, Math.PI * 2);
-    c.fill();
-    this.poly(GRANARY.roof, x - r * 1.15, y - h, x, y - h - s * 0.55, x, y - h + r * 0.5);
-    this.poly(GRANARY.roofShade, x, y - h - s * 0.55, x + r * 1.15, y - h, x, y - h + r * 0.5);
-    if (this.amb.cover > 0.15) {
-      this.poly(SNOW, x - r * 0.7, y - h - s * 0.22, x, y - h - s * 0.56, x, y - h - s * 0.12);
-      this.poly(SNOW_SHADE, x, y - h - s * 0.56, x + r * 0.7, y - h - s * 0.22, x, y - h - s * 0.12);
+    if (fine) {
+      // 草顶顺坡的纹路
+      c.strokeStyle = withAlpha(GRANARY.thatchLine, 0.4);
+      c.lineWidth = Math.max(0.5, tw * 0.008);
+      c.beginPath();
+      for (let k = 1; k < 10; k++) {
+        const u = k / 10;
+        const top: [number, number] = [k1[0] + (k2[0] - k1[0]) * u, k1[1] + (k2[1] - k1[1]) * u];
+        const low: [number, number] = [e1[0] + (e2[0] - e1[0]) * u, e1[1] + (e2[1] - e1[1]) * u];
+        c.moveTo(top[0] + (low[0] - top[0]) * 0.12, top[1] + (low[1] - top[1]) * 0.12);
+        c.lineTo(low[0], low[1]);
+      }
+      c.stroke();
+    }
+    if (a.cover > 0.15) {
+      const k = 0.35 + 0.45 * a.cover;
+      const l: [number, number] = [k1[0] + (e1[0] - k1[0]) * k, k1[1] + (e1[1] - k1[1]) * k];
+      const r: [number, number] = [k2[0] + (e2[0] - k2[0]) * k, k2[1] + (e2[1] - k2[1]) * k];
+      this.poly(SNOW, ...f([k1[0], k1[1] - tw * 0.012], [k2[0], k2[1] - tw * 0.012], r, l));
     }
     if (busy) {
-      // 门半开表示「此刻正在用时间」，不改变粮仓存量高度。
-      c.fillStyle = GRANARY.door;
-      c.fillRect(x - r * 0.48, y - s * 0.34, r * 0.96, s * 0.34);
-      c.fillStyle = GRANARY.doorway;
+      const [hx, hy] = P(wi, 0, H + rh * 0.72);
+      const [ex, ey] = P(wi + 0.17, 0, H + rh * 0.72);
+      c.strokeStyle = GRANARY.beam;
+      c.lineWidth = Math.max(0.8, tw * 0.02);
       c.beginPath();
-      c.moveTo(x - r * 0.48, y - s * 0.34);
-      c.lineTo(x - r * 0.08, y - s * 0.25);
-      c.lineTo(x - r * 0.08, y + 0.01);
-      c.lineTo(x - r * 0.48, y);
-      c.closePath();
-      c.fill();
-      if (this.lit) this.lights.push([x - r * 0.16, y - s * 0.16, tw * 0.24, GLOW.warm]);
+      c.moveTo(hx, hy);
+      c.lineTo(ex, ey);
+      c.stroke();
+      const bob = this.calm ? 0 : Math.sin(this.t * 1.4) * tw * 0.012;
+      const sy = ey + tw * 0.2 + bob;
+      c.strokeStyle = GRANARY.rope;
+      c.lineWidth = Math.max(0.5, tw * 0.008);
+      c.beginPath();
+      c.moveTo(ex - tw * 0.01, ey);
+      c.lineTo(ex - tw * 0.01, sy - tw * 0.07);
+      c.stroke();
+      this.drawSack(ex - tw * 0.01, sy, tw * 0.045);
+      if (this.lit) {
+        const [lx, ly] = P(wi, 0, (hz0 + hz1) / 2);
+        this.lights.push([lx, ly, tw * 0.3, GLOW.warm]);
+      }
     }
+    // 门口的麻袋：沿长墙一字排开，再往上码两袋
+    const n = granarySacks(ratio);
+    const u = tw * 0.06;
+    GRANARY_SACK_SLOTS.slice(0, n).forEach(([pi, row]) => {
+      const [sx, sy] = P(pi, wj + 0.12, row * u * 1.1);
+      this.drawSack(sx, sy, u);
+    });
+  }
+
+  /** 一只麻袋：底宽顶收，袋口扎绳；落地点在底边中点 */
+  protected drawSack(x: number, y: number, u: number) {
+    const c = this.ctx;
+    c.fillStyle = GRANARY.sack;
+    c.beginPath();
+    c.moveTo(x - u * 0.95, y);
+    c.quadraticCurveTo(x - u * 1.15, y - u * 1.0, x - u * 0.45, y - u * 1.25);
+    c.lineTo(x + u * 0.45, y - u * 1.25);
+    c.quadraticCurveTo(x + u * 1.15, y - u * 1.0, x + u * 0.95, y);
+    c.closePath();
+    c.fill();
+    c.fillStyle = GRANARY.sackShade;
+    c.beginPath();
+    c.moveTo(x + u * 0.2, y);
+    c.quadraticCurveTo(x + u * 0.45, y - u * 0.8, x + u * 0.45, y - u * 1.25);
+    c.quadraticCurveTo(x + u * 1.15, y - u * 1.0, x + u * 0.95, y);
+    c.closePath();
+    c.fill();
+    this.poly(GRANARY.sackTie, x - u * 0.3, y - u * 1.22, x + u * 0.3, y - u * 1.22, x + u * 0.15, y - u * 1.5, x - u * 0.15, y - u * 1.5);
+    if (this.amb.cover > 0.3) {
+      c.fillStyle = SNOW;
+      c.beginPath();
+      c.ellipse(x - u * 0.1, y - u * 1.22, u * 0.55, u * 0.18, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+
+  /** 粮仓的屏幕轮廓：仓身、草顶、敞开的门扇和门口的麻袋都在里面；也是点粮仓的范围 */
+  protected granaryOutline(x: number, y: number, tw: number): [number, number][] {
+    const P = this.isoAt(x, y, tw);
+    const { wi, wj, eave: o } = BARN;
+    const H = tw * BARN.H;
+    const rh = tw * BARN.rh;
+    return [
+      P(-wi - 0.02, wj + 0.2, 0),
+      P(wi + 0.02, wj + 0.2, 0),
+      P(wi + 0.17, 0.16, 0),
+      P(wi + 0.17, -wj, 0),
+      P(wi + o, -wj - o, H),
+      P(wi + o, 0, H + rh),
+      P(-wi - o, 0, H + rh),
+      P(-wi - o, wj + o, H),
+    ];
   }
 
   protected drawWeeds(x: number, y: number, tw: number, seed: number) {
@@ -816,6 +1156,9 @@ export abstract class IslandStructurePainter extends IslandTerrainPainter {
     const c = this.ctx;
     const a = this.amb;
     const r = tw * 0.1;
+    // 村旗（B4）：插在井的左边，村色，和屋顶一起随阶段褪色
+    const [fx, fy] = this.villageFlagFoot(x, y, tw);
+    this.drawFlag(fx, fy, tw * VILLAGE_FLAG, decayFlag(vv.roof, vv.stage), hash(vv.projectId) * 6, false, this.calm);
     this.shadow(x + r * 0.2, y + r * 0.2, r * 1.3, r * 0.6);
     c.fillStyle = WELL.body;
     c.beginPath();

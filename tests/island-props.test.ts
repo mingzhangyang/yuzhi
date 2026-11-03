@@ -72,6 +72,22 @@ describe('小岛道具摆放', () => {
     expect(new Set(props.map((p) => `${p.i},${p.j}`)).size).toBe(props.length);
   });
 
+  it('衰败只撤院落道具、不换道具：安静和正常一样齐全，蒙灰留一半，搬离全撤', () => {
+    const m = buildIsland(0);
+    // 院落道具落在房子左右角（±0.38 格），广场道具落在整格上
+    const yard = (stage: number) =>
+      villageProps(m, [{ slot: 0, projectId: 'p-move', stage, houses: 6 }])
+        .filter((p) => !Number.isInteger(p.i))
+        .map((p) => `${p.id}@${p.i},${p.j}`);
+    const full = yard(0);
+    expect(full.length).toBeGreaterThan(1);
+    expect(yard(1)).toEqual(full);
+    const dusty = yard(2);
+    expect(dusty.length).toBe(Math.ceil(full.length / 2));
+    for (const p of dusty) expect(full).toContain(p);
+    expect(yard(3)).toEqual([]);
+  });
+
   it('遮挡轮廓落在贴图外框之内', () => {
     for (const id of Object.keys(PROP_SPRITES) as (keyof typeof PROP_SPRITES)[]) {
       const w = 40;

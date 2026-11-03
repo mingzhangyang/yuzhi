@@ -19,10 +19,24 @@ export function luma(c: string): number {
   return r * 0.299 + g * 0.587 + b * 0.114;
 }
 
+/**
+ * 混色结果的缓存：绘制时同一组（颜色、颜色、比例）每帧要算上百次（屋顶的明暗面、瓦线、墙角柱……），
+ * 解析两段十六进制再拼回字符串比查表贵得多。键里的颜色和比例都来自调色板与少数几个连续量，
+ * 条目数有上限，超过就整表清掉重来。
+ */
+const mixCache = new Map<string, string>();
+const MIX_CACHE_MAX = 8192;
+
 export function mix(a: string, b: string, t: number): string {
+  const key = a + b + t;
+  let out = mixCache.get(key);
+  if (out !== undefined) return out;
   const A = hx(a);
   const B = hx(b);
-  return '#' + A.map((v, k) => clamp(Math.round(v + (B[k] - v) * t), 0, 255).toString(16).padStart(2, '0')).join('');
+  out = '#' + A.map((v, k) => clamp(Math.round(v + (B[k] - v) * t), 0, 255).toString(16).padStart(2, '0')).join('');
+  if (mixCache.size >= MIX_CACHE_MAX) mixCache.clear();
+  mixCache.set(key, out);
+  return out;
 }
 
 export function shade(c: string, t: number): string {
