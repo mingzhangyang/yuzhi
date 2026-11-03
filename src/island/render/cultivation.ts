@@ -892,12 +892,12 @@ export function drawCultivationArea(
 export function cultivationExtent(kind: CultivationKind, level: number): { half: number; above: number; below: number } {
   const has = cultivationElements(kind, level);
   if (kind === 'field') return { half: 0.5, above: has.has('scarecrow') ? 0.4 : has.has('crop-half') || has.has('crop-gold') ? 0.3 : 0.26, below: 0.24 };
-  if (kind === 'orchard') return { half: 0.47, above: has.has('grown-trees') ? 0.47 : 0.34, below: 0.24 };
+  if (kind === 'orchard') return { half: 0.47, above: has.has('grown-trees') ? 0.47 : 0.4, below: 0.24 };
   if (kind === 'pond') return { half: 0.49, above: 0.3, below: 0.25 };
   return { half: 0.47, above: has.has('arch') ? 0.56 : 0.28, below: 0.24 };
 }
 
-/** Conservative opaque footprint for walker hit occlusion, matching the drawing above. */
+/** Broad, backwards-compatible click and inspection target; NOT a solid occlusion mask. */
 export function cultivationOutline(
   area: CultivationAreaState,
   x: number,
@@ -911,4 +911,84 @@ export function cultivationOutline(
     [x + tw * half, y - tw * above],
     [x - tw * half, y - tw * above],
   ];
+}
+
+
+/**
+ * 真实物体的不透明轮廓（只供小人遮挡判断）。
+ * 点击/检查继续使用 cultivationOutline() 的宽松矩形，包括旧版本能点到的边缘。
+ * 地块本体按画出来的菱形/椭圆；高出地面的装饰只挡住实际茎、树冠、芦苇或花拱门附近。
+ */
+export function cultivationOcclusionOutlines(
+  area: CultivationAreaState,
+  x: number,
+  y: number,
+  tw: number,
+): Pt[][] {
+  const P: Iso = (pi, pj, z = 0) => [x + ((pi - pj) * tw) / 2, y + ((pi + pj) * tw) / 4 - z];
+  const box = (cx: number, cy: number, half: number, above: number, below = 0): Pt[] => [
+    [cx - half, cy + below], [cx + half, cy + below],
+    [cx + half, cy - above], [cx - half, cy - above],
+  ];
+  const has = cultivationElements(area.kind, area.level);
+
+  if (area.kind === 'pond') {
+    // 水面和岸石的圆形外框；左后方高出的芦苇单独保留。
+    const water: Pt[] = Array.from({ length: 16 }, (_, k): Pt => {
+      const a = (k * Math.PI * 2) / 16;
+      return [x + Math.cos(a) * tw * (POND_RX + 0.05), y + Math.sin(a) * tw * (POND_RY + 0.04)];
+    });
+    return [
+      water,
+      box(x - tw * POND_RX * 0.78, y - tw * POND_RY * 0.35, tw * 0.09, tw * 0.24, tw * 0.02),
+    ];
+  }
+
+  const outlines: Pt[][] = [diamond(P, area.kind === 'field' ? 0.47 : 0.46)];
+  if (area.kind === 'field') {
+    if (has.has('scarecrow')) {
+      const [sx, sy] = P(0.06, -0.12);
+      outlines.push(box(sx, sy, tw * 0.115, tw * 0.38));
+    }
+  } else if (area.kind === 'orchard') {
+    // 四棵树与 drawOrchard() 使用相同落点；树冠长高，但树与树间仍可点到可见小人。
+    const size = has.has('grown-trees') ? 2 : has.has('young-trees') ? 1 : 0;
+    const half = tw * [0.05, 0.08, 0.135][size];
+    const above = tw * [0.23, 0.27, 0.38][size];
+    for (const [pi, pj] of ORCHARD_TREES) {
+      const [tx, ty] = P(pi, pj);
+      outlines.push(box(tx, ty, half, above, tw * 0.015));
+    }
+  } else if (has.has('arch')) {
+    // 与 drawArch() 的柱子及二次贝塞尔拱顶共享 FENCE_R、FENCE_GATE 和 0.24 高度。
+    // 拱顶是窄曲线，不是宽 0.94 格的实心墙；两侧高处的空白不能挡住行人。
+    const gate = -FENCE_R + 2 * FENCE_R * FENCE_GATE;
+    const [lx, ly] = P(-FENCE_R, gate);
+    const [rx, ry] = P(gate, -FENCE_R);
+    const h = tw * 0.24;
+    const midX = (lx + rx) / 2;
+    const midY = (ly + ry) / 2;
+    const span = Math.hypot(rx - lx, ry - ly) / 2;
+    const pad = tw * 0.03;
+    outlines.push(box(lx, ly, pad, h + pad, tw * 0.015));
+    outlines.push(box(rx, ry, pad, h + pad, tw * 0.015));
+    const archPoint = (u: number): Pt => {
+      const v = 1 - u;
+      return [
+        v * v * lx + 2 * v * u * midX + u * u * rx,
+        v * v * (ly - h) + 2 * v * u * (midY - h - span * 1.1) + u * u * (ry - h),
+      ];
+    };
+    for (let k = 0; k < 4; k++) {
+      const [ax, ay] = archPoint(k / 4);
+      const [bx, by] = archPoint((k + 1) / 4);
+      outlines.push([
+        [Math.min(ax, bx) - pad, Math.max(ay, by) + pad],
+        [Math.max(ax, bx) + pad, Math.max(ay, by) + pad],
+        [Math.max(ax, bx) + pad, Math.min(ay, by) - pad],
+        [Math.min(ax, bx) - pad, Math.min(ay, by) - pad],
+      ]);
+    }
+  }
+  return outlines;
 }

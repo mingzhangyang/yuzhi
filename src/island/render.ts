@@ -14,7 +14,7 @@ import { AGENDA, CUE, decayRoof, decayWall, GLOW, LAMP, PIER, PLASTER, SNOW, WHI
 import { HOUSE_SCALE, houseVariant, MARKER, personSize } from './render/style';
 import { collapsedSlot, decayLook, houseBoarded, houseLit, houseSmokes, wallMaterial } from './render/visual-state';
 import { hash, mix } from './render/utils';
-import { cultivationOutline, drawCultivationArea } from './render/cultivation';
+import { cultivationOcclusionOutlines, cultivationOutline, drawCultivationArea } from './render/cultivation';
 import { layoutLabels, placedLabelBounds, type LabelRequest } from './render/label-layout';
 
 /** 以落地点为底边中点的矩形轮廓：半宽 w，向上高 h，向下延伸 below */
@@ -220,10 +220,16 @@ export class IslandRenderer extends IslandEffectsPainter {
       if (cultivation) {
         const depth = d + 0.08;
         queue.push({ d: depth, draw: () => drawCultivationArea(c, cultivation, x, y, tw, a.cover, this.t, this.calm) });
+        // 不透明遮挡用实际画出来的地块和高物轮廓；宽松旧点击范围不能挡住可见小人。
+        for (const poly of cultivationOcclusionOutlines(cultivation, x, y, tw)) {
+          occluders.push({ d: depth, poly });
+        }
+        // 与遮挡轮廓同深度，放最后：点击/检查仍优先命中整个培育区目标。
         occluders.push({
           d: depth,
           poly: cultivationOutline(cultivation, x, y, tw),
           hit: { kind: 'cultivation', area: cultivation.kind },
+          hitOnly: true,
         });
       }
       if (t === m.lighthouse) {

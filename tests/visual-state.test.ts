@@ -147,9 +147,16 @@ describe('B2 培育区等级的画面元素', () => {
       for (let level = 0; level <= 4; level++) {
         const e = cultivationExtent(kind, level);
         // 外框不比原来的更窄、更矮（原来是半宽 0.47–0.49、上 0.23–0.4、下 0.23–0.24）
-        expect(e.half).toBeGreaterThanOrEqual(kind === 'pond' ? 0.49 : 0.47);
-        expect(e.above).toBeGreaterThanOrEqual(0.26);
-        expect(e.below).toBeGreaterThanOrEqual(0.24);
+        // 不得收缩 B 期以前的点击范围：每类地块的旧尺寸不同。
+        const prior = {
+          field: { half: 0.47, above: 0.26, below: 0.24 },
+          orchard: { half: 0.47, above: 0.4, below: 0.24 },
+          pond: { half: 0.49, above: 0.23, below: 0.23 },
+          garden: { half: 0.47, above: 0.26, below: 0.24 },
+        }[kind];
+        expect(e.half).toBeGreaterThanOrEqual(prior.half);
+        expect(e.above).toBeGreaterThanOrEqual(prior.above);
+        expect(e.below).toBeGreaterThanOrEqual(prior.below);
       }
     }
   });

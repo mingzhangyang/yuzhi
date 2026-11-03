@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { IslandInteraction } from '../src/island/render/interaction';
+import { cultivationOcclusionOutlines, cultivationOutline } from '../src/island/render/cultivation';
+import type { CultivationAreaState, CultivationKind } from '../src/logic/cultivation';
 import type { Ambience, Scene, Walker } from '../src/island/render/model';
 import { personSize } from '../src/island/render/style';
 
@@ -22,6 +24,24 @@ class HitHarness extends IslandInteraction {
     return { x, y: y - this.view.tw * 0.70 };
   }
 
+  installCultivation(kind: CultivationKind, level: number) {
+    const area = { kind, level } as CultivationAreaState;
+    const site = this.map.cultivation[kind];
+    const [x, y] = this.iso(site.i, site.j);
+    const tw = this.view.tw;
+    const d = site.i + site.j + 0.08;
+    this.occluders = cultivationOcclusionOutlines(area, x, y, tw).map((poly) => ({ d, poly }));
+    this.occluders.push({
+      d, poly: cultivationOutline(area, x, y, tw),
+      hit: { kind: 'cultivation', area: kind }, hitOnly: true,
+    });
+    return { x, y, tw };
+  }
+
+  cultivationTarget(pt: { x: number; y: number }) {
+    return this.cultivationHitAt(pt);
+  }
+
   placeWalkerUnderPointer(pt: { x: number; y: number }) {
     const s0 = personSize(this.view.tw);
     const { fi, fj } = this.tileCoords({ x: pt.x, y: pt.y + s0 * 0.7 });
@@ -37,5 +57,36 @@ describe('粮仓旧点击范围不会遮挡可见的小人', () => {
     expect(h.hitAt(pt)).toEqual({ kind: 'granary' });
     h.placeWalkerUnderPointer(pt);
     expect(h.hitAt(pt)).toEqual({ kind: 'task', id: 'visible-walker' });
+  });
+});
+
+
+describe('培育区点击范围与不透明物体分离', () => {
+  it('果园低等级仍能点击旧版 0.4 格高的上沿（即使标签未显示）', () => {
+    for (const level of [0, 1]) {
+      const h = new HitHarness();
+      const { x, y, tw } = h.installCultivation('orchard', level);
+      const oldTopBand = { x, y: y - tw * 0.39 };
+      expect(h.cultivationTarget(oldTopBand)).toEqual({ kind: 'cultivation', area: 'orchard' });
+    }
+  });
+
+  it('花园拱门旁边的高空白仍能点到可见小人，空白处仍能点花园', () => {
+    const h = new HitHarness();
+    const { x, y, tw } = h.installCultivation('garden', 4);
+    const emptyBesideArch = { x: x + tw * 0.4, y: y - tw * 0.45 };
+    expect(h.cultivationTarget(emptyBesideArch)).toEqual({ kind: 'cultivation', area: 'garden' });
+    expect(h.hitAt(emptyBesideArch)).toEqual({ kind: 'cultivation', area: 'garden' });
+    h.placeWalkerUnderPointer(emptyBesideArch);
+    expect(h.hitAt(emptyBesideArch)).toEqual({ kind: 'task', id: 'visible-walker' });
+  });
+
+  it('真正站在拱门柱子后面的行人仍会被遮挡', () => {
+    const h = new HitHarness();
+    const { x, y, tw } = h.installCultivation('garden', 4);
+    // 左柱脚在 (-0.148, -0.131)，柱子向上 0.24 格。
+    const onArchPost = { x: x - tw * 0.148, y: y - tw * 0.3 };
+    h.placeWalkerUnderPointer(onArchPost);
+    expect(h.hitAt(onArchPost)).toEqual({ kind: 'cultivation', area: 'garden' });
   });
 });

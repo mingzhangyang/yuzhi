@@ -444,7 +444,7 @@ export abstract class IslandInteraction extends IslandViewport {
    */
   protected occludedAt(p: Walker, pt: { x: number; y: number }): boolean {
     const d = p.x + p.y;
-    return this.occluders.some((o) => o.d > d && insidePolygon(pt, o.poly));
+    return this.occluders.some((o) => !o.hitOnly && o.d > d && insidePolygon(pt, o.poly));
   }
 
   /** Frontmost cultivation artwork under this screen point, using the same outline as drawing/occlusion. */
