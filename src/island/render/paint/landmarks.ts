@@ -1,5 +1,6 @@
 import type { LandmarkView } from '../model';
-import { LANDMARK_HEIGHT, landmarkKind, SNOW, WARM, type LandmarkKind } from '../style';
+import { GLASS, GLOW, GREENHOUSE, HARBOR_HALL, LAMP, LANDMARK, MEMORIAL, OBSERVATORY, PAVILION, PLASTER, PLINTH, SNOW, STONE, TREE, withAlpha, WOOD } from '../palette';
+import { LANDMARK_HEIGHT, landmarkKind, type LandmarkKind } from '../style';
 import { shade } from '../utils';
 import { IslandStructurePainter } from './structures';
 
@@ -41,9 +42,9 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     this.shadow(x + tw * 0.1, by + tw * 0.02, r * 1.6, r * 0.55);
     // 塔身
     const g = c.createLinearGradient(x - r, 0, x + r, 0);
-    g.addColorStop(0, '#f1e7d2');
-    g.addColorStop(0.55, '#dccfb2');
-    g.addColorStop(1, '#b9ab8e');
+    g.addColorStop(0, OBSERVATORY.body[0]);
+    g.addColorStop(0.55, OBSERVATORY.body[1]);
+    g.addColorStop(1, OBSERVATORY.body[2]);
     c.fillStyle = g;
     c.beginPath();
     c.moveTo(x - r, top);
@@ -52,24 +53,24 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     c.lineTo(x + r, top);
     c.closePath();
     c.fill();
-    c.strokeStyle = 'rgba(120,105,80,.25)';
+    c.strokeStyle = withAlpha(STONE.seam, 0.25);
     c.lineWidth = Math.max(0.5, tw * 0.01);
     c.beginPath();
     for (let k = 1; k < 4; k++) c.ellipse(x, by - (h * k) / 4, r, r * 0.4, 0, 0.1, Math.PI - 0.1);
     c.stroke();
     // 门与一扇窗
-    c.fillStyle = '#6a4e38';
+    c.fillStyle = LANDMARK.door;
     c.fillRect(x - tw * 0.045, by - h * 0.42 + r * 0.38, tw * 0.07, h * 0.42);
-    this.dot(x - tw * 0.01, by - h * 0.42 + r * 0.38, tw * 0.035, '#6a4e38');
+    this.dot(x - tw * 0.01, by - h * 0.42 + r * 0.38, tw * 0.035, LANDMARK.door);
     const win: [number, number] = [x - r * 0.62, by - h * 0.62];
-    c.fillStyle = this.lit ? '#ffd677' : '#8fa5b2';
+    c.fillStyle = this.lit ? GLASS.lit : GLASS.day;
     c.fillRect(win[0] - tw * 0.02, win[1] - tw * 0.035, tw * 0.04, tw * 0.07);
     // 平台：一圈木栏
-    c.fillStyle = '#8a6242';
+    c.fillStyle = WOOD.rail;
     c.beginPath();
     c.ellipse(x, top, r * 1.2, r * 0.48, 0, 0, Math.PI * 2);
     c.fill();
-    c.fillStyle = '#a77b52';
+    c.fillStyle = WOOD.deck;
     c.beginPath();
     c.ellipse(x, top - tw * 0.012, r * 1.2, r * 0.48, 0, 0, Math.PI * 2);
     c.fill();
@@ -77,15 +78,15 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const rd = r * 0.95;
     const dy = top - tw * 0.02;
     const dg = c.createLinearGradient(x - rd, 0, x + rd, 0);
-    dg.addColorStop(0, '#c4ccd4');
-    dg.addColorStop(0.5, '#98a4b0');
-    dg.addColorStop(1, '#6c7886');
+    dg.addColorStop(0, OBSERVATORY.dome[0]);
+    dg.addColorStop(0.5, OBSERVATORY.dome[1]);
+    dg.addColorStop(1, OBSERVATORY.dome[2]);
     c.fillStyle = dg;
     c.beginPath();
     c.ellipse(x, dy, rd, rd * 0.4, 0, 0, Math.PI);
     c.ellipse(x, dy, rd, rd, 0, Math.PI, 0);
     c.fill();
-    c.strokeStyle = 'rgba(50,60,70,.35)';
+    c.strokeStyle = withAlpha(OBSERVATORY.domeSeam, 0.35);
     c.lineWidth = Math.max(0.5, tw * 0.01);
     c.beginPath();
     c.ellipse(x, dy, rd * 0.5, rd, 0, Math.PI, 0);
@@ -97,30 +98,30 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
       c.fill();
     }
     // 观测缝：夜里透出灯光
-    this.poly(this.lit ? '#ffd98a' : '#2f3842', x + rd * 0.05, dy - rd * 0.98, x + rd * 0.35, dy - rd * 0.9, x + rd * 0.42, dy - rd * 0.1, x + rd * 0.12, dy - rd * 0.05);
+    this.poly(this.lit ? OBSERVATORY.slitLit : OBSERVATORY.slit, x + rd * 0.05, dy - rd * 0.98, x + rd * 0.35, dy - rd * 0.9, x + rd * 0.42, dy - rd * 0.1, x + rd * 0.12, dy - rd * 0.05);
     // 望远镜：从缝里斜向右上方伸出
     const t0: [number, number] = [x + rd * 0.25, dy - rd * 0.55];
     const len = tw * 0.2 * sc;
     const t1: [number, number] = [t0[0] + len * 0.78, t0[1] - len * 0.62];
     c.lineCap = 'round';
-    c.strokeStyle = '#8a6328';
+    c.strokeStyle = OBSERVATORY.tube;
     c.lineWidth = Math.max(1.2, tw * 0.055 * sc);
     c.beginPath();
     c.moveTo(...t0);
     c.lineTo(...t1);
     c.stroke();
-    c.strokeStyle = '#c99a4a';
+    c.strokeStyle = OBSERVATORY.tubeTrim;
     c.lineWidth = Math.max(0.8, tw * 0.03 * sc);
     c.beginPath();
     c.moveTo(t0[0] - tw * 0.005, t0[1] - tw * 0.008);
     c.lineTo(t1[0] - tw * 0.005, t1[1] - tw * 0.008);
     c.stroke();
-    this.dot(t1[0], t1[1], tw * 0.03 * sc, '#5a4126');
+    this.dot(t1[0], t1[1], tw * 0.03 * sc, OBSERVATORY.lens);
     // 顶上一颗小球，和项目颜色呼应
     this.dot(x, dy - rd - tw * 0.012, tw * 0.022, roof);
     if (this.lit) {
-      this.lights.push([win[0], win[1], tw * 0.3, WARM]);
-      this.lights.push([x + rd * 0.25, dy - rd * 0.6, tw * 0.3, WARM]);
+      this.lights.push([win[0], win[1], tw * 0.3, GLOW.warm]);
+      this.lights.push([x + rd * 0.25, dy - rd * 0.6, tw * 0.3, GLOW.warm]);
     }
     return win;
   }
@@ -135,16 +136,16 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const z0 = tw * 0.035;
     const H = tw * 0.27 * sc;
     const rh = tw * 0.17 * sc;
-    const frame = '#4f6b5a';
+    const frame = GREENHOUSE.frame;
     this.shadow(x + tw * 0.08, y + tw * 0.08, tw * 0.42, tw * 0.17);
-    this.isoBox(P, -wi, wi, -wj, wj, 0, z0, '#cfc6b0', '#b5ab94');
+    this.isoBox(P, -wi, wi, -wj, wj, 0, z0, STONE.base, STONE.baseShade);
     // 后面两面玻璃墙（透过前墙能看到）
     // shade() 只认十六进制颜色，半透明的玻璃色直接写出亮、暗两面
-    this.poly(this.lit ? 'rgba(236,214,150,.85)' : 'rgba(170,205,198,.9)', ...f(P(-wi, -wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(-wi, -wj, H)));
-    this.poly(this.lit ? 'rgba(217,197,138,.85)' : 'rgba(156,189,182,.9)', ...f(P(-wi, -wj, z0), P(-wi, wj, z0), P(-wi, wj, H), P(-wi, -wj, H)));
+    this.poly(this.lit ? GREENHOUSE.backLit[0] : GREENHOUSE.back[0], ...f(P(-wi, -wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(-wi, -wj, H)));
+    this.poly(this.lit ? GREENHOUSE.backLit[1] : GREENHOUSE.back[1], ...f(P(-wi, -wj, z0), P(-wi, wj, z0), P(-wi, wj, H), P(-wi, -wj, H)));
     // 里面的绿植与花：叶色随季节
-    const leaf = a.cover > 0.3 ? '#6f8f6a' : ['#6fae55', '#5f9a48', '#8a9a48', '#5f8a5a'][a.season] ?? '#6fae55';
-    const bloom = ['#f2a6c0', '#f6d36b', '#e88a5a', '#e9e4f2'][a.season] ?? '#f2a6c0';
+    const leaf = a.cover > 0.3 ? GREENHOUSE.leafSnowy : GREENHOUSE.leaf[a.season] ?? GREENHOUSE.leaf[0];
+    const bloom = GREENHOUSE.bloom[a.season] ?? GREENHOUSE.bloom[0];
     for (const [u, v, s] of [[-0.6, -0.3, 1], [0, -0.5, 1.2], [0.55, -0.2, 0.9], [-0.25, 0.35, 0.8], [0.4, 0.4, 1]] as const) {
       const [px, py] = P(u * wi, v * wj, z0);
       this.dot(px, py - tw * 0.06 * s * sc, tw * 0.07 * s * sc, leaf);
@@ -152,13 +153,13 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
       this.dot(px + tw * 0.02, py - tw * 0.1 * s * sc, tw * 0.016, bloom);
     }
     // 前面两面玻璃墙
-    this.poly(this.lit ? 'rgba(255,226,150,.5)' : 'rgba(214,238,232,.5)', ...f(P(-wi, wj, z0), P(wi, wj, z0), P(wi, wj, H), P(-wi, wj, H)));
-    this.poly(this.lit ? 'rgba(240,212,141,.5)' : 'rgba(201,224,218,.5)', ...f(P(wi, wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(wi, wj, H)));
+    this.poly(this.lit ? GREENHOUSE.frontLit[0] : GREENHOUSE.front[0], ...f(P(-wi, wj, z0), P(wi, wj, z0), P(wi, wj, H), P(-wi, wj, H)));
+    this.poly(this.lit ? GREENHOUSE.frontLit[1] : GREENHOUSE.front[1], ...f(P(wi, wj, z0), P(wi, -wj, z0), P(wi, -wj, H), P(wi, wj, H)));
     // 双坡玻璃顶：屋脊沿 i 方向，朝左前的一坡和右侧的山墙
     const R0 = P(-wi, 0, H + rh);
     const R1 = P(wi, 0, H + rh);
-    this.poly(this.lit ? 'rgba(255,230,165,.7)' : 'rgba(226,244,240,.75)', ...f(P(-wi, wj, H), P(wi, wj, H), R1, R0));
-    this.poly(this.lit ? 'rgba(240,210,140,.7)' : 'rgba(196,224,220,.75)', ...f(P(wi, wj, H), P(wi, -wj, H), R1));
+    this.poly(this.lit ? GREENHOUSE.roofLit[0] : GREENHOUSE.roof[0], ...f(P(-wi, wj, H), P(wi, wj, H), R1, R0));
+    this.poly(this.lit ? GREENHOUSE.roofLit[1] : GREENHOUSE.roof[1], ...f(P(wi, wj, H), P(wi, -wj, H), R1));
     if (a.cover > 0.3) this.poly(SNOW, ...f(R0, R1, P(wi, wj * 0.35, H + rh * 0.65), P(-wi, wj * 0.35, H + rh * 0.65)));
     // 铁框
     c.strokeStyle = frame;
@@ -190,12 +191,12 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     this.facePoly(shade(roof, -0.15), ddx, ddy, tw * 0.08 * sc, H * 0.62, -0.5);
     // 屋脊正中一座小亭和尖顶
     const zc = H + rh;
-    this.isoBox(P, -0.05, 0.05, -0.05, 0.05, zc - tw * 0.01, zc + tw * 0.05, 'rgba(226,244,240,.9)', 'rgba(196,224,220,.9)');
+    this.isoBox(P, -0.05, 0.05, -0.05, 0.05, zc - tw * 0.01, zc + tw * 0.05, GREENHOUSE.cupola[0], GREENHOUSE.cupola[1]);
     this.isoPyramid(P, 0.07, zc + tw * 0.05, zc + tw * 0.11 * sc, frame);
     const [ax, ay] = P(0, 0, zc + tw * 0.11 * sc);
-    this.dot(ax, ay - tw * 0.015, tw * 0.018, '#e2b84a');
+    this.dot(ax, ay - tw * 0.015, tw * 0.018, LANDMARK.finial);
     const glow = P(0, 0, H * 0.6);
-    if (this.lit) this.lights.push([glow[0], glow[1], tw * 0.5, WARM]);
+    if (this.lit) this.lights.push([glow[0], glow[1], tw * 0.5, GLOW.warm]);
     return glow;
   }
 
@@ -210,11 +211,11 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const H = tw * 0.25 * sc;
     const rh = tw * 0.2 * sc;
     const o = 0.05;
-    const beam = '#6e4d32';
+    const beam = WOOD.beam;
     this.shadow(x + tw * 0.08, y + tw * 0.08, tw * 0.42, tw * 0.17);
     // 石基与墙
-    this.isoBox(P, -wi, wi, -wj, wj, 0, z0, '#bfb7a3', '#a59c87');
-    this.isoBox(P, -wi, wi, -wj, wj, z0, H, '#efe2c6', '#d3c3a2');
+    this.isoBox(P, -wi, wi, -wj, wj, 0, z0, HARBOR_HALL.footing, HARBOR_HALL.footingShade);
+    this.isoBox(P, -wi, wi, -wj, wj, z0, H, HARBOR_HALL.wall, HARBOR_HALL.wallShade);
     // 木构：转角和中间的立柱、一道腰梁
     c.strokeStyle = beam;
     c.lineWidth = Math.max(0.7, tw * 0.022);
@@ -233,11 +234,11 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const lightsAt: [number, number][] = [];
     for (const u of [-0.55, 0.45]) {
       const [wx, wy] = P(u * wi - 0.04, wj, z0 + H * 0.12);
-      this.facePoly(this.lit ? '#ffd677' : '#8fa5b2', wx, wy, tw * 0.08 * sc, H * 0.3, 0.5);
+      this.facePoly(this.lit ? GLASS.lit : GLASS.day, wx, wy, tw * 0.08 * sc, H * 0.3, 0.5);
       lightsAt.push([wx + tw * 0.04, wy - H * 0.15]);
     }
     const [ddx, ddy] = P(wi, 0.07, z0);
-    this.facePoly('#5a3f2c', ddx, ddy, tw * 0.1 * sc, H * 0.52, -0.5);
+    this.facePoly(HARBOR_HALL.door, ddx, ddy, tw * 0.1 * sc, H * 0.52, -0.5);
     // 双坡顶：屋脊沿 i 方向，朝左前一坡 + 右侧山墙
     const zr = H + rh;
     const eL = P(-wi - o, wj + o, H - tw * 0.01);
@@ -245,7 +246,7 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const eR = P(wi + o, -wj - o, H - tw * 0.01);
     const R0 = P(-wi - o, 0, zr);
     const R1 = P(wi + o, 0, zr);
-    this.poly('#e6d7b8', ...f(P(wi, wj, H), P(wi, -wj, H), P(wi, 0, zr - tw * 0.02)));
+    this.poly(HARBOR_HALL.gable, ...f(P(wi, wj, H), P(wi, -wj, H), P(wi, 0, zr - tw * 0.02)));
     this.poly(roof, ...f(eL, eF, R1, R0));
     this.poly(shade(roof, -0.35), ...f(eL, eF, [eF[0], eF[1] + tw * 0.025], [eL[0], eL[1] + tw * 0.025]));
     c.strokeStyle = shade(roof, -0.3);
@@ -263,7 +264,7 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     c.save();
     c.translate(gx, gy);
     c.transform(1, -0.5, 0, 1, 0, 0);
-    c.strokeStyle = '#3e4c5c';
+    c.strokeStyle = HARBOR_HALL.anchor;
     c.lineWidth = Math.max(0.6, tw * 0.014);
     c.lineCap = 'round';
     const s = tw * 0.05 * sc;
@@ -277,24 +278,24 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     c.stroke();
     c.restore();
     // 屋脊上一根烟囱
-    this.isoBox(P, -wi * 0.55, -wi * 0.38, -0.04, 0.04, zr - tw * 0.06, zr + tw * 0.06, '#9a8d78', '#7f735f');
+    this.isoBox(P, -wi * 0.55, -wi * 0.38, -0.04, 0.04, zr - tw * 0.06, zr + tw * 0.06, HARBOR_HALL.chimney, HARBOR_HALL.chimneyShade);
     // 门前：两根系缆桩缠着绳子，一盏港灯
     for (const [pi, pj] of [[wi + 0.1, wj + 0.12], [wi + 0.1, -wj + 0.02]] as const) {
       const [px, py] = P(pi, pj, 0);
-      c.fillStyle = '#5a4030';
+      c.fillStyle = WOOD.post;
       c.fillRect(px - tw * 0.016, py - tw * 0.09, tw * 0.032, tw * 0.09);
-      this.dot(px, py - tw * 0.09, tw * 0.018, '#6e4d32');
-      c.fillStyle = '#c8ab72';
+      this.dot(px, py - tw * 0.09, tw * 0.018, WOOD.beam);
+      c.fillStyle = HARBOR_HALL.rope;
       c.fillRect(px - tw * 0.018, py - tw * 0.06, tw * 0.036, tw * 0.018);
     }
     const [lx, ly] = P(-wi - 0.04, wj + 0.12, 0);
-    c.fillStyle = '#3e3a36';
+    c.fillStyle = LAMP.iron;
     c.fillRect(lx - tw * 0.01, ly - tw * 0.3 * sc, tw * 0.02, tw * 0.3 * sc);
     const lamp: [number, number] = [lx, ly - tw * 0.31 * sc];
-    this.dot(lamp[0], lamp[1], tw * 0.03, this.lit ? '#ffe08a' : '#e8e2cc');
+    this.dot(lamp[0], lamp[1], tw * 0.03, this.lit ? LAMP.on : LAMP.off);
     if (this.lit) {
-      for (const [wx, wy] of lightsAt) this.lights.push([wx, wy, tw * 0.3, WARM]);
-      this.lights.push([lamp[0], lamp[1], tw * 0.5, WARM]);
+      for (const [wx, wy] of lightsAt) this.lights.push([wx, wy, tw * 0.3, GLOW.warm]);
+      this.lights.push([lamp[0], lamp[1], tw * 0.5, GLOW.warm]);
     }
     return lightsAt[0];
   }
@@ -306,16 +307,16 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const P = this.isoAt(x, y, tw);
     this.shadow(x + tw * 0.1, y + tw * 0.06, tw * 0.32, tw * 0.13);
     // 石阶
-    this.isoBox(P, -0.24, 0.24, -0.24, 0.24, 0, tw * 0.05, '#d6ccb6', '#bfb49c', a.cover > 0.3 ? SNOW : '#e4dac4');
-    this.isoBox(P, -0.17, 0.17, -0.17, 0.17, tw * 0.05, tw * 0.1, '#ddd3bd', '#c4b9a1', a.cover > 0.3 ? SNOW : '#e9dfc9');
+    this.isoBox(P, -0.24, 0.24, -0.24, 0.24, 0, tw * 0.05, STONE.step, STONE.stepShade, a.cover > 0.3 ? SNOW : STONE.stepTop);
+    this.isoBox(P, -0.17, 0.17, -0.17, 0.17, tw * 0.05, tw * 0.1, MEMORIAL.upperStep, MEMORIAL.upperStepShade, a.cover > 0.3 ? SNOW : MEMORIAL.upperStepTop);
     // 塔身：底宽顶窄
     const z0 = tw * 0.1;
     const z1 = z0 + tw * 0.68 * sc;
     const w0 = 0.11 * sc;
     const w1 = 0.075 * sc;
-    this.poly('#efe6d2', ...f(P(-w0, w0, z0), P(w0, w0, z0), P(w1, w1, z1), P(-w1, w1, z1)));
-    this.poly('#d3c8b1', ...f(P(w0, w0, z0), P(w0, -w0, z0), P(w1, -w1, z1), P(w1, w1, z1)));
-    c.strokeStyle = 'rgba(120,105,80,.25)';
+    this.poly(PLASTER.tower, ...f(P(-w0, w0, z0), P(w0, w0, z0), P(w1, w1, z1), P(-w1, w1, z1)));
+    this.poly(PLASTER.towerShade, ...f(P(w0, w0, z0), P(w0, -w0, z0), P(w1, -w1, z1), P(w1, w1, z1)));
+    c.strokeStyle = withAlpha(STONE.seam, 0.25);
     c.lineWidth = Math.max(0.5, tw * 0.01);
     c.beginPath();
     for (let k = 1; k < 5; k++) {
@@ -329,17 +330,17 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     c.stroke();
     // 碑：左墙下部一块深色石板，上面一道项目颜色的饰带
     const [bx, by] = P(-w0 * 0.6, w0, z0 + tw * 0.08 * sc);
-    this.facePoly('#a69a82', bx, by, tw * 0.1 * sc, tw * 0.16 * sc, 0.5);
+    this.facePoly(MEMORIAL.tablet, bx, by, tw * 0.1 * sc, tw * 0.16 * sc, 0.5);
     this.facePoly(roof, bx, by - tw * 0.18 * sc, tw * 0.1 * sc, tw * 0.025, 0.5);
     // 塔顶：一圈压顶石和铜盆
-    this.isoBox(P, -w1 * 1.35, w1 * 1.35, -w1 * 1.35, w1 * 1.35, z1, z1 + tw * 0.035, '#e4dac4', '#c9bea6', '#f0e8d6');
+    this.isoBox(P, -w1 * 1.35, w1 * 1.35, -w1 * 1.35, w1 * 1.35, z1, z1 + tw * 0.035, STONE.stepTop, MEMORIAL.capShade, MEMORIAL.capTop);
     const [px, py] = P(0, 0, z1 + tw * 0.035);
-    c.fillStyle = '#7a5a2c';
+    c.fillStyle = MEMORIAL.brazier;
     c.beginPath();
     c.ellipse(px, py, tw * 0.07 * sc, tw * 0.028 * sc, 0, 0, Math.PI);
     c.lineTo(px - tw * 0.07 * sc, py);
     c.fill();
-    c.fillStyle = '#9c7a3c';
+    c.fillStyle = MEMORIAL.brazierRim;
     c.beginPath();
     c.ellipse(px, py - tw * 0.004, tw * 0.07 * sc, tw * 0.025 * sc, 0, 0, Math.PI * 2);
     c.fill();
@@ -347,11 +348,11 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const fh = tw * 0.13 * sc;
     const sway = this.calm ? 0 : Math.sin(this.t * 6) * tw * 0.012;
     const flick = this.calm ? 1 : 0.92 + 0.08 * Math.sin(this.t * 9.3);
-    this.poly('#f08a3a', px - tw * 0.05 * sc, py - tw * 0.01, px + sway, py - fh * flick, px + tw * 0.05 * sc, py - tw * 0.01);
-    this.poly('#ffd36b', px - tw * 0.026 * sc, py - tw * 0.012, px + sway * 0.6, py - fh * 0.62 * flick, px + tw * 0.026 * sc, py - tw * 0.012);
+    this.poly(MEMORIAL.flame, px - tw * 0.05 * sc, py - tw * 0.01, px + sway, py - fh * flick, px + tw * 0.05 * sc, py - tw * 0.01);
+    this.poly(MEMORIAL.flameCore, px - tw * 0.026 * sc, py - tw * 0.012, px + sway * 0.6, py - fh * 0.62 * flick, px + tw * 0.026 * sc, py - tw * 0.012);
     const fire: [number, number] = [px, py - fh * 0.4];
     // 长明火：白天也亮着，夜里照亮塔顶
-    if (this.lit) this.lights.push([fire[0], fire[1], tw * 0.6, '255,170,90']);
+    if (this.lit) this.lights.push([fire[0], fire[1], tw * 0.6, GLOW.fire]);
     return fire;
   }
 
@@ -363,12 +364,12 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const w = 0.18 * sc;
     const z0 = tw * 0.05;
     const ph = tw * 0.28 * sc;
-    const pillar = '#9a3a2c';
+    const pillar = PAVILION.pillar;
     this.shadow(x + tw * 0.08, y + tw * 0.07, tw * 0.36, tw * 0.14);
     // 亭后的花树：春天粉、夏天绿、秋天橙红，冬天落尽只剩枝
     const [tx, ty] = P(PAVILION_TREE.pi, PAVILION_TREE.pj, 0);
     const ts = tw * PAVILION_TREE.size * sc;
-    c.strokeStyle = '#6b4a30';
+    c.strokeStyle = WOOD.dark;
     c.lineCap = 'round';
     c.lineWidth = Math.max(1, ts * 0.07);
     c.beginPath();
@@ -381,10 +382,10 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     c.stroke();
     const lobes = pavilionCrown(seed, a.season);
     if (lobes.length) {
-      const crown = ['#f3b6c8', '#6fae55', '#e0904a'][a.season];
+      const crown = PAVILION.crown[a.season];
       // 最后一团是树顶的高光，颜色亮一些
       lobes.forEach(([dx, dy, r], k) => this.dot(tx + ts * dx, ty + ts * dy, ts * r, k === lobes.length - 1 ? shade(crown, 0.15) : crown));
-      if (a.season === 0) for (const [dx, dy] of [[-0.2, -0.6], [0.12, -0.78], [0.22, -0.62]] as const) this.dot(tx + ts * dx, ty + ts * dy, ts * 0.025, '#fff1f5');
+      if (a.season === 0) for (const [dx, dy] of [[-0.2, -0.6], [0.12, -0.78], [0.22, -0.62]] as const) this.dot(tx + ts * dx, ty + ts * dy, ts * 0.025, TREE.petal);
     } else if (a.cover > 0.15) {
       c.strokeStyle = SNOW;
       c.lineWidth = Math.max(0.8, ts * 0.035);
@@ -396,7 +397,7 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
       c.stroke();
     }
     // 亭基
-    this.isoBox(P, -w * 1.45, w * 1.45, -w * 1.45, w * 1.45, 0, z0, '#cfc6b0', '#b5ab94', a.cover > 0.3 ? SNOW : '#e0d8c4');
+    this.isoBox(P, -w * 1.45, w * 1.45, -w * 1.45, w * 1.45, 0, z0, STONE.base, STONE.baseShade, a.cover > 0.3 ? SNOW : PAVILION.baseTop);
     const column = (pi: number, pj: number) => {
       const [px, py] = P(pi, pj, z0);
       c.fillStyle = pillar;
@@ -407,18 +408,18 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     // 后柱、石桌和石凳、前三根柱
     column(-w, -w);
     const [sx, sy] = P(0, 0, z0);
-    c.fillStyle = '#a79f8c';
+    c.fillStyle = PAVILION.tableLeg;
     c.fillRect(sx - tw * 0.012, sy - tw * 0.07, tw * 0.024, tw * 0.07);
-    c.fillStyle = '#c9c1ad';
+    c.fillStyle = PAVILION.table;
     c.beginPath();
     c.ellipse(sx, sy - tw * 0.07, tw * 0.07, tw * 0.03, 0, 0, Math.PI * 2);
     c.fill();
-    this.dot(sx - tw * 0.1, sy - tw * 0.02, tw * 0.025, '#b8b09c');
-    this.dot(sx + tw * 0.1, sy - tw * 0.02, tw * 0.025, '#b8b09c');
+    this.dot(sx - tw * 0.1, sy - tw * 0.02, tw * 0.025, PAVILION.stool);
+    this.dot(sx + tw * 0.1, sy - tw * 0.02, tw * 0.025, PAVILION.stool);
     column(-w, w);
     column(w, -w);
     // 正面两根柱之间一道矮栏
-    c.strokeStyle = '#7a3428';
+    c.strokeStyle = PAVILION.rail;
     c.lineWidth = Math.max(0.6, tw * 0.016);
     c.beginPath();
     c.moveTo(...P(-w, w, z0 + ph * 0.25));
@@ -442,16 +443,16 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     }
     c.stroke();
     const [ax, ay] = P(0, 0, zA);
-    c.fillStyle = '#c99a3c';
+    c.fillStyle = LANDMARK.brass;
     c.fillRect(ax - tw * 0.008, ay - tw * 0.05, tw * 0.016, tw * 0.05);
-    this.dot(ax, ay - tw * 0.06, tw * 0.026, '#e2b84a');
+    this.dot(ax, ay - tw * 0.06, tw * 0.026, LANDMARK.finial);
     // 檐下两盏灯笼
     const lamps: [number, number][] = [P(-rw * 0.95, rw * 0.95, zE - tw * 0.05), P(rw * 0.95, -rw * 0.95, zE - tw * 0.05)];
     for (const [lx, ly] of lamps) {
-      c.fillStyle = '#5a4030';
+      c.fillStyle = WOOD.post;
       c.fillRect(lx - 0.5, ly - tw * 0.03, 1, tw * 0.03);
-      this.dot(lx, ly + tw * 0.012, tw * 0.025, this.lit ? '#ffb070' : '#c8473a');
-      if (this.lit) this.lights.push([lx, ly + tw * 0.012, tw * 0.3, WARM]);
+      this.dot(lx, ly + tw * 0.012, tw * 0.025, this.lit ? PAVILION.lanternLit : PAVILION.lantern);
+      if (this.lit) this.lights.push([lx, ly + tw * 0.012, tw * 0.3, GLOW.warm]);
     }
     return [lamps[0][0], lamps[0][1] + tw * 0.012];
   }
@@ -526,16 +527,16 @@ export abstract class IslandLandmarkPainter extends IslandStructurePainter {
     const pw = hw * 0.78;
     const ph = hh * 0.78;
     const pd = tw * 0.1;
-    this.poly('#cfc8b4', x - pw, y, x, y + ph, x, y + ph + pd, x - pw, y + pd);
-    this.poly('#b3ab95', x, y + ph, x + pw, y, x + pw, y + pd, x, y + ph + pd);
-    c.strokeStyle = 'rgba(90,80,60,.3)';
+    this.poly(PLINTH.side, x - pw, y, x, y + ph, x, y + ph + pd, x - pw, y + pd);
+    this.poly(PLINTH.sideShade, x, y + ph, x + pw, y, x + pw, y + pd, x, y + ph + pd);
+    c.strokeStyle = withAlpha(PLINTH.seam, 0.3);
     c.lineWidth = Math.max(0.5, tw * 0.012);
     c.beginPath();
     c.moveTo(x - pw, y + pd / 2);
     c.lineTo(x, y + ph + pd / 2);
     c.lineTo(x + pw, y + pd / 2);
     c.stroke();
-    this.poly(this.amb.cover > 0.3 ? SNOW : '#e4dece', x, y - ph, x + pw, y, x, y + ph, x - pw, y);
+    this.poly(this.amb.cover > 0.3 ? SNOW : PLINTH.top, x, y - ph, x + pw, y, x, y + ph, x - pw, y);
     c.save();
     c.translate(x, y);
     c.scale(1, k);

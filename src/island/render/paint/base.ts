@@ -1,5 +1,6 @@
 import { IslandPropArt } from '../../props';
 import type { Glow } from '../model';
+import { SHADOW_INK, withAlpha } from '../palette';
 import { IslandSimulation } from '../simulation';
 
 /**
@@ -47,7 +48,7 @@ export abstract class IslandPaintBase extends IslandSimulation {
 
   protected shadow(x: number, y: number, rx: number, ry: number, a = 0.15) {
     const c = this.ctx;
-    c.fillStyle = `rgba(30,40,20,${a})`;
+    c.fillStyle = withAlpha(SHADOW_INK, a);
     c.beginPath();
     c.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
     c.fill();

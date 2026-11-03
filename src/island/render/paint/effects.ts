@@ -1,6 +1,6 @@
 import { moonPhase } from '../../ambience';
 import type { Scene, Walker } from '../model';
-import { SNOW } from '../style';
+import { FESTIVE, FIGURE, GLOW, LABEL, SKY, SNOW, WHITE, withAlpha } from '../palette';
 import { clamp, hash, luma, mix, rgb, shade } from '../utils';
 import { IslandLandmarkPainter } from './landmarks';
 
@@ -15,7 +15,7 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     const bob = p.moving ? Math.abs(Math.cos(p.walk)) * s * 0.04 : 0;
     y -= bob;
     // 腿
-    c.fillStyle = '#4a4038';
+    c.fillStyle = FIGURE.legs;
     c.fillRect(x - s * 0.15 + step * s * 0.06, y - s * 0.3, s * 0.12, s * 0.3);
     c.fillRect(x + s * 0.03 - step * s * 0.06, y - s * 0.3, s * 0.12, s * 0.3);
     // 身子：受光的一侧亮一点
@@ -48,31 +48,31 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     c.fill();
     if (a.season === 3) {
       // 围巾和毛线帽
-      c.fillStyle = p.r < 0.5 ? '#c8473a' : '#e0b84a';
+      c.fillStyle = FIGURE.scarf[p.r < 0.5 ? 0 : 1];
       c.fillRect(x - s * 0.2, y - s * 0.98, s * 0.4, s * 0.1);
       c.fillRect(x + p.face * s * 0.05, y - s * 0.95, s * 0.09, s * 0.22);
-      c.fillStyle = a.fest.has('christmas') ? '#d63a2c' : p.r < 0.5 ? '#e7e2d6' : '#5a7f95';
+      c.fillStyle = a.fest.has('christmas') ? FESTIVE.red : p.r < 0.5 ? FIGURE.hat[0] : FIGURE.hat[1];
       c.beginPath();
       c.arc(x, hy - s * 0.06, s * 0.22, Math.PI, 0);
       c.fill();
-      this.dot(x, hy - s * 0.3, s * 0.07, '#ffffff');
+      this.dot(x, hy - s * 0.3, s * 0.07, FIGURE.pompom);
     } else if (a.season === 1 && a.weather === 'clear' && p.r < 0.55 && !this.lit) {
       // 草帽
-      c.fillStyle = '#e6c878';
+      c.fillStyle = FIGURE.straw;
       c.beginPath();
       c.ellipse(x, hy - s * 0.1, s * 0.34, s * 0.09, 0, 0, Math.PI * 2);
       c.fill();
-      c.fillStyle = '#d6b45e';
+      c.fillStyle = FIGURE.strawShade;
       c.beginPath();
       c.arc(x, hy - s * 0.12, s * 0.16, Math.PI, 0);
       c.fill();
-      c.fillStyle = '#c8473a';
+      c.fillStyle = FIGURE.hatBand;
       c.fillRect(x - s * 0.16, hy - s * 0.15, s * 0.32, s * 0.04);
     }
     if (p.leaving) {
       // 背着包袱
-      this.dot(x - p.face * s * 0.24, y - s * 0.7, s * 0.17, '#b98b3c');
-      c.strokeStyle = '#8a6428';
+      this.dot(x - p.face * s * 0.24, y - s * 0.7, s * 0.17, FIGURE.bundle);
+      c.strokeStyle = FIGURE.bundleStrap;
       c.lineWidth = Math.max(0.6, s * 0.04);
       c.beginPath();
       c.moveTo(x - p.face * s * 0.3, y - s * 0.78);
@@ -82,13 +82,13 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     if (a.weather === 'rain' || (a.weather === 'snow' && p.r < 0.4)) {
       // 伞
       const uy = hy - s * 0.42;
-      c.strokeStyle = '#4a4038';
+      c.strokeStyle = FIGURE.legs;
       c.lineWidth = Math.max(0.6, s * 0.04);
       c.beginPath();
       c.moveTo(x + s * 0.06, uy);
       c.lineTo(x + s * 0.06, y - s * 0.6);
       c.stroke();
-      const uc = ['#d8574a', '#4c6a84', '#e0b84a', '#5d8a4a'][Math.floor(p.r * 4)];
+      const uc = FIGURE.umbrella[Math.floor(p.r * 4)];
       c.fillStyle = uc;
       c.beginPath();
       c.ellipse(x + s * 0.06, uy, s * 0.5, s * 0.3, 0, Math.PI, 0);
@@ -111,7 +111,7 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     const { tw } = this.view;
     const k = 0.55 + 0.45 * Math.sin(this.t * 4);
     c.save();
-    c.strokeStyle = '#ffffff';
+    c.strokeStyle = WHITE;
     c.globalAlpha = 0.5 + 0.4 * k;
     c.lineWidth = 2;
     c.setLineDash([5, 4]);
@@ -149,8 +149,8 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
       const x = ((hash('cx' + k) * (v.w + 2 * r) + this.t * (6 + k * 2)) % (v.w + 2 * r)) - r;
       const y = v.h * (0.15 + hash('cy' + k) * 0.7);
       const g = c.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, `rgba(20,30,40,${al * (1 - this.day.night)})`);
-      g.addColorStop(1, 'rgba(20,30,40,0)');
+      g.addColorStop(0, withAlpha(SKY.cloudShadow, al * (1 - this.day.night)));
+      g.addColorStop(1, withAlpha(SKY.cloudShadow, 0));
       c.fillStyle = g;
       c.save();
       c.translate(x, y);
@@ -166,7 +166,7 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     if (this.day.night > 0.5 || a.weather === 'rain' || a.weather === 'snow') return;
     const v = this.view;
     const c = this.ctx;
-    c.strokeStyle = 'rgba(60,60,60,.75)';
+    c.strokeStyle = withAlpha(SKY.bird, 0.75);
     c.lineWidth = 1.2;
     c.lineCap = 'round';
     for (let k = 0; k < 4; k++) {
@@ -188,7 +188,7 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     const kind = this.driftKind;
     if (!kind) return;
     if (kind === 'rain') {
-      c.strokeStyle = 'rgba(220,232,245,.45)';
+      c.strokeStyle = withAlpha(SKY.rain, 0.45);
       c.lineWidth = 1;
       c.beginPath();
       for (const d of this.drifts) {
@@ -229,11 +229,11 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     c.save();
     c.globalCompositeOperation = 'lighter';
     const g = c.createRadialGradient(x, y, r * 0.5, x, y, r * 4);
-    g.addColorStop(0, `rgba(230,236,255,${0.25 * al * illum})`);
-    g.addColorStop(1, 'rgba(230,236,255,0)');
+    g.addColorStop(0, withAlpha(SKY.moonHalo, 0.25 * al * illum));
+    g.addColorStop(1, withAlpha(SKY.moonHalo, 0));
     c.fillStyle = g;
     c.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
-    c.fillStyle = `rgba(240,240,220,${0.22 * al * illum})`;
+    c.fillStyle = withAlpha(SKY.moonGlint, 0.22 * al * illum);
     for (let k = 0; k < 9; k++) {
       const yy = y + r * 1.4 + k * r * 0.55;
       const ww = r * (1.1 - k * 0.08) * (0.7 + 0.3 * Math.sin(this.t * 1.5 + k * 1.7));
@@ -247,15 +247,15 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     c.beginPath();
     c.arc(x, y, r, 0, Math.PI * 2);
     c.clip();
-    c.fillStyle = 'rgba(200,210,230,.08)';
+    c.fillStyle = withAlpha(SKY.moonDark, 0.08);
     c.fill();
     c.beginPath();
     c.arc(x, y, r, 0, Math.PI * 2);
     c.arc(x + off, y, r * 1.02, 0, Math.PI * 2);
-    c.fillStyle = '#fbf6e0';
+    c.fillStyle = SKY.moon;
     c.fill('evenodd');
     c.clip('evenodd');
-    c.fillStyle = 'rgba(200,196,170,.5)';
+    c.fillStyle = withAlpha(SKY.moonCrater, 0.5);
     c.beginPath();
     c.arc(x - r * 0.3, y - r * 0.2, r * 0.22, 0, Math.PI * 2);
     c.arc(x + r * 0.25, y + r * 0.3, r * 0.15, 0, Math.PI * 2);
@@ -277,7 +277,7 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
       const y = hash('sy' + k) * v.h;
       if (!this.onSea(x, y)) continue;
       const tw2 = 0.5 + 0.5 * Math.sin(this.t * (1 + hash('st' + k) * 2) + k);
-      c.fillStyle = `rgba(255,255,240,${(0.25 + 0.5 * tw2) * (n - 0.5) * 2})`;
+      c.fillStyle = withAlpha(SKY.starGlint, (0.25 + 0.5 * tw2) * (n - 0.5) * 2);
       const r = 0.6 + hash('sr' + k) * 0.9;
       c.fillRect(x - r / 2, y - r / 2, r, r);
     }
@@ -298,7 +298,7 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
       const [x, y] = this.iso(i, j);
       const on = 0.5 + 0.5 * Math.sin(this.t * 2.2 + k * 3.1);
       if (on < 0.3) continue;
-      this.lights.push([x, y - this.view.tw * 0.25, this.view.tw * 0.16 * on, '200,255,120']);
+      this.lights.push([x, y - this.view.tw * 0.25, this.view.tw * 0.16 * on, GLOW.firefly]);
     }
   }
 
@@ -316,9 +316,9 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
       const s = Math.max(3, v.tw * 0.12) * (1 - ph * 0.5);
       const al = ph < 0.1 ? ph * 10 : ph > 0.85 ? (1 - ph) / 0.15 : 1;
       c.globalAlpha = al;
-      this.poly('#ffb35a', x - s * 0.5, y - s, x + s * 0.5, y - s, x + s * 0.35, y, x - s * 0.35, y);
+      this.poly(FESTIVE.skyLantern, x - s * 0.5, y - s, x + s * 0.5, y - s, x + s * 0.35, y, x - s * 0.35, y);
       c.globalAlpha = 1;
-      this.lights.push([x, y - s * 0.4, s * 3 * al, '255,170,80']);
+      this.lights.push([x, y - s * 0.4, s * 3 * al, GLOW.skyLantern]);
     }
   }
 
@@ -333,8 +333,8 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
       if (p.flash) {
         const fr = this.view.h * 0.16 * (1.2 - k);
         const g = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, fr);
-        g.addColorStop(0, `rgba(255,240,200,${0.35 * k})`);
-        g.addColorStop(1, 'rgba(255,240,200,0)');
+        g.addColorStop(0, withAlpha(SKY.flash, 0.35 * k));
+        g.addColorStop(1, withAlpha(SKY.flash, 0));
         c.globalAlpha = 1;
         c.fillStyle = g;
         c.fillRect(p.x - fr, p.y - fr, fr * 2, fr * 2);
@@ -373,8 +373,8 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     // 日出日落时，画面一角有一层暖光
     if (this.day.warm > 0.05) {
       const g = c.createLinearGradient(v.w, 0, 0, v.h);
-      g.addColorStop(0, `rgba(255,170,90,${0.22 * this.day.warm})`);
-      g.addColorStop(1, 'rgba(255,170,90,0)');
+      g.addColorStop(0, withAlpha(SKY.duskGlow, 0.22 * this.day.warm));
+      g.addColorStop(1, withAlpha(SKY.duskGlow, 0));
       c.fillStyle = g;
       c.fillRect(0, 0, v.w, v.h);
     }
@@ -407,10 +407,10 @@ export abstract class IslandEffectsPainter extends IslandLandmarkPainter {
     const night = hl || !(luma(this.theme.label) >= 150) ? 0 : this.day.night;
     // 紧凑标签再淡一些，退到村子后面
     c.globalAlpha = (muted ? 0.82 : 1) * (compact ? 0.86 : 1) * (1 - 0.18 * night);
-    c.fillStyle = compact ? 'rgba(20,30,20,.07)' : 'rgba(20,30,20,.12)';
+    c.fillStyle = compact ? withAlpha(LABEL.shadow, 0.07) : withAlpha(LABEL.shadow, 0.12);
     this.rrect(x - bw / 2, y - bh / 2 + 1.5, bw, bh, bh / 2);
     c.fill();
-    const fill = night > 0.01 ? mix(this.theme.label, '#4a5068', 0.6 * night) : this.theme.label;
+    const fill = night > 0.01 ? mix(this.theme.label, LABEL.night, 0.6 * night) : this.theme.label;
     c.fillStyle = fill;
     c.strokeStyle = hl ? this.theme.accent : this.theme.line;
     c.lineWidth = hl ? 2.2 : 1;
