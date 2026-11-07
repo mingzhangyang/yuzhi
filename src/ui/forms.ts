@@ -354,8 +354,8 @@ export function openClassify(store: Store, skipped = new Set<string>(), preferre
 }
 
 /** 设置：工作时段、外观，以及这个浏览器里数据的安全与备份 */
-export function openSettings(store: Store, applyTheme: () => void, safety: { exportBackup?: () => void; autoBackup?: AutoBackup } = {}) {
-  const { exportBackup, autoBackup } = safety;
+export function openSettings(store: Store, applyTheme: () => void, safety: { exportBackup?: () => void; exportSnapshot?: () => void; autoBackup?: AutoBackup } = {}) {
+  const { exportBackup, exportSnapshot, autoBackup } = safety;
   const s = store.data.settings;
   openModal({
     title: t('forms.settingsTitle'),
@@ -364,8 +364,8 @@ export function openSettings(store: Store, applyTheme: () => void, safety: { exp
       <label class="field">${esc(t('forms.appearance'))}<select name="theme"><option value="auto"${s.theme === 'auto' ? ' selected' : ''}>${esc(t('forms.themeAuto'))}</option><option value="light"${s.theme === 'light' ? ' selected' : ''}>${esc(t('forms.themeLight'))}</option><option value="dark"${s.theme === 'dark' ? ' selected' : ''}>${esc(t('forms.themeDark'))}</option></select></label>
       ${safetySettingsHtml(store.today())}
       <div class="actions"><button class="btn" data-close>${esc(t('forms.nevermind'))}</button><button class="btn primary" data-ok>${esc(t('common.save'))}</button></div>`,
-    mount(box) {
-      fillSafetySettings(box, () => box.isConnected);
+    mount(box, signal) {
+      fillSafetySettings(box, () => !signal.aborted && box.isConnected, Boolean(exportSnapshot), () => store.today());
       const autoBox = box.querySelector<HTMLElement>('[data-auto-backup]');
       if (autoBox && autoBackup) autoBackup.mountSettings(autoBox, () => store.today(), () => refreshSafetySettings(box, store.today()));
       const exportButton = box.querySelector<HTMLButtonElement>('[data-safety-export]')!;
@@ -373,6 +373,10 @@ export function openSettings(store: Store, applyTheme: () => void, safety: { exp
       exportButton.addEventListener('click', () => {
         closeModal(false);
         exportBackup?.();
+      });
+      box.querySelector('[data-safety-snapshot-export]')!.addEventListener('click', () => {
+        closeModal(false);
+        exportSnapshot?.();
       });
       box.querySelector('[data-ok]')!.addEventListener('click', () => {
         const ws = box.querySelector<HTMLInputElement>('input[name=ws]')!.value || '09:00';

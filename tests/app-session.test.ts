@@ -123,6 +123,24 @@ beforeEach(() => {
 });
 
 describe('AppSession', () => {
+  it('启动读取失败会关闭连接和释放写锁，之后可以重试', async () => {
+    const locks = new FakeLocks();
+    const bad = new ControlledPersistence(true);
+    bad.load = async () => { throw new DOMException('read failed', 'UnknownError'); };
+    await expect(AppSession.start({
+      coordinator: { ownerId: 'failed-start', locks, channelFactory },
+      persistenceFactory: () => bad,
+    })).rejects.toMatchObject({ name: 'UnknownError' });
+    expect(bad.operations).toContain('close');
+    expect(FakeChannel.peers.size).toBe(0);
+    const retried = (await AppSession.start({
+      coordinator: { ownerId: 'retry-start', locks, channelFactory },
+      persistenceFactory: (writeAccess) => new ControlledPersistence(writeAccess),
+    })).session;
+    expect(retried.state).toBe('writer');
+    await retried.close();
+  });
+
   it('统一提交刷新、释放与接管，并从最终持久快照恢复 writer', async () => {
     const name = `yuzhi-session-${Date.now()}-${Math.random()}`;
     const locks = new FakeLocks();

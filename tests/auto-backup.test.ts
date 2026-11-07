@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeStore } from './helpers';
 import { createProject } from '../src/actions';
+import { settleDay } from '../src/actions/settlement';
+import { emptyData, MemoryPersistence, parseBackup } from '../src/db';
+import { Store } from '../src/store';
 
 /** Device storage double: in memory, with switchable read/write failures. */
 const device = vi.hoisted(() => ({
@@ -83,6 +86,36 @@ function island() {
 }
 
 describe('自动备份（PR #37 第三轮评审）', () => {
+  it.each([true, false])('结算保存完成前不覆盖文件，保存成功=%s', async (succeeds) => {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const gate = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    gate.catch(() => {});
+    class SlowPersistence extends MemoryPersistence {
+      override async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        await gate;
+        return super.batch(writes);
+      }
+    }
+    const data = emptyData();
+    const store = new Store(data, new SlowPersistence(data));
+    store.clock = () => new Date(2026, 10, 2, 21);
+    store.onError = () => {};
+    const backup = new AutoBackup(store);
+    expect(await backup.choose()).toBe(true);
+    const filename = 'yuzhi-auto-2026-11-02.json';
+    const previous = picked.files.get(filename)!;
+    settleDay(store, '2026-11-02', new Map());
+    const pending = backup.run('settled');
+    await Promise.resolve();
+    expect(picked.files.get(filename)).toBe(previous);
+    if (succeeds) resolve();
+    else reject(new Error('settlement write failed'));
+    expect(await pending).toBe(succeeds);
+    if (succeeds) expect(parseBackup(picked.files.get(filename)!).days).toContainEqual({ date: '2026-11-02', status: 'settled' });
+    else expect(picked.files.get(filename)).toBe(previous);
+  });
+
   it('不支持文件夹备份的浏览器，启动后的每日备份不会把「不支持」改成「未开启」', async () => {
     vi.stubGlobal('window', {});
     const backup = new AutoBackup(island().store);

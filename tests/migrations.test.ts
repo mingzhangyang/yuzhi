@@ -134,7 +134,7 @@ describe('数据迁移基础设施', () => {
     upgraded.close();
   });
 
-  it('迁移写回配额失败先回滚并关闭连接，再降级到已恢复快照', async () => {
+  it('迁移写回配额失败先回滚并关闭连接，停止启动并保留恢复快照', async () => {
     const name = dbName('startup-quota');
     await seedLegacyHistory(name, 3);
     // A discarded application's callback cannot close the old connection.
@@ -147,15 +147,17 @@ describe('数据迁移基础设施', () => {
       }
       return originalPut.call(this, value, key);
     });
-    let initialized;
+    let failure: unknown;
     try {
-      initialized = await initializePersistence(persistence);
+      await initializePersistence(persistence);
+    } catch (error) {
+      failure = error;
     } finally {
       fault.mockRestore();
     }
-    expect(initialized.fallback).toBeInstanceOf(StorageUnavailableError);
-    expect(await initialized.persistence.load()).toEqual(initialized.data);
-    expect(lifeEntries(initialized.data).filter((row) => row.text.startsWith('唯一历史快照'))).toHaveLength(preservedLifeKinds.length);
+    expect(failure).toBeInstanceOf(StorageUnavailableError);
+    const recovered = (failure as StorageUnavailableError).recoveredData!;
+    expect(lifeEntries(recovered).filter((row) => row.text.startsWith('唯一历史快照'))).toHaveLength(preservedLifeKinds.length);
 
     const staged = await openDB(name);
     expect(staged.version).toBe(IDB_SCHEMA_VERSION - 1);
@@ -168,6 +170,29 @@ describe('数据迁移基础设施', () => {
     expect(blocked).not.toHaveBeenCalled();
     expect(onVersionChange).not.toHaveBeenCalled();
     upgraded.close();
+  });
+
+  it('读取已有数据时失败，停止启动；恢复后仍能读到原数据', async () => {
+    const name = dbName('startup-read-failure');
+    const seed = new IdbPersistence(name);
+    await seed.load();
+    await seed.batch([{ kind: 'put', coll: 'projects', item: {
+      id: 'existing', name: '原有村落', createdAt: '2026-10-01', status: 'active', islandSlot: 0,
+    } }]);
+    await seed.close();
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    const fault = vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (this.name === 'projects') throw new DOMException('read failed', 'UnknownError');
+      return originalGetAll.apply(this, args);
+    });
+    try {
+      await expect(initializePersistence(new IdbPersistence(name))).rejects.toBeInstanceOf(StorageUnavailableError);
+    } finally {
+      fault.mockRestore();
+    }
+    const retry = new IdbPersistence(name);
+    expect((await retry.load()).projects.map((project) => project.name)).toEqual(['原有村落']);
+    await retry.close();
   });
 
   it('启动验证失败也关闭候选连接，保留原错误且不切换空白数据', async () => {
@@ -201,7 +226,7 @@ describe('数据迁移基础设施', () => {
     expect(() => runMigrationSteps({ n: 1 }, 2, 1, [])).toThrow('更新的屿志版本');
   });
 
-  it('只有明确的存储不可用错误才允许降级到临时内存，并可携带已恢复的数据', () => {
+  it('存储不可用错误可携带已恢复的数据，但不会伪装成成功启动', () => {
     expect(isStorageUnavailableError(new StorageUnavailableError(new DOMException('blocked', 'SecurityError')))).toBe(true);
     expect(isStorageUnavailableError(new Error('本地数据版本号损坏'))).toBe(false);
     expect(isStorageUnavailableError(new DOMException('newer schema', 'VersionError'))).toBe(false);

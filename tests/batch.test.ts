@@ -197,6 +197,27 @@ describe('原子批次写入', () => {
     expect(durableStore.task(task.id)).toMatchObject({ projectId: from.id, scheduledFor: '2026-10-04' });
   });
 
+  it('保存失败后仍能导出上一次成功提交的数据，不包含回滚的修改', async () => {
+    class FailNextPersistence extends MemoryPersistence {
+      failNext = false;
+      override async batch(writes: Parameters<MemoryPersistence['batch']>[0]) {
+        if (this.failNext) throw new Error('保存失败');
+        return super.batch(writes);
+      }
+    }
+    const persistence = new FailNextPersistence();
+    const store = new Store(emptyData(), persistence);
+    store.onError = () => {};
+    createProject(store, '已保存');
+    await store.flush();
+    persistence.failNext = true;
+    createProject(store, '未保存');
+    await expect(store.committedSnapshot()).rejects.toThrow('保存失败');
+    const saved = await store.lastSavedSnapshot();
+    expect(saved.projects.map((project) => project.name)).toEqual(['已保存']);
+    expect(saved).toEqual(await persistence.load());
+  });
+
   it('replaceAll 排队期间写者换代不能复活旧替换请求', async () => {
     const persistence = new MemoryPersistence();
     const store = new Store(emptyData(), persistence);

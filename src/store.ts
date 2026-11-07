@@ -22,6 +22,8 @@ export class Store {
   private writeTail: Promise<void> = Promise.resolve();
   /** Observable outcome of the latest queued generation; rejection is reusable by every waiter. */
   private flushTail: Promise<void> = Promise.resolve();
+  /** The durable snapshot for that same generation, including assigned sequences. */
+  private snapshotTail: Promise<Data>;
   private activeWrites: PersistenceWrite[] | null = null;
   private pendingBatches = new Set<PendingBatch>();
   private committedData: Data;
@@ -47,6 +49,7 @@ export class Store {
     private readonly lifecycleRevision: () => number = () => 0,
   ) {
     this.committedData = structuredClone(data);
+    this.snapshotTail = Promise.resolve(structuredClone(data));
   }
 
   setReadOnly(value: boolean) {
@@ -69,10 +72,12 @@ export class Store {
     const generation = this.accessGeneration;
     const revision = this.lifecycleRevision();
     const data = this.data;
-    const isCurrent = () => !signal?.aborted && !this.readOnly && generation === this.accessGeneration
-      && revision === this.lifecycleRevision() && data === this.data;
+    const hasCurrentAccess = () => !signal?.aborted && !this.readOnly && generation === this.accessGeneration
+      && revision === this.lifecycleRevision();
+    const isCurrent = () => hasCurrentAccess() && data === this.data;
     return {
       isCurrent,
+      hasCurrentAccess,
       assertCurrent: () => {
         if (!isCurrent()) throw new Error('异步任务的写权限或数据快照已失效，已丢弃结果');
       },
@@ -91,6 +96,7 @@ export class Store {
     this.batchFailure = undefined;
     this.writeTail = Promise.resolve();
     this.flushTail = Promise.resolve();
+    this.snapshotTail = Promise.resolve(structuredClone(this.committedData));
     this.invalidateData();
     this.batchChanged = true;
     this.scheduleNotify();
@@ -227,6 +233,8 @@ export class Store {
     // waiter for this generation observes the same failure.
     outcome.catch(() => {});
     this.flushTail = outcome;
+    this.snapshotTail = outcome.then(() => structuredClone(pending.snapshot));
+    this.snapshotTail.catch(() => {});
     this.writeTail = outcome.catch(() => {});
     return result;
   }
@@ -352,6 +360,19 @@ export class Store {
   async flush(): Promise<void> {
     const generation = this.flushTail;
     await generation;
+  }
+
+  /** Snapshot the current write generation; later pending writes cannot leak into it. */
+  committedSnapshot(): Promise<Data> {
+    const generation = this.snapshotTail;
+    return generation.then((data) => structuredClone(data));
+  }
+
+  /** After a failed write, allow an explicit export of the last successful state. */
+  async lastSavedSnapshot(): Promise<Data> {
+    const tail = this.writeTail;
+    await tail;
+    return structuredClone(this.committedData);
   }
 
   private invalidateData(): void {

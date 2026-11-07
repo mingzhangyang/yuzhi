@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { readFile } from 'node:fs/promises';
 
 const baseURL = process.env.BASE_URL ?? 'http://127.0.0.1:4173';
 const timeout = 20_000;
@@ -36,6 +37,75 @@ const browser = await chromium.launch({
 });
 
 try {
+  await runScenario('startup read failure stays blocked, offers recovery export, and retries safely', async () => {
+    const context = await browser.newContext({ locale: 'zh-CN', acceptDownloads: true });
+    try {
+      const page = await context.newPage();
+      await page.addInitScript(() => {
+        if (sessionStorage.getItem('fail-next-project-read') !== 'yes') return;
+        sessionStorage.removeItem('fail-next-project-read');
+        const original = IDBObjectStore.prototype.getAll;
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'projects') {
+            IDBObjectStore.prototype.getAll = original;
+            throw new DOMException('injected startup read failure', 'UnknownError');
+          }
+          return original.apply(this, args);
+        };
+      });
+      await openApp(page);
+      await waitReadOnly(page, false);
+      if (await page.locator('#mdl').isVisible()) await page.keyboard.press('Escape');
+      await page.evaluate(async () => {
+        const { store, actions } = window.yuzhi;
+        const project = actions.createProject(store, '启动恢复验收');
+        actions.createTask(store, { title: '结算快照验收', projectId: project.id, scheduledFor: store.today() });
+        await store.flush();
+      });
+      await page.locator('#settleBtn').click();
+      await page.locator('#settle [data-act="commit"]').click();
+      await page.waitForFunction(() => new Promise((resolve) => {
+        const open = indexedDB.open('yuzhi-device', 1);
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction('kv', 'readonly');
+          const get = tx.objectStore('kv').get('lastSettlementSnapshot');
+          get.onsuccess = () => {
+            try { resolve(JSON.parse(get.result?.json ?? '{}').projects?.some((p) => p.name === '启动恢复验收') === true); }
+            catch { resolve(false); }
+          };
+          get.onerror = () => resolve(false);
+          tx.oncomplete = () => db.close();
+          tx.onabort = () => db.close();
+        };
+      }), undefined, { timeout });
+      await page.evaluate(() => sessionStorage.setItem('fail-next-project-read', 'yes'));
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('[data-retry-startup]').waitFor({ state: 'visible', timeout });
+      assert(await page.locator('[role="alert"]').innerText().then((text) => text.includes('不要清除浏览器站点数据')),
+        'startup error did not explain how to protect the existing data');
+      assert(await page.locator('#map').count() === 0, 'startup failure rendered an empty island');
+      await page.locator('[data-export-startup-snapshot]').waitFor({ state: 'visible', timeout });
+      await page.locator('[data-export-startup-snapshot]').click();
+      const downloadPromise = page.waitForEvent('download');
+      await page.locator('#mdl [data-ok]').click();
+      const download = await downloadPromise;
+      const exported = JSON.parse(await readFile(await download.path(), 'utf8'));
+      assert(exported.projects.some((p) => p.name === '启动恢复验收'), 'startup recovery export lost the saved project');
+      assert(await page.evaluate(() => !JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}').lastBackup),
+        'exporting an older recovery snapshot incorrectly cleared the current-data backup reminder');
+
+      await page.locator('[data-retry-startup]').click();
+      await page.waitForFunction(() => window.yuzhi?.store?.data.projects.some((p) => p.name === '启动恢复验收'), undefined, { timeout });
+      await waitReadOnly(page, false);
+      assert(await page.evaluate(() => window.yuzhi.store.data.days.some((day) => day.status === 'settled')),
+        'retry did not restore the durable settlement');
+    } finally {
+      await context.close();
+    }
+  });
+
   await runScenario('real multi-tab writer handoff drains accepted writes', async () => {
     const context = await browser.newContext();
     try {

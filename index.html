@@ -87,6 +87,11 @@
     <div class="acts"><button class="btn small primary" id="safetyGo">现在导出</button><button class="btn small" id="safetyLater">稍后</button></div>
   </div>
 
+  <div class="safety-notice card" id="settlementBackupNotice" hidden role="alert">
+    <div class="tx" data-i18n="safety.snapshotFailed">本机结算快照未能更新。请确认结算已保存后重试，也可以先导出备份。</div>
+    <div class="acts"><button class="btn small primary" id="settlementBackupRetry" data-i18n="safety.snapshotRetry">重试保存快照</button><button class="btn small" id="settlementBackupExport" data-readonly-safe data-i18n="safety.exportNow">现在导出</button></div>
+  </div>
+
   <section class="stats" id="stats"></section>
 
   <div class="main">

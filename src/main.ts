@@ -25,6 +25,8 @@ import { festivalName, getLocale, initI18n, lightName, onLocaleChange, seasonNam
 import { formatChronicleLine } from './history';
 import { deliverBackup, markBackupExported, SafetyNoticeBar } from './ui/safety';
 import { AutoBackup } from './ui/auto-backup';
+import { readSettlementSnapshot, SettlementBackup, type SettlementSnapshot } from './ui/settlement-backup';
+import { showStartupError } from './ui/startup-error';
 
 // 标题衬线字体按需异步加载：不阻塞首屏，加载完成前用系统宋体 / 衬线回退（font-display: swap）。
 void import('./fonts.css');
@@ -32,6 +34,38 @@ void import('./fonts.css');
 /** 还没有任何现实输入的新岛：没有项目、任务、日历、日程、日记，也没有结算 */
 function isBlankIsland(data: { projects: unknown[]; tasks: unknown[]; sources: unknown[]; events: unknown[]; diaries: unknown[]; entries: unknown[] }): boolean {
   return !data.projects.length && !data.tasks.length && !data.sources.length && !data.events.length && !data.diaries.length && !data.entries.length;
+}
+
+/** Export the exact saved snapshot that the privacy confirmation describes. */
+async function exportSettlementSnapshot(existing?: SettlementSnapshot) {
+  let snapshot: SettlementSnapshot | undefined;
+  try {
+    snapshot = existing ?? await readSettlementSnapshot();
+  } catch {
+    toast(t('safety.snapshotUnavailable'), true);
+    return;
+  }
+  if (!snapshot) {
+    toast(t('safety.snapshotNone'), true);
+    return;
+  }
+  const ok = await confirmModal({
+    title: t('main.exportTitle'),
+    text: (snapshot.diaryCount
+      ? t('main.exportDiaryBody', { count: snapshot.diaryCount })
+      : t('main.exportBody')) + ` ${t('safety.snapshotHistorical')}`,
+    ok: t('main.exportOk'),
+    readOnlySafe: true,
+  });
+  if (!ok) return;
+  try {
+    if (await deliverBackup(`yuzhi-settlement-${snapshot.date}.json`, snapshot.json) === 'cancelled') return;
+    // This historical snapshot may not include newer data, so it must not
+    // reset the reminder for exporting the current island.
+    toast(t('safety.snapshotExportDone'));
+  } catch {
+    toast(t('main.exportFailed'), true);
+  }
 }
 
 async function boot() {
@@ -43,23 +77,12 @@ async function boot() {
   try {
     const started = await AppSession.start();
     session = started.session;
-    if (started.fallback) {
-      setTimeout(() => toast(t('main.storageBlocked'), true), 500);
-    }
   } catch (error) {
     console.error('无法打开屿志本地数据', error);
-    const message = error instanceof Error ? error.message : String(error);
-    const wrap = document.querySelector<HTMLElement>('.wrap');
-    if (wrap) {
-      setHTML(
-        wrap,
-        `<section class="card panel" role="alert" style="max-width:760px;margin:48px auto">
-          <h2>${esc(t('main.openDataTitle'))}</h2>
-          <p>${esc(message)}</p>
-          <p>${esc(t('main.openDataBody'))}</p>
-        </section>`,
-      );
-    }
+    showStartupError(error, {
+      retry: () => window.location.reload(),
+      exportSnapshot: (snapshot) => { void exportSettlementSnapshot(snapshot); },
+    });
     return;
   }
   const store = session.store;
@@ -68,6 +91,7 @@ async function boot() {
   // Map inspections capture the permission state used to build their actions.
   // A session generation change invalidates that UI snapshot.
   let clearSessionSensitiveMapInfo: () => void = () => {};
+  let syncSettlementBackupNotice: () => void = () => {};
 
   const syncReadOnlyUi = (readOnly: boolean) => {
     for (const id of ['newBtn', 'settleBtn', 'fogGo', 'calBtn']) {
@@ -136,6 +160,7 @@ async function boot() {
     const readOnly = state !== 'writer';
     store.setReadOnly(readOnly);
     syncReadOnlyUi(readOnly);
+    syncSettlementBackupNotice();
     clearSessionSensitiveMapInfo();
     if (readOnly) {
       closeModal(false);
@@ -254,7 +279,7 @@ async function boot() {
     openNew: (kind) => openNew(store, kind, openProjectAfterCreate),
     openClassify: () => openClassify(store),
     openPrompt: (p) => abandonPrompt(store, p, () => setTimeout(maybePrompt, 300)),
-    openSettings: () => openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup }),
+    openSettings: () => openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), exportSnapshot: () => void exportSettlementSnapshot(), autoBackup }),
     openCeremony: (p) => ceremony.open(p),
     onViewChange: () => update(),
   });
@@ -277,7 +302,10 @@ async function boot() {
       if (!o) setTimeout(maybePrompt, 600);
     },
     // An evening review is the day's real change: refresh today's backup file.
-    settled: () => { void autoBackup.run('settled'); },
+    settled: (date) => {
+      void settlementBackup.run(date);
+      void autoBackup.run('settled');
+    },
   });
 
   function flyBrick(pid: string, from: DOMRect) {
@@ -427,8 +455,16 @@ async function boot() {
 
   // 数据只在这个浏览器里：申请持久存储、提醒备份、自动备份到文件夹、说明「添加到主屏幕」。
   const autoBackup = new AutoBackup(store);
+  const settlementBackup = new SettlementBackup(store);
   const safetyBar = new SafetyNoticeBar(store, () => void exportFlow(), autoBackup);
   autoBackup.onChange = () => safetyBar.sync();
+  syncSettlementBackupNotice = () => {
+    $('settlementBackupNotice').hidden = !settlementBackup.failed;
+    $<HTMLButtonElement>('settlementBackupRetry').disabled = store.isReadOnly;
+  };
+  settlementBackup.onChange = syncSettlementBackupNotice;
+  $('settlementBackupRetry').addEventListener('click', () => { void settlementBackup.retry(); });
+  $('settlementBackupExport').addEventListener('click', () => { void exportFlow(); });
 
   /* ---------------- 每次数据变化 ---------------- */
   let lastToday = store.today();
@@ -541,6 +577,9 @@ async function boot() {
   function resumeWriterDuties() {
     if (store.isReadOnly) return;
     daily();
+    // Backfill an absent snapshot without replacing an existing recovery point.
+    const latest = store.data.days.filter((day) => day.status === 'settled').map((day) => day.date).sort().at(-1);
+    if (latest) void settlementBackup.ensure(latest);
     lastToday = store.today();
     asked.clear();
     setTimeout(maybePrompt, 0);
@@ -593,28 +632,42 @@ async function boot() {
 
   /* ---------------- 导出备份 ---------------- */
   async function exportFlow() {
-    // Reader tabs may refresh while the privacy confirmation is open.
-    // Warn about one exact Store snapshot and only download that snapshot;
-    // if reload replaced it, re-prompt against the fresh data.
+    // Warn about one exact saved snapshot. A reader refresh or an in-place
+    // edit while waiting or confirming must restart the confirmation.
     while (true) {
       const warnedData = store.data;
-      const diaryCount = warnedData.diaries.length;
-      const backup = exportBackup(warnedData);
+      const warnedVersion = store.dataVersion;
+      let snapshot;
+      let lastSavedOnly = false;
+      try {
+        snapshot = await store.committedSnapshot();
+      } catch {
+        snapshot = await store.lastSavedSnapshot();
+        lastSavedOnly = true;
+      }
+      if (store.data !== warnedData || store.dataVersion !== warnedVersion) continue;
+      const diaryCount = snapshot.diaries.length;
+      const backup = exportBackup(snapshot);
       const ok = await confirmModal({
         title: t('main.exportTitle'),
-        text: diaryCount
+        text: (diaryCount
           ? t('main.exportDiaryBody', { count: diaryCount })
-          : t('main.exportBody'),
+          : t('main.exportBody')) + (lastSavedOnly ? ` ${t('main.exportLastSaved')}` : ''),
         ok: t('main.exportOk'),
         readOnlySafe: true,
       });
       if (!ok) return;
-      if (store.data !== warnedData) {
+      if (store.data !== warnedData || store.dataVersion !== warnedVersion) {
         toast(t('main.exportChanged'), true);
         continue;
       }
       const today = store.today();
-      if (await deliverBackup(`yuzhi-backup-${today}.json`, backup) === 'cancelled') return;
+      try {
+        if (await deliverBackup(`yuzhi-backup-${today}.json`, backup) === 'cancelled') return;
+      } catch {
+        toast(t('main.exportFailed'), true);
+        return;
+      }
       markBackupExported(today);
       safetyBar.sync();
       toast(t('main.exportDone'));
@@ -723,7 +776,7 @@ async function boot() {
     // The keyboard-selected menu item is hidden now; dialogs must restore
     // focus to the visible menu trigger rather than that hidden item.
     moreBtn.focus({ preventScroll: true });
-    if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), autoBackup });
+    if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), exportSnapshot: () => void exportSettlementSnapshot(), autoBackup });
     else if (m === 'export') await exportFlow();
     else if (m === 'import') await importFlow();
     else if (m === 'archive') tracker.open({ kind: 'archive' });

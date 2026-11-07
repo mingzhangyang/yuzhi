@@ -790,9 +790,8 @@ export class IdbPersistence implements Persistence {
       storedSettings = settings;
       storedVersionValue = version;
     } catch (error) {
-      // Only known browser/IndexedDB availability failures may fall back to
-      // transient memory storage. Migration, version and validation failures
-      // must remain visible so we never make existing data look "empty".
+      // Classify known browser/IndexedDB availability failures so startup can
+      // explain them. All failures stop startup; none implies an empty island.
       if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error);
       throw error;
     }
@@ -818,9 +817,8 @@ export class IdbPersistence implements Persistence {
         await this.dbp;
       }
     } catch (error) {
-      // Startup persistence failures such as quota/security errors mean the
-      // browser cannot safely persist this session. Keep migration/version/
-      // validation errors outside this block so they remain actionable.
+      // Keep the validated read snapshot on the error for diagnostics, while
+      // stopping startup until persistence can be retried safely.
       if (isStorageUnavailableCause(error)) throw new StorageUnavailableError(error, data);
       throw error;
     }

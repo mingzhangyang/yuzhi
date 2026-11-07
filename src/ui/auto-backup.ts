@@ -8,7 +8,7 @@
  * pruned, keeping the latest AUTO_BACKUP_KEEP. Rules live in logic/backup.ts.
  */
 import type { Store } from '../store';
-import type { ISODate } from '../types';
+import type { Data, ISODate } from '../types';
 import { exportBackup } from '../db';
 import { relDay } from '../lib/date';
 import { t } from '../i18n';
@@ -187,13 +187,16 @@ export class AutoBackup {
    * permission only reports that the user needs to allow it again.
    */
   run(reason: AutoBackupReason): Promise<boolean> {
+    if (!this.supported) return Promise.resolve(false);
+    const context = this.writeContext();
+    if (!context) return Promise.resolve(false);
+    const snapshot = this.store.committedSnapshot();
+    snapshot.catch(() => {});
     return this.enqueue(async () => {
       // Without folder access there is nothing to run, and the "unsupported"
       // status (with its guidance) must not be replaced by "off".
-      if (!this.supported) return false;
       await this.ready;
-      const context = this.writeContext();
-      if (!context) return false;
+      if (!context.isCurrent()) return false;
       await this.reconcile();
       const record = this.record;
       if (!record || !context.isCurrent()) {
@@ -217,7 +220,7 @@ export class AutoBackup {
         this.setStatus({ kind: 'needs-permission', folder: record.folder, lastDate: record.lastDate });
         return false;
       }
-      return this.write(record, today, context);
+      return this.write(record, today, context, snapshot);
     });
   }
 
@@ -227,10 +230,15 @@ export class AutoBackup {
    * aborted, so a stale tab can never replace the new writer's file; the
    * browser only swaps a writable stream into place on close().
    */
-  private async write(record: AutoBackupRecord, today: ISODate, context: { isCurrent(): boolean }): Promise<boolean> {
+  private async write(record: AutoBackupRecord, today: ISODate, context: { isCurrent(): boolean }, snapshot?: Promise<Data>): Promise<boolean> {
     if (!context.isCurrent()) return false;
-    const text = exportBackup(this.store.data);
     try {
+      // Store.data can be ahead of the durable transaction, and later writes
+      // may already be queued while we wait. Copy the last committed snapshot
+      // instead of serializing the mutable in-memory view.
+      const data = await (snapshot ?? this.store.committedSnapshot());
+      if (!context.isCurrent()) return false;
+      const text = exportBackup(data);
       const file = await record.handle.getFileHandle(autoBackupFileName(today), { create: true });
       const writable = await file.createWritable();
       try {
