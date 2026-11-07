@@ -63,13 +63,13 @@ export class SettlementBackup {
         if (onlyIfMissing && await readSettlementSnapshot()) return false;
         if (!context.isCurrent()) return false;
         const saved = await devicePutIfCurrent(SNAPSHOT_KEY, { date, json: exportBackup(snapshot) }, context.isCurrent);
-        if (saved && context.hasCurrentAccess()) {
+        if (saved && context.isCurrent()) {
           this.failedDate = undefined;
           try { this.onChange(); } catch { /* reporting must not affect backup */ }
         }
         return saved;
       } catch {
-        if (context.hasCurrentAccess()) {
+        if (context.isCurrent()) {
           this.failedDate = date;
           try { this.onChange(); } catch { /* reporting must not affect backup */ }
         }

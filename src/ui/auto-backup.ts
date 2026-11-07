@@ -260,7 +260,7 @@ export class AutoBackup {
       await this.refreshStatus();
       return true;
     } catch (error) {
-      if (context.hasCurrentAccess() && await this.stillChosen(record)) await this.saveRecord({ ...record, lastError: errorText(error) });
+      if (context.isCurrent() && await this.stillChosen(record) && context.isCurrent()) await this.saveRecord({ ...record, lastError: errorText(error) });
       else await this.reconcile();
       await this.refreshStatus();
       return false;

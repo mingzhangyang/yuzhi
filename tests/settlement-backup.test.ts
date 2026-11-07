@@ -110,6 +110,19 @@ describe('本机结算快照', () => {
     expect(parseBackup(saved.json).days.map((day) => day.date)).toEqual(['2026-11-01']);
   });
 
+  it('导入开始后，旧备份的失败不能覆盖新会话状态', async () => {
+    const { store, persistence, backup } = setup();
+    const gate = persistence.blockNext();
+    settleDay(store, '2026-11-02', new Map());
+    const old = backup.run('2026-11-02');
+    const importing = store.replaceAll(emptyData());
+    importing.catch(() => {});
+    gate.reject(new Error('old write failed'));
+    expect(await old).toBe(false);
+    await expect(importing).rejects.toThrow('old write failed');
+    expect(backup.failed).toBe(false);
+  });
+
   it('持久化期间失去并重新取得写权限时，旧请求不能写入快照', async () => {
     const { store, persistence, backup } = setup();
     const gate = persistence.blockNext();
