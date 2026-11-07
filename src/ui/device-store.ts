@@ -34,24 +34,44 @@ export async function devicePut(key: string, value: unknown): Promise<void> {
   await withDevice((db) => db.put(KV, value, key));
 }
 
-/** Start no write after ownership is lost, and abort an in-flight stale write. */
-export async function devicePutIfCurrent(key: string, value: unknown, isCurrent: () => boolean): Promise<boolean> {
+/**
+ * A lifecycle revocation must synchronously abort the transaction, including
+ * the gap between the last put() check and tx.done. Polling isCurrent() alone
+ * cannot stop a transaction already waiting to commit.
+ */
+export async function devicePutIfCurrent(
+  key: string, value: unknown, isCurrent: () => boolean, signal?: AbortSignal,
+): Promise<boolean> {
   return withDevice(async (db) => {
-    if (!isCurrent()) return false;
+    if (signal?.aborted || !isCurrent()) return false;
     const tx = db.transaction(KV, 'readwrite');
+    const abort = () => {
+      try { tx.abort(); } catch { /* the transaction may already have committed */ }
+    };
+    signal?.addEventListener('abort', abort, { once: true });
     try {
+      if (signal?.aborted || !isCurrent()) {
+        abort();
+        await tx.done.catch(() => {});
+        return false;
+      }
       await tx.store.put(value, key);
-      if (!isCurrent()) {
-        tx.abort();
+      if (signal?.aborted || !isCurrent()) {
+        abort();
         await tx.done.catch(() => {});
         return false;
       }
       await tx.done;
-      return true;
+      // A revocation after the native commit cannot undo it; it did, however,
+      // commit while the context was valid and must not claim a new success.
+      return !signal?.aborted && isCurrent();
     } catch (error) {
-      try { tx.abort(); } catch { /* already finished */ }
+      abort();
       await tx.done.catch(() => {});
+      if (signal?.aborted || !isCurrent()) return false;
       throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
     }
   });
 }

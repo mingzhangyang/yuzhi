@@ -33,6 +33,9 @@ export class Store {
   private readOnly = false;
   private accessGeneration = 0;
   private backupGeneration = 0;
+  /** Abort an in-flight device transaction as soon as its owning session is revoked. */
+  private backupAbort = new AbortController();
+  private readonly backupContextListeners = new Set<() => void>();
   /** Dynamic/JS callers can hide async work behind an ordinary function. */
   private rejectedAsyncCallbacks = 0;
   private callbackContractError: Error | undefined;
@@ -53,9 +56,27 @@ export class Store {
     this.snapshotTail = Promise.resolve(structuredClone(data));
   }
 
+  private resetBackupContext() {
+    this.backupGeneration++;
+    // Abort synchronously: an isCurrent() check alone cannot cancel an IDB
+    // transaction that is still committing after its last awaited request.
+    this.backupAbort.abort();
+    this.backupAbort = new AbortController();
+    for (const listener of this.backupContextListeners) {
+      try { listener(); } catch { /* lifecycle notifications must not block a revocation */ }
+    }
+  }
+
+  subscribeBackupContextReset(listener: () => void): () => void {
+    this.backupContextListeners.add(listener);
+    return () => this.backupContextListeners.delete(listener);
+  }
+
   setReadOnly(value: boolean) {
-    if (this.readOnly !== value) this.accessGeneration++;
+    if (this.readOnly === value) return;
     this.readOnly = value;
+    this.accessGeneration++;
+    this.resetBackupContext();
   }
 
   get isReadOnly() {
@@ -89,7 +110,12 @@ export class Store {
   captureBackupContext() {
     const access = this.captureWriteContext();
     const generation = this.backupGeneration;
-    return { hasCurrentAccess: access.hasCurrentAccess, isCurrent: () => access.hasCurrentAccess() && generation === this.backupGeneration };
+    const signal = this.backupAbort.signal;
+    return {
+      signal,
+      hasCurrentAccess: access.hasCurrentAccess,
+      isCurrent: () => !signal.aborted && access.hasCurrentAccess() && generation === this.backupGeneration,
+    };
   }
 
   /** Replace the in-memory snapshot after a read-only tab observes another tab's commit. */
@@ -97,7 +123,7 @@ export class Store {
     if (this.activeWrites || this.pendingBatches.size > 0 || this.replacementInProgress) {
       throw new Error('Store.reload 只能在没有在途写入或全量替换时切换快照');
     }
-    this.backupGeneration++;
+    this.resetBackupContext();
     this.data = structuredClone(data);
     this.committedData = structuredClone(this.data);
     this.pendingBatches.clear();
@@ -342,7 +368,7 @@ export class Store {
     this.assertWritable();
     const context = this.captureWriteContext();
     if (this.activeWrites) throw new Error('Store.replaceAll cannot run inside Store.batch');
-    this.backupGeneration++;
+    this.resetBackupContext();
     const replacement = structuredClone(d);
     this.replacementInProgress = true;
 

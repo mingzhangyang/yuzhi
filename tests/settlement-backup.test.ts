@@ -174,7 +174,6 @@ describe('本机结算快照', () => {
     const { store, persistence, backup } = setup();
     settleDay(store, '2026-11-01', new Map());
     expect(await backup.run('2026-11-01')).toBe(true);
-    const previous = await readSettlementSnapshot();
     const gate = persistence.blockNext();
     settleDay(store, '2026-11-02', new Map());
     const pending = backup.run('2026-11-02');
@@ -182,9 +181,55 @@ describe('本机结算快照', () => {
     expect(await pending).toBe(false);
     store.saveSettings({ theme: 'dark' });
     await store.flush();
-    expect(await backup.retry()).toBe(false);
+    expect(await backup.retry()).toBe(true);
+    expect(backup.failed).toBe(false);
+    const recovered = (await readSettlementSnapshot())!;
+    expect(recovered.date).toBe('2026-11-01');
+    expect(parseBackup(recovered.json).days.map((day) => day.date)).toEqual(['2026-11-01']);
+    expect(parseBackup(recovered.json).settings.theme).toBe('dark');
+  });
+
+  it.each(['import', 'reload'] as const)('%s 后不保留旧快照失败提示，但保留恢复点', async (kind) => {
+    const { store, backup } = setup();
+    settleDay(store, '2026-11-01', new Map());
+    expect(await backup.run('2026-11-01')).toBe(true);
+    const previous = await readSettlementSnapshot();
+    settleDay(store, '2026-11-02', new Map());
+    await store.flush();
+    const put = IDBObjectStore.prototype.put;
+    const fault = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, id) {
+      if (this.name === 'kv' && id === key) throw new DOMException('quota', 'QuotaExceededError');
+      return put.call(this, value, id);
+    });
+    expect(await backup.run('2026-11-02')).toBe(false);
+    fault.mockRestore();
     expect(backup.failed).toBe(true);
+    const notice = vi.fn();
+    backup.onChange = notice;
+    if (kind === 'import') await store.replaceAll(emptyData());
+    else store.reload(emptyData());
+    expect(backup.failed).toBe(false);
+    expect(notice).toHaveBeenCalledTimes(1);
+    expect(await backup.retry()).toBe(false);
     expect(await readSettlementSnapshot()).toEqual(previous);
+  });
+
+  it.each(['release', 'replace'] as const)('%s 在 put 检查后、事务完成前取消旧备份', async (kind) => {
+    await devicePut(key, 'previous');
+    const { store } = setup();
+    const context = store.captureBackupContext();
+    let checks = 0;
+    let replacing: Promise<void> | undefined;
+    const current = () => {
+      if (++checks === 3) queueMicrotask(() => {
+        if (kind === 'release') store.setReadOnly(true);
+        else replacing = store.replaceAll(emptyData());
+      });
+      return context.isCurrent();
+    };
+    expect(await devicePutIfCurrent(key, 'replacement', current, context.signal)).toBe(false);
+    await replacing;
+    expect(await deviceGet(key)).toBe('previous');
   });
 
   it('设备库中途失去权限时中止事务，保留原快照', async () => {

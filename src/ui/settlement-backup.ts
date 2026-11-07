@@ -33,7 +33,19 @@ export class SettlementBackup {
   private failedDate?: ISODate;
   onChange: () => void = () => {};
 
-  constructor(private readonly store: Store) {}
+  constructor(private readonly store: Store) {
+    // A failed date belongs to one island/session generation. Imports, reloads,
+    // and lease changes must not carry an unretryable warning into new data.
+    store.subscribeBackupContextReset(() => {
+      if (this.failedDate === undefined) return;
+      this.failedDate = undefined;
+      this.reportChanged();
+    });
+  }
+
+  private reportChanged() {
+    try { this.onChange(); } catch { /* reporting must not affect backup */ }
+  }
 
   get failed(): boolean { return this.failedDate !== undefined; }
 
@@ -62,16 +74,16 @@ export class SettlementBackup {
         }
         if (onlyIfMissing && await readSettlementSnapshot()) return false;
         if (!context.isCurrent()) return false;
-        const saved = await devicePutIfCurrent(SNAPSHOT_KEY, { date, json: exportBackup(snapshot) }, context.isCurrent);
+        const saved = await devicePutIfCurrent(SNAPSHOT_KEY, { date, json: exportBackup(snapshot) }, context.isCurrent, context.signal);
         if (saved && context.isCurrent()) {
           this.failedDate = undefined;
-          try { this.onChange(); } catch { /* reporting must not affect backup */ }
+          this.reportChanged();
         }
         return saved;
       } catch {
         if (context.isCurrent()) {
           this.failedDate = date;
-          try { this.onChange(); } catch { /* reporting must not affect backup */ }
+          this.reportChanged();
         }
         return false;
       }
@@ -81,6 +93,17 @@ export class SettlementBackup {
   }
 
   retry(): Promise<boolean> {
-    return this.failedDate ? this.run(this.failedDate) : Promise.resolve(false);
+    const failedDate = this.failedDate;
+    if (!failedDate) return Promise.resolve(false);
+    let context: ReturnType<Store['captureBackupContext']>;
+    try { context = this.store.captureBackupContext(); } catch { return Promise.resolve(false); }
+    // A failed settlement is not in durable data. Retry the newest actually
+    // committed settlement instead of repeatedly trying to export that date.
+    return this.store.lastSavedSnapshot().then((data) => {
+      if (!context.isCurrent() || this.failedDate !== failedDate) return false;
+      const dates = data.days.filter((day) => day.status === 'settled').map((day) => day.date);
+      const date = dates.includes(failedDate) ? failedDate : dates.sort().at(-1);
+      return date ? this.run(date) : false;
+    }).catch(() => false);
   }
 }
