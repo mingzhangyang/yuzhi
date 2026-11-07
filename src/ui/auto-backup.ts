@@ -133,10 +133,10 @@ export class AutoBackup {
    * Bind a backup to the writer lease and data snapshot it started under.
    * Returns null in a read-only tab.
    */
-  private writeContext(): { isCurrent(): boolean } | null {
+  private writeContext(): ReturnType<Store['captureBackupContext']> | null {
     if (this.store.isReadOnly) return null;
     try {
-      return this.store.captureWriteContext();
+      return this.store.captureBackupContext();
     } catch {
       return null;
     }
@@ -230,7 +230,7 @@ export class AutoBackup {
    * aborted, so a stale tab can never replace the new writer's file; the
    * browser only swaps a writable stream into place on close().
    */
-  private async write(record: AutoBackupRecord, today: ISODate, context: { isCurrent(): boolean }, snapshot?: Promise<Data>): Promise<boolean> {
+  private async write(record: AutoBackupRecord, today: ISODate, context: ReturnType<Store['captureBackupContext']>, snapshot?: Promise<Data>): Promise<boolean> {
     if (!context.isCurrent()) return false;
     try {
       // Store.data can be ahead of the durable transaction, and later writes
@@ -260,7 +260,7 @@ export class AutoBackup {
       await this.refreshStatus();
       return true;
     } catch (error) {
-      if (context.isCurrent() && await this.stillChosen(record)) await this.saveRecord({ ...record, lastError: errorText(error) });
+      if (context.hasCurrentAccess() && await this.stillChosen(record)) await this.saveRecord({ ...record, lastError: errorText(error) });
       else await this.reconcile();
       await this.refreshStatus();
       return false;

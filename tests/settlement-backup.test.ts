@@ -93,6 +93,23 @@ describe('本机结算快照', () => {
     expect(parseBackup((await readSettlementSnapshot())!.json).days.map((day) => day.date)).toEqual(['2026-11-01', '2026-11-02']);
   });
 
+  it('后续结算失败回滚时，先前已提交结算的快照仍能保存', async () => {
+    const { store, persistence, backup } = setup();
+    const first = persistence.blockNext();
+    const second = persistence.blockNext();
+    settleDay(store, '2026-11-01', new Map());
+    const one = backup.run('2026-11-01');
+    settleDay(store, '2026-11-02', new Map());
+    const two = backup.run('2026-11-02');
+    first.resolve();
+    second.reject(new Error('later failure'));
+    expect(await one).toBe(true);
+    expect(await two).toBe(false);
+    const saved = (await readSettlementSnapshot())!;
+    expect(saved.date).toBe('2026-11-01');
+    expect(parseBackup(saved.json).days.map((day) => day.date)).toEqual(['2026-11-01']);
+  });
+
   it('持久化期间失去并重新取得写权限时，旧请求不能写入快照', async () => {
     const { store, persistence, backup } = setup();
     const gate = persistence.blockNext();

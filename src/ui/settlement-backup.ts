@@ -48,8 +48,8 @@ export class SettlementBackup {
   }
 
   private enqueueSnapshot(date: ISODate, onlyIfMissing: boolean): Promise<boolean> {
-    let context: ReturnType<Store['captureWriteContext']>;
-    try { context = this.store.captureWriteContext(); } catch { return Promise.resolve(false); }
+    let context: ReturnType<Store['captureBackupContext']>;
+    try { context = this.store.captureBackupContext(); } catch { return Promise.resolve(false); }
     const settlement = this.store.committedSnapshot();
     // This run may be queued behind an earlier snapshot.
     settlement.catch(() => {});

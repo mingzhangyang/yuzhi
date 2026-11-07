@@ -113,7 +113,10 @@ describe('自动备份（PR #37 第三轮评审）', () => {
     else reject(new Error('settlement write failed'));
     expect(await pending).toBe(succeeds);
     if (succeeds) expect(parseBackup(picked.files.get(filename)!).days).toContainEqual({ date: '2026-11-02', status: 'settled' });
-    else expect(picked.files.get(filename)).toBe(previous);
+    else {
+      expect(picked.files.get(filename)).toBe(previous);
+      expect(backup.status.kind).toBe('error');
+    }
   });
 
   it('不支持文件夹备份的浏览器，启动后的每日备份不会把「不支持」改成「未开启」', async () => {
