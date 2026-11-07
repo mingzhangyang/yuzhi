@@ -8,7 +8,7 @@
  * pruned, keeping the latest AUTO_BACKUP_KEEP. Rules live in logic/backup.ts.
  */
 import type { Store } from '../store';
-import type { ISODate } from '../types';
+import type { Data, ISODate } from '../types';
 import { exportBackup } from '../db';
 import { relDay } from '../lib/date';
 import { t } from '../i18n';
@@ -133,10 +133,10 @@ export class AutoBackup {
    * Bind a backup to the writer lease and data snapshot it started under.
    * Returns null in a read-only tab.
    */
-  private writeContext(): { isCurrent(): boolean } | null {
+  private writeContext(): ReturnType<Store['captureBackupContext']> | null {
     if (this.store.isReadOnly) return null;
     try {
-      return this.store.captureWriteContext();
+      return this.store.captureBackupContext();
     } catch {
       return null;
     }
@@ -187,13 +187,16 @@ export class AutoBackup {
    * permission only reports that the user needs to allow it again.
    */
   run(reason: AutoBackupReason): Promise<boolean> {
+    if (!this.supported) return Promise.resolve(false);
+    const context = this.writeContext();
+    if (!context) return Promise.resolve(false);
+    const snapshot = this.store.committedSnapshot();
+    snapshot.catch(() => {});
     return this.enqueue(async () => {
       // Without folder access there is nothing to run, and the "unsupported"
       // status (with its guidance) must not be replaced by "off".
-      if (!this.supported) return false;
       await this.ready;
-      const context = this.writeContext();
-      if (!context) return false;
+      if (!context.isCurrent()) return false;
       await this.reconcile();
       const record = this.record;
       if (!record || !context.isCurrent()) {
@@ -217,7 +220,7 @@ export class AutoBackup {
         this.setStatus({ kind: 'needs-permission', folder: record.folder, lastDate: record.lastDate });
         return false;
       }
-      return this.write(record, today, context);
+      return this.write(record, today, context, snapshot);
     });
   }
 
@@ -227,10 +230,15 @@ export class AutoBackup {
    * aborted, so a stale tab can never replace the new writer's file; the
    * browser only swaps a writable stream into place on close().
    */
-  private async write(record: AutoBackupRecord, today: ISODate, context: { isCurrent(): boolean }): Promise<boolean> {
+  private async write(record: AutoBackupRecord, today: ISODate, context: ReturnType<Store['captureBackupContext']>, snapshot: Promise<Data>): Promise<boolean> {
     if (!context.isCurrent()) return false;
-    const text = exportBackup(this.store.data);
     try {
+      // Store.data can be ahead of the durable transaction, and later writes
+      // may already be queued while we wait. Copy the last committed snapshot
+      // instead of serializing the mutable in-memory view.
+      const data = await snapshot;
+      if (!context.isCurrent()) return false;
+      const text = exportBackup(data);
       const file = await record.handle.getFileHandle(autoBackupFileName(today), { create: true });
       const writable = await file.createWritable();
       try {
@@ -252,7 +260,7 @@ export class AutoBackup {
       await this.refreshStatus();
       return true;
     } catch (error) {
-      if (context.isCurrent() && await this.stillChosen(record)) await this.saveRecord({ ...record, lastError: errorText(error) });
+      if (context.isCurrent() && await this.stillChosen(record) && context.isCurrent()) await this.saveRecord({ ...record, lastError: errorText(error) });
       else await this.reconcile();
       await this.refreshStatus();
       return false;
@@ -278,6 +286,10 @@ export class AutoBackup {
     if (!context) return Promise.resolve(false);
     // Open the picker inside the click's user activation, before any await.
     const picked = pick({ id: 'yuzhi-auto-backup', mode: 'readwrite', startIn: 'documents' });
+    // Capture at enqueue time, not after a slow folder picker. Otherwise this
+    // earlier operation can write newer data before a queued older settlement.
+    const snapshot = this.store.committedSnapshot();
+    snapshot.catch(() => {});
     return this.enqueue(async () => {
       let handle: FolderHandle;
       try {
@@ -299,7 +311,7 @@ export class AutoBackup {
         this.setStatus({ kind: 'error', folder: record.folder, lastDate: previous?.lastDate, message: t('auto.notRemembered') });
         return false;
       }
-      return this.write(record, this.store.today(), context);
+      return this.write(record, this.store.today(), context, snapshot);
     });
   }
 
@@ -310,6 +322,8 @@ export class AutoBackup {
     if (!record || !context) return Promise.resolve(false);
     // requestPermission must start inside the click's user activation.
     const asked = record.handle.requestPermission?.(READ_WRITE) ?? Promise.resolve<PermissionState>('granted');
+    const snapshot = this.store.committedSnapshot();
+    snapshot.catch(() => {});
     return this.enqueue(async () => {
       let permission: PermissionState;
       try {
@@ -328,7 +342,7 @@ export class AutoBackup {
         await this.refreshStatus();
         return false;
       }
-      return this.write(current, this.store.today(), context);
+      return this.write(current, this.store.today(), context, snapshot);
     });
   }
 

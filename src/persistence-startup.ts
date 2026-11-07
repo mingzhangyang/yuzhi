@@ -1,4 +1,4 @@
-import { isStorageUnavailableError, MemoryPersistence, type Persistence, type StorageUnavailableError } from './db';
+import type { Persistence } from './db';
 import type { Data } from './types';
 
 interface StartupPersistence extends Persistence {
@@ -7,19 +7,18 @@ interface StartupPersistence extends Persistence {
 
 /**
  * Own the candidate connection until startup succeeds. Every failed startup
- * closes it before transferring ownership to memory or propagating the error.
+ * closes it before propagating the error. A failed read cannot establish that
+ * an island is empty, so startup must never switch to an empty memory store.
  * Callers may supply a lifecycle-stable load without duplicating cleanup rules.
  */
 export async function initializePersistence(
   candidate: StartupPersistence,
   load: () => Promise<Data> = () => candidate.load(),
-): Promise<{ persistence: Persistence; data: Data; fallback?: StorageUnavailableError }> {
+): Promise<{ persistence: StartupPersistence; data: Data }> {
   try {
     return { persistence: candidate, data: await load() };
   } catch (error) {
-    await candidate.close();
-    if (!isStorageUnavailableError(error)) throw error;
-    const persistence = new MemoryPersistence(error.recoveredData);
-    return { persistence, data: await persistence.load(), fallback: error };
+    try { await candidate.close(); } catch { /* preserve the original startup error */ }
+    throw error;
   }
 }

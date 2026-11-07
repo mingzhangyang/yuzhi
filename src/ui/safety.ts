@@ -5,7 +5,7 @@
 import type { Store } from '../store';
 import type { ISODate } from '../types';
 import { $, download, esc, setText } from './dom';
-import { relDay } from '../lib/date';
+import { localDate, relDay } from '../lib/date';
 import { getLocale, t } from '../i18n';
 import {
   dismissInstallHint,
@@ -21,6 +21,7 @@ import {
   type SafetyNotice,
 } from '../logic/backup';
 import type { AutoBackup } from './auto-backup';
+import { readSettlementSnapshot } from './settlement-backup';
 
 /** 按浏览器保存：要提醒的正是这个浏览器里的这一份数据。 */
 export const SAFETY_STATE_KEY = 'yuzhi:data-safety';
@@ -161,6 +162,9 @@ export function safetySettingsHtml(today: ISODate): string {
     <p class="hint" data-safety-last>${esc(last)}</p>
     ${hint ? `<p class="hint">${esc(t(installKey(hint)))}</p>` : ''}
     <div class="btnrow"><button type="button" class="btn small" data-safety-export data-readonly-safe>${esc(t('safety.exportButton'))}</button></div>
+    <p class="hint">${esc(t('safety.snapshotHint'))}</p>
+    <p class="hint" data-safety-snapshot>${esc(t('safety.snapshotChecking'))}</p>
+    <div class="btnrow"><button type="button" class="btn small" data-safety-snapshot-export data-readonly-safe hidden>${esc(t('safety.snapshotExport'))}</button></div>
     <div data-auto-backup></div>`;
 }
 
@@ -172,12 +176,22 @@ export function refreshSafetySettings(box: HTMLElement, today: ISODate) {
   setText(line, state.lastBackup ? t('safety.lastBackup', { when: relDay(state.lastBackup, today) }) : t('safety.neverBacked'));
 }
 
-export function fillSafetySettings(box: HTMLElement, isCurrent: () => boolean) {
+export function fillSafetySettings(box: HTMLElement, isCurrent: () => boolean, canExportSnapshot = false, today: () => ISODate = localDate) {
   void persistenceStatus().then((status) => {
     const line = box.querySelector<HTMLElement>('[data-safety-storage]');
     if (!line || !isCurrent()) return;
     const key = status === 'persisted' ? 'safety.persisted' : status === 'best-effort' ? 'safety.bestEffort' : 'safety.unsupported';
     setText(line, t(key));
+  });
+  void readSettlementSnapshot().then((snapshot) => {
+    const line = box.querySelector<HTMLElement>('[data-safety-snapshot]');
+    const button = box.querySelector<HTMLButtonElement>('[data-safety-snapshot-export]');
+    if (!line || !isCurrent()) return;
+    setText(line, snapshot ? t('safety.snapshotReady', { when: relDay(snapshot.date, today()) }) : t('safety.snapshotNone'));
+    if (button) button.hidden = !snapshot || !canExportSnapshot;
+  }).catch(() => {
+    const line = box.querySelector<HTMLElement>('[data-safety-snapshot]');
+    if (line && isCurrent()) setText(line, t('safety.snapshotUnavailable'));
   });
 }
 

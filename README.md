@@ -59,7 +59,7 @@ Cloudflare 的 Preview Builds 是项目级设置，不能由 `wrangler.toml` 代
 src/
   types.ts            数据模型（交接文档第 14 节，加了几处必要字段）
   db.ts               IndexedDB（idb）读写、JSON 备份导出/导入
-  persistence-startup.ts 启动持久层所有权转移、失败清理与受控内存降级
+  persistence-startup.ts 启动持久层所有权转移、失败清理与停止启动
   app-session.ts      启动/接管/恢复/bfcache/关闭的应用会话编排
   store.ts            内存数据 + 写穿持久层 + 变化通知 + 村落状态缓存
   actions.ts          公共 action 聚合出口（composition-only）
@@ -78,13 +78,15 @@ src/
   calendar.ts         订阅链接 / 上传文件 / 自动刷新
   island/             小岛：地形生成（map.ts）与 Canvas 绘制、交互（render.ts）
   ui/                 指标卡、追踪栏（含档案馆）、晚间结算、落成仪式、对话框、数据安全提示条、
-                      自动备份到文件夹（auto-backup.ts，句柄存于独立的 device-store）
+                      自动备份到文件夹（auto-backup.ts）及本机结算快照（settlement-backup.ts）
 shared/icsProxy.ts    .ics 代理核心，Worker 与 Vite 开发服务器共用
 worker/index.ts       Cloudflare Worker 入口（静态资源 + /api/ics）
 tests/                单元测试
 ```
 
 实体保留自身字段，`entries` / `operations` 保存结算与操作事实，`snapshots` / `chronicle` 保存历史采样与冻结叙述；一生之书、打断记录、阶段和有效任务状态由 read model 计算。旧版 `life` / `interruptions` 在历史保全、校验及业务事务提交成功后才删除。每个用户动作使用一个持久化 batch；多标签页只有 Web Locks 的 writer 接收新动作，已接受写入在释放锁前完成提交及通知，读者接管取得锁后，须刷新成功才开放新动作。
+
+启动无法读取或保存本地数据时，屿志停止启动并显示重试入口，不会把读取失败当作空岛。每次结算持久化成功后，应用尽力在独立的本机数据库保留最近一份完整 JSON 快照，可在「设置 → 数据安全」导出；启动失败但快照仍可读取时，也可从错误页面导出。快照保存在同一浏览器的站点存储中，清除站点数据可能一起丢失，仍需将导出的备份另存到安全位置。支持文件夹访问的浏览器可以额外启用自动文件夹备份。
 
 架构状态（2026-10-04）：**Architecture v2 已完成，项目进入维护 / 演进状态。** Phase 0–5 与 Batch A–D 均已完成并通过最终对照验收；本轮计划不再追加新的 Phase。正式完结记录见 [`docs/ARCHITECTURE_V2_COMPLETION.md`](docs/ARCHITECTURE_V2_COMPLETION.md)，长期架构不变量与历史实施细节见[架构调整方案第 10 节](docs/架构调整方案.md#10-阶段状态与实施记录)。后续若需要新的结构性调整，应新建独立 RFC / architecture plan，而不是继续延长本计划。
 

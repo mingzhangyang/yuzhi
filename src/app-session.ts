@@ -1,7 +1,6 @@
 import {
   IdbPersistence,
   type Persistence,
-  type StorageUnavailableError,
 } from './db';
 import { initializePersistence } from './persistence-startup';
 import { SingleWriterCoordinator, type SingleWriterOptions, type WriterState } from './single-writer';
@@ -53,11 +52,11 @@ export class AppSession {
     });
   }
 
-  static async start(options: AppSessionOptions = {}): Promise<{ session: AppSession; fallback?: StorageUnavailableError }> {
+  static async start(options: AppSessionOptions = {}): Promise<{ session: AppSession }> {
     const session = new AppSession(options);
     try {
-      const fallback = await session.initialize();
-      return { session, ...(fallback ? { fallback } : {}) };
+      await session.initialize();
+      return { session };
     } catch (error) {
       await session.tabs.close().catch(() => {});
       throw error;
@@ -81,7 +80,7 @@ export class AppSession {
     return this.tabs.supportsWriterLock;
   }
 
-  private async initialize(): Promise<StorageUnavailableError | undefined> {
+  private async initialize(): Promise<void> {
     await this.tabs.acquire();
 
     const notifyVersionChange = () => { void this.tabs.notifyVersionChange(); };
@@ -95,15 +94,12 @@ export class AppSession {
       return idb.load();
     }));
 
-    if (initialized.persistence !== idb) this.idb = undefined;
-
     const store = new Store(initialized.data, initialized.persistence, () => this.tabs.revision);
     this.currentStore = store;
     store.onCommitted = () => {
       if (this.idb) this.tabs.announceCommit();
     };
     this.projectState(this.tabs.state);
-    return initialized.fallback;
   }
 
   private report(error: unknown) {
