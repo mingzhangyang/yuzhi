@@ -1,3 +1,4 @@
+import { applyDocumentPolicy } from '../shared/documentPolicy';
 import { handleIcsRequest } from '../shared/icsProxy';
 import {
   DEFAULT_LOCALE,
@@ -80,13 +81,14 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/ics') {
       if (request.method !== 'GET') return new Response('Method Not Allowed', { status: 405, headers: { allow: 'GET' } });
-      return handleIcsRequest(request.url);
+      return handleIcsRequest(request.url, fetch, request.headers.get('origin'));
     }
 
     const asset = await env.ASSETS.fetch(request);
+    const isHtml = asset.headers.get('content-type')?.includes('text/html') === true;
     const requestedLocale = localeFromPath(url.pathname)
       ?? (url.pathname === '/' ? DEFAULT_LOCALE : null);
-    if (!requestedLocale || !asset.headers.get('content-type')?.includes('text/html')) return asset;
-    return localizedHtml(asset, requestedLocale);
+    const document = requestedLocale && isHtml ? localizedHtml(asset, requestedLocale) : asset;
+    return isHtml ? applyDocumentPolicy(document) : document;
   },
 } satisfies ExportedHandler<Env>;

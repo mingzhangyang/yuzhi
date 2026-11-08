@@ -37,6 +37,7 @@ describe('备份提醒', () => {
       data.events.push({ id: 'e1', sourceId: 'work', uid: 'u', title: '会', start: '2026-10-01T01:00:00Z', end: '2026-10-01T02:00:00Z', allDay: false, classified: false });
     });
     expect(hasKeepsakeData(subscribed)).toBe(false);
+    expect(safetyNotice(subscribed, {}, '2026-12-01', null)).toBeNull();
     // An uploaded file has no URL to fetch from again (PR #37 review).
     const uploaded = structuredClone(subscribed);
     delete uploaded.sources[0].icsUrl;
@@ -48,10 +49,12 @@ describe('备份提醒', () => {
     }))).toBe(true);
   });
 
-  it('从没导出过：从第一天算起满 14 天才提醒', () => {
+  it('有珍贵数据且从未导出时当天就提醒；导出后仍满 14 天再提醒', () => {
     const data = island('2026-11-01');
-    expect(safetyNotice(data, {}, '2026-11-14', null)).toBeNull();
-    expect(safetyNotice(data, {}, '2026-11-15', null)).toEqual({ kind: 'backup', days: null, installHint: null });
+    expect(safetyNotice(data, {}, '2026-11-01', null)).toEqual({ kind: 'backup', days: null, installHint: null });
+    const exported = recordBackupDone({}, '2026-11-01');
+    expect(safetyNotice(data, exported, '2026-11-14', null)).toBeNull();
+    expect(safetyNotice(data, exported, '2026-11-15', null)).toEqual({ kind: 'backup', days: 14, installHint: null });
   });
 
   it('导出过：距上次导出满 14 天再提醒，并给出天数', () => {

@@ -6,7 +6,7 @@ import { Store } from '../src/store';
 import { makeStore } from './helpers';
 import { classifyEvents, createProject, mergeEvents, removeSource, settleDay } from '../src/actions';
 import { itemKey } from '../src/logic/days';
-import { normalizeIcsUrl, handleIcsRequest, isPrivateHost } from '../shared/icsProxy';
+import { normalizeIcsUrl, handleIcsRequest, isAllowedIcsOrigin, isPrivateHost } from '../shared/icsProxy';
 import { interruptions } from '../src/logic/read-model';
 import { lifeEntries } from '../src/logic/operations';
 import { localDate } from '../src/lib/date';
@@ -294,11 +294,37 @@ describe('ics 代理', () => {
   });
   it('只转发日历内容', async () => {
     const ok = (async () => new Response('BEGIN:VCALENDAR\nEND:VCALENDAR')) as unknown as typeof fetch;
-    const bad = (async () => new Response('<html>')) as unknown as typeof fetch;
+    const bad = (async () => new Response('<html>BEGIN:VCALENDAR\nEND:VCALENDAR')) as unknown as typeof fetch;
+    const unfinished = (async () => new Response('BEGIN:VCALENDAR\nVERSION:2.0')) as unknown as typeof fetch;
     const r1 = await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', ok);
     expect(r1.status).toBe(200);
+    expect(r1.headers.get('access-control-allow-origin')).toBeNull();
     const r2 = await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', bad);
     expect(r2.status).toBe(422);
+    const r3 = await handleIcsRequest('https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics', unfinished);
+    expect(r3.status).toBe(422);
+  });
+
+  it('只对生产站和本机开发源回写 CORS，其他来源不向上游请求', async () => {
+    expect(isAllowedIcsOrigin('https://yuzhi.orangely.xyz')).toBe(true);
+    expect(isAllowedIcsOrigin('http://localhost:5173')).toBe(true);
+    expect(isAllowedIcsOrigin('http://127.0.0.1:8787')).toBe(true);
+    expect(isAllowedIcsOrigin('https://evil.example')).toBe(false);
+    expect(isAllowedIcsOrigin('http://localhost.evil.com')).toBe(false);
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('BEGIN:VCALENDAR\nEND:VCALENDAR');
+    }) as unknown as typeof fetch;
+    const url = 'https://x/api/ics?url=https%3A%2F%2Fexample.com%2Fa.ics';
+    const allowed = await handleIcsRequest(url, fetchImpl, 'https://yuzhi.orangely.xyz');
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('https://yuzhi.orangely.xyz');
+    expect(allowed.headers.get('vary')).toBe('Origin');
+    const denied = await handleIcsRequest(url, fetchImpl, 'https://evil.example');
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+    expect(calls).toBe(1);
   });
 
   it('按规范解析地址，拒绝各种写法的内网地址', () => {

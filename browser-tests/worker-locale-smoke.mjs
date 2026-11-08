@@ -31,6 +31,10 @@ assert(
   english.response.headers.get('x-yuzhi-locale-metadata') === 'en',
   'English HTML did not pass through the shared locale metadata rewriter',
 );
+assert(
+  english.response.headers.get('content-security-policy-report-only')?.includes("script-src 'self'"),
+  'English HTML is missing the report-only content security policy',
+);
 has(english.text, '<html lang="en">', 'English document language');
 has(english.text, '<title>Yuzhi | Grow an island from your real life</title>', 'English title');
 has(
@@ -53,6 +57,10 @@ const chinese = await fetchText('/');
 assert(
   chinese.response.headers.get('x-yuzhi-locale-metadata') === 'zh-CN',
   'Chinese root HTML bypassed the shared locale metadata rewriter',
+);
+assert(
+  chinese.response.headers.get('content-security-policy-report-only')?.includes("script-src 'self'"),
+  'Chinese HTML is missing the report-only content security policy',
 );
 has(chinese.text, '<html lang="zh-CN">', 'Chinese document language');
 has(chinese.text, '<link rel="canonical" href="https://yuzhi.orangely.xyz/">', 'Chinese canonical');

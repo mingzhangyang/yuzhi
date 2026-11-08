@@ -8,8 +8,11 @@ function icsProxyDev(): Plugin {
     name: 'yuzhi-ics-proxy-dev',
     configureServer(server) {
       server.middlewares.use('/api/ics', async (req, res) => {
-        const path = (req as { originalUrl?: string }).originalUrl ?? '';
-        const r = await handleIcsRequest(`http://localhost${path}`);
+        const incoming = req as { originalUrl?: string; headers?: { origin?: string | string[] } };
+        const path = incoming.originalUrl ?? '';
+        const originHeader = incoming.headers?.origin;
+        const origin = typeof originHeader === 'string' ? originHeader : null;
+        const r = await handleIcsRequest(`http://localhost${path}`, fetch, origin);
         res.statusCode = r.status;
         r.headers.forEach((v, k) => res.setHeader(k, v));
         res.end(await r.text());

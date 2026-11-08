@@ -90,7 +90,9 @@ export function safetyNotice(
   const age = diffDays(since, today);
   const snoozed = state.snoozedUntil !== undefined && today < state.snoozedUntil;
   const installQuiet = state.installHintUntil !== undefined && today < state.installHintUntil;
-  if (age >= BACKUP_REMIND_AFTER_DAYS && !snoozed) {
+  // 从未导出过时当天就提醒。导出过之后仍按 14 天的间隔。
+  const dueAfter = state.lastBackup ? BACKUP_REMIND_AFTER_DAYS : 0;
+  if (age >= dueAfter && !snoozed) {
     return { kind: 'backup', days: state.lastBackup ? age : null, installHint: installQuiet ? null : installHint };
   }
 

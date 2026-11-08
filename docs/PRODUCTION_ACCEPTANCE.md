@@ -30,6 +30,24 @@ A real iPhone Safari sanity pass remains useful before a major public launch.
 The automated mobile focus smoke protects the known >=16px input and
 keyboard-like viewport invariants, but Chromium emulation is not Safari.
 
+## Calendar proxy and document policy
+
+`/api/ics` forwards a calendar the browser cannot fetch itself. It does not store
+the feed. Responses echo `Access-Control-Allow-Origin` only for
+`https://yuzhi.orangely.xyz` and for `http://localhost` / `http://127.0.0.1`
+development origins. Any other `Origin` is rejected before the Worker contacts
+the upstream URL. Missing `Origin` (same-origin page fetches and non-browser
+clients) gets no CORS header. Redirects are checked hop by hop, and hostnames
+that parse as private or special-use addresses are rejected in
+`shared/icsProxy.ts`. Connecting to a public name that resolves to a private
+address is left to the Workers fetch runtime.
+
+HTML documents, including both locale entry points, carry
+`Content-Security-Policy-Report-Only` from `shared/documentPolicy.ts`. The
+header stays report-only until a production acceptance run shows no violations.
+It then becomes an enforcing `Content-Security-Policy` in a separate change.
+`/api/ics` does not get that header. The Vite dev server does not either.
+
 ## Localized image policy
 
 Locale is a presentation concern, so an image is split only when the image itself

@@ -2,6 +2,8 @@
  * .ics 代理的核心逻辑：只转发，不保存任何数据。
  * 同时被 Cloudflare Worker（worker/index.ts）和 Vite 开发服务器使用。
  */
+import { SITE_ORIGIN } from './locale.ts';
+
 export const MAX_ICS_BYTES = 5 * 1024 * 1024;
 
 export class ProxyError extends Error {
@@ -90,6 +92,34 @@ export function isPrivateHost(hostname: string): boolean {
   return /^[\d.]+$/.test(h);
 }
 
+/**
+ * 浏览器跨源读取代理时允许的 Origin。
+ * 同源请求可以不带 Origin，这时不回写 CORS 头。
+ * 只放行生产站和本机开发源，避免把代理开放成任意网站都能用的转发器。
+ */
+export function isAllowedIcsOrigin(origin: string): boolean {
+  if (origin === SITE_ORIGIN) return true;
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' || url.username || url.password) return false;
+  if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return false;
+  if (url.pathname !== '/' || url.search || url.hash) return false;
+  return true;
+}
+
+export function icsCorsHeaders(origin: string | null): Record<string, string> {
+  const headers: Record<string, string> = { 'cache-control': 'no-store' };
+  if (origin && isAllowedIcsOrigin(origin)) {
+    headers['access-control-allow-origin'] = origin;
+    headers.vary = 'Origin';
+  }
+  return headers;
+}
+
 /** 校验并规范化用户给的订阅链接；webcal:// 视为 https:// */
 export function normalizeIcsUrl(raw: string | null): URL {
   if (!raw) throw new ProxyError(400, '缺少 url 参数');
@@ -167,12 +197,21 @@ export async function fetchIcsText(target: URL, fetchImpl: typeof fetch = fetch)
   const len = Number(res.headers.get('content-length') || 0);
   if (len > MAX_ICS_BYTES) throw new ProxyError(413, '日历文件太大');
   const text = await readCapped(res);
-  if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000))) throw new ProxyError(422, '这个链接返回的不是日历（.ics）内容');
+  if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 2000)) || !/END:VCALENDAR/i.test(text)) {
+    throw new ProxyError(422, '这个链接返回的不是日历（.ics）内容');
+  }
+  if (/<script|<!doctype|<html/i.test(text)) throw new ProxyError(422, '这个链接返回的不是日历（.ics）内容');
   return text;
 }
 
-export async function handleIcsRequest(requestUrl: string, fetchImpl: typeof fetch = fetch): Promise<Response> {
-  const headers = { 'cache-control': 'no-store', 'access-control-allow-origin': '*' };
+export async function handleIcsRequest(requestUrl: string, fetchImpl: typeof fetch = fetch, origin: string | null = null): Promise<Response> {
+  if (origin && !isAllowedIcsOrigin(origin)) {
+    return new Response(JSON.stringify({ error: '不能从这里访问日历代理' }), {
+      status: 403,
+      headers: { 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8' },
+    });
+  }
+  const headers = icsCorsHeaders(origin);
   try {
     const target = normalizeIcsUrl(new URL(requestUrl).searchParams.get('url'));
     const text = await fetchIcsText(target, fetchImpl);

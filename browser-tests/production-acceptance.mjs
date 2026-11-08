@@ -109,6 +109,42 @@ has(sitemap, `<loc>${expectedOrigin}/en/</loc>`, 'English sitemap URL');
 has(sitemap, 'hreflang="zh-CN"', 'Chinese sitemap hreflang');
 has(sitemap, 'hreflang="en"', 'English sitemap hreflang');
 
+async function verifyDocumentPolicy(path) {
+  const response = await fetch(baseURL + path, {
+    headers: { accept: 'text/html', 'cache-control': 'no-cache' },
+    redirect: 'error',
+    cache: 'no-store',
+  });
+  assert(response.ok, `${path} returned ${response.status}`);
+  const policy = response.headers.get('content-security-policy-report-only');
+  assert(policy?.includes("script-src 'self'"), `${path} is missing the report-only content security policy`);
+  assert(!policy?.includes('unsafe-eval'), `${path} content security policy allows eval`);
+  await response.arrayBuffer();
+}
+
+async function verifyIcsProxy() {
+  const evil = await fetch(baseURL + '/api/ics', {
+    headers: { origin: 'https://evil.example', accept: 'application/json', 'cache-control': 'no-cache' },
+    redirect: 'error',
+    cache: 'no-store',
+  });
+  assert(evil.status === 403, `/api/ics accepted a foreign origin: ${evil.status}`);
+  assert(evil.headers.get('access-control-allow-origin') !== '*', '/api/ics still publishes a wildcard CORS header');
+  await evil.arrayBuffer();
+
+  const same = await fetch(baseURL + '/api/ics', {
+    headers: { origin: expectedOrigin, accept: 'application/json', 'cache-control': 'no-cache' },
+    redirect: 'error',
+    cache: 'no-store',
+  });
+  assert(same.status === 400, `/api/ics without a url returned ${same.status}`);
+  assert(same.headers.get('access-control-allow-origin') === expectedOrigin, 'same-origin calendar proxy did not echo its Origin');
+  assert(same.headers.get('vary')?.toLowerCase().includes('origin'), 'calendar proxy did not vary on Origin');
+  await same.arrayBuffer();
+}
+
+await Promise.all([verifyDocumentPolicy('/'), verifyDocumentPolicy('/en/'), verifyIcsProxy()]);
+
 assert(zhManifestResponse.ok && enManifestResponse.ok, 'both locale manifests must be available');
 const [zhManifest, enManifest] = await Promise.all([zhManifestResponse.json(), enManifestResponse.json()]);
 assert(
