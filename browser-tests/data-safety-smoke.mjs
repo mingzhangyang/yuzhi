@@ -136,7 +136,8 @@ try {
     await context.close();
   }
 
-  // iPhone: the Home Screen hint shows even right after a backup, and "got it" quiets it.
+  // iPhone: the first-backup reminder includes the Home Screen hint; after
+  // a successful export, "got it" can dismiss the standalone install hint.
   {
     const context = await browser.newContext({ ...devices['iPhone 13'], locale: 'zh-CN' });
     // Record what reaches the system share sheet instead of opening it.
@@ -159,13 +160,15 @@ try {
     await page.evaluate(() => window.yuzhi.actions.createProject(window.yuzhi.store, '手机上的岛'));
     await page.waitForFunction(() => !document.getElementById('safetyNotice').hidden, undefined, { timeout });
     const hint = await notice(page);
-    // The installed app keeps its own storage, so the hint must explain the
-    // export-then-import move and keep the export one tap away.
-    assert(hint.text.includes('添加到主屏幕') && hint.text.includes('导入备份') && hint.go === '现在导出' && hint.later === '知道了',
-      `iPhone install hint missing: ${JSON.stringify(hint)}`);
+    // First-time data protection takes priority but includes the installation
+    // instructions (the Home Screen copy has separate storage).
+    assert(hint.text.includes('还没有导出过备份') && hint.text.includes('添加到主屏幕')
+      && hint.text.includes('导入备份') && hint.go === '现在导出' && hint.later === '稍后',
+      `iPhone first-backup/install guidance missing: ${JSON.stringify(hint)}`);
     await page.locator('#safetyLater').click();
     const quiet = await notice(page);
-    assert(!quiet.visible && quiet.state.installHintUntil, `got it did not quiet the hint: ${JSON.stringify(quiet)}`);
+    assert(!quiet.visible && quiet.state.snoozedUntil && !quiet.state.lastBackup,
+      `later did not snooze the first-backup reminder: ${JSON.stringify(quiet)}`);
 
     // On a phone, export hands the file to the share sheet ("Save to Files").
     const exportFromMenu = async () => {
@@ -192,6 +195,21 @@ try {
     assert(shared.last.name === `yuzhi-backup-${today}.json` && shared.last.type === 'application/json'
       && sharedBackup.format === 'yuzhi-backup' && sharedBackup.projects.length === 1 && shared.state.lastBackup === today,
       `share-sheet export failed: ${JSON.stringify({ name: shared.last.name, state: shared.state })}`);
+
+    // Export clears the backup snooze. The Home Screen hint must still be
+    // shown independently, with an export shortcut for moving the island.
+    await page.waitForFunction(() => !document.getElementById('safetyNotice').hidden
+      && document.getElementById('safetyLater').textContent === '知道了', undefined, { timeout });
+    const installAfterBackup = await notice(page);
+    assert(installAfterBackup.text.includes('添加到主屏幕')
+      && installAfterBackup.text.includes('导入备份')
+      && !installAfterBackup.text.includes('还没有导出过备份')
+      && installAfterBackup.go === '现在导出' && installAfterBackup.later === '知道了',
+      `standalone iPhone install hint missing after export: ${JSON.stringify(installAfterBackup)}`);
+    await page.locator('#safetyLater').click();
+    const dismissed = await notice(page);
+    assert(!dismissed.visible && dismissed.state.installHintUntil,
+      `got it did not quiet the install hint: ${JSON.stringify(dismissed)}`);
     await context.close();
   }
 
