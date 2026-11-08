@@ -505,6 +505,22 @@ try {
     assert(hutHit?.kind === 'chores', `narrow chores hut hit: ${JSON.stringify(hutHit)}`);
     const tipHit = await hitAt(page, p.chores.broomTip);
     assert(tipHit?.kind === 'agenda' && tipHit.target === 'chores', `narrow broom tip hit: ${JSON.stringify(tipHit)}`);
+    // The mobile tracker consumes Escape to collapse its sheet. The same key
+    // must also dismiss a previously opened scenery card, not leave it over
+    // the hut and steal the next pointer click.
+    const beforeEscape = await page.evaluate(() => ({
+      sheetOpen: document.getElementById('tracker').classList.contains('open'),
+      infoVisible: !document.getElementById('mapinfo').hidden,
+    }));
+    assert(beforeEscape.sheetOpen && beforeEscape.infoVisible,
+      `narrow screen did not preserve the open sheet and card: ${JSON.stringify(beforeEscape)}`);
+    await page.keyboard.press('Escape');
+    const afterEscape = await page.evaluate(() => ({
+      sheetOpen: document.getElementById('tracker').classList.contains('open'),
+      infoVisible: !document.getElementById('mapinfo').hidden,
+    }));
+    assert(!afterEscape.sheetOpen && !afterEscape.infoVisible,
+      `Escape left the scenery card over the mobile tracker: ${JSON.stringify(afterEscape)}`);
     const hut = await click(page, p.chores.hut);
     assert(hut.view.kind === 'chores' && !hut.info, `narrow chores hut opened ${JSON.stringify(hut)}`);
     await page.setViewportSize({ width: 1280, height: 900 });
