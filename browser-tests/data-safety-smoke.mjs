@@ -2,10 +2,10 @@
  * Data-safety regression smoke.
  *
  * Yuzhi keeps the only copy of the island in this browser. This checks the
- * real page: persistent storage is requested once the island holds data, a
- * backup reminder appears after 14 days without export and clears on export
- * or "later", Apple WebKit users get the Home Screen hint, and settings report
- * the current state.
+ * real page: persistent storage is requested once the island holds data,
+ * never-exported keepsake data prompts a first backup immediately, and later
+ * reminders recur 14 days after an export. "Later" snoozes the reminder;
+ * Apple WebKit users get the Home Screen hint, and settings report the state.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -84,8 +84,10 @@ try {
 
     await page.evaluate(() => window.yuzhi.actions.createProject(window.yuzhi.store, '数据安全验收'));
     await page.waitForFunction(() => window.__persistCalls === 1, undefined, { timeout });
+    await page.waitForFunction(() => !document.getElementById('safetyNotice').hidden, undefined, { timeout });
     const fresh = await notice(page);
-    assert(!fresh.visible, `a brand-new island is not due for a backup reminder: ${JSON.stringify(fresh)}`);
+    assert(fresh.visible && fresh.text.includes('还没有导出过备份') && fresh.go === '现在导出',
+      `never-exported keepsake data should prompt a first backup immediately: ${JSON.stringify(fresh)}`);
 
     await ageIsland(page, 20);
     const due = await notice(page);
