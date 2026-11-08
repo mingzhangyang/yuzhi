@@ -424,9 +424,11 @@ async function boot() {
       showInspection(renderer.browseScenery(step));
     }
   });
+  // The mobile bottom sheet consumes Escape in its own keydown handler.
+  // Clear the scenery card first, or it can cover the next tap on the map.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideInfo();
-  });
+  }, true);
 
   renderer.onTap = (hit, pt) => {
     $('tip').style.opacity = '0';
