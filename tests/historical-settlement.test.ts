@@ -5,10 +5,11 @@ import { makeStore } from './helpers';
 
 describe('YZ-F9 historical settlement', () => {
   it('settles an archived date without counting tasks from other dates', () => {
-    const h = makeStore('2026-11-10', '2026-11-01');
+    const h = makeStore('2026-11-01', '2026-11-01');
     const p = createProject(h.store, 'Village');
     const due = createTask(h.store, { title: 'Due on the fifth', projectId: p.id, scheduledFor: '2026-11-05' });
     const later = createTask(h.store, { title: 'Due tomorrow', projectId: p.id, scheduledFor: '2026-11-11' });
+    h.setToday('2026-11-10');
     h.store.put('days', { date: '2026-11-05', status: 'unrecorded' });
     const items = itemsForDay(h.store.data, '2026-11-05');
     expect(items.map((item) => item.id)).toContain(due.id);
