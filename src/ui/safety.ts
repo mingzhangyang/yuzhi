@@ -116,7 +116,22 @@ function prefersShareSheet(): boolean {
   }
 }
 
-export type BackupDelivery = 'shared' | 'downloaded' | 'cancelled';
+export type BackupDelivery = 'saved' | 'shared' | 'downloaded' | 'cancelled';
+
+/** Only a completed writable stream is proof of a saved backup. */
+type SavePicker = (options: {
+  suggestedName: string;
+  types: { description: string; accept: Record<string, string[]> }[];
+}) => Promise<FileSystemFileHandle>;
+
+function savePicker(): SavePicker | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+}
+
+function wasCancelled(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === 'AbortError';
+}
 
 /**
  * Hand a backup file to the user. On touch devices that can share files this
@@ -125,6 +140,30 @@ export type BackupDelivery = 'shared' | 'downloaded' | 'cancelled';
  * while the export click's user activation is still valid.
  */
 export async function deliverBackup(name: string, text: string): Promise<BackupDelivery> {
+  // Start the native picker before the click's user activation expires.
+  // A picker/write error is not silently downgraded to a download.
+  const pick = savePicker();
+  if (pick && !prefersShareSheet()) {
+    let handle: FileSystemFileHandle;
+    try {
+      handle = await pick({
+        suggestedName: name,
+        types: [{ description: 'JSON backup', accept: { 'application/json': ['.json'] } }],
+      });
+    } catch (error) {
+      if (wasCancelled(error)) return 'cancelled';
+      throw error;
+    }
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(text);
+      await writable.close();
+    } catch (error) {
+      await writable.abort().catch(() => {});
+      throw error;
+    }
+    return 'saved';
+  }
   if (prefersShareSheet() && typeof File !== 'undefined' && typeof navigator !== 'undefined' && navigator.canShare && navigator.share) {
     const file = new File([text], name, { type: 'application/json' });
     let shareable = false;
@@ -139,7 +178,7 @@ export async function deliverBackup(name: string, text: string): Promise<BackupD
         return 'shared';
       } catch (error) {
         // Closing the sheet is a choice, not a failure: nothing was saved.
-        if ((error as { name?: unknown } | null)?.name === 'AbortError') return 'cancelled';
+        if (wasCancelled(error)) return 'cancelled';
         // Anything else (permission, unsupported target): fall back to a download.
       }
     }
