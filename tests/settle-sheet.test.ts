@@ -10,7 +10,7 @@ class ElementStub extends EventTarget {
   textContent = '';
   style: Record<string, string> = {};
   classList = { add() {}, remove() {}, toggle() {} };
-  querySelector() { return null; }
+  querySelector(_selector: string): unknown { return null; }
   querySelectorAll() { return []; }
 }
 let box: ElementStub;
@@ -19,6 +19,9 @@ beforeEach(() => {
   box = new ElementStub();
   els.set('settleBox', box);
   vi.stubGlobal('window', { setTimeout: () => 0 });
+  // The Node test runner has no DOM globals. The fixture IDs are selector-safe;
+  // production still uses the browser's native CSS.escape implementation.
+  vi.stubGlobal('CSS', { escape: (value: string) => value });
   vi.stubGlobal('document', {
     addEventListener() {},
     body: { style: {} },
@@ -164,7 +167,7 @@ describe('YZ-F9 sheet regression coverage', () => {
     expect(box.innerHTML).toContain('value="2026-11-07"');
   });
 
-  it('preserves intermediate native date edits, validates on Enter, and applies on blur', () => {
+  it('preserves intermediate native date edits, validates on Enter, and applies only on explicit confirmation', () => {
     const { store, today } = makeStore('2026-11-10', '2026-11-01');
     const sheet = new SettleSheet(store, { brick() {}, onOpenChange() {} });
     sheet.open(today);
@@ -192,8 +195,57 @@ describe('YZ-F9 sheet regression coverage', () => {
 
     input.value = '2026-11-05';
     sheetEvent('change', input);
-    expect(box.innerHTML).toBe(html);
     sheetEvent('focusout', input);
+    // Valid blur leaves the current review visible and any pressed button alive.
+    expect(input.value).toBe('2026-11-05');
+    expect(box.innerHTML).toBe(html);
+
+    vi.spyOn(box, 'querySelector').mockImplementation((selector) =>
+      selector === '[data-history-date]' ? input : null);
+    click('[data-act]', { dataset: { act: 'apply-date' } });
+    expect(box.innerHTML).toContain('value="2026-11-05"');
+
+    sheet.open(today);
+    input.value = '2026-11-05';
+    sheetEvent('keydown', input, 'Enter');
     expect(box.innerHTML).toContain('value="2026-11-05"');
   });
+
+  it('preserves a day-tab first click after the date field loses focus', () => {
+    const { store, today } = makeStore('2026-11-10', '2026-11-01');
+    const sheet = new SettleSheet(store, { brick() {}, onOpenChange() {} });
+    sheet.open('2026-11-05');
+    const before = box.innerHTML;
+    const input = {
+      value: '2026-11-07',
+      matches: (selector: string) => selector === '[data-history-date]',
+      checkValidity: () => true,
+    };
+    sheetEvent('focusout', input);
+    // The click target must not be replaced between pointerdown and click.
+    expect(box.innerHTML).toBe(before);
+    click('[data-day]', { dataset: { day: today } });
+    expect(box.innerHTML).toContain('value="2026-11-10"');
+  });
+
+  it('commits the visible day rather than an un-applied historical date after blur', () => {
+    const { store, today } = makeStore('2026-11-10', '2026-11-01');
+    const p = A.createProject(store, 'Visible village');
+    const task = A.createTask(store, { title: 'Visible work', projectId: p.id, scheduledFor: today });
+    const sheet = new SettleSheet(store, { brick() {}, onOpenChange() {} });
+    sheet.open(today);
+    const item = { dataset: { key: `task|${task.id}`, project: '' } };
+    click('[data-set]', { dataset: { set: 'done' }, closest: () => item });
+    const before = box.innerHTML;
+    sheetEvent('focusout', {
+      value: '2026-11-05',
+      matches: (selector: string) => selector === '[data-history-date]',
+      checkValidity: () => true,
+    });
+    expect(box.innerHTML).toBe(before);
+    click('[data-act]', { dataset: { act: 'commit' } });
+    expect(store.data.entries.find((entry) => entry.itemId === task.id)?.date).toBe(today);
+    expect(store.data.days.find((day) => day.date === '2026-11-05')).toBeUndefined();
+  });
+
 });

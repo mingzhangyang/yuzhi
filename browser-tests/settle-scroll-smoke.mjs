@@ -154,6 +154,41 @@ try {
   assert(back.rows >= 55 && back.top === 0,
     `switching back to today failed to reset scroll: ${JSON.stringify(back)}`);
 
+
+  // The date input should not replace a pressed tab or Commit button during
+  // focusout. Use physical mouse clicks, not locator.click() auto-retries,
+  // to reproduce the browser pointerdown -> blur -> pointerup -> click order.
+  const historyPicker = page.locator('#settle [data-history-date]');
+  const physicalClick = async (locator) => {
+    await locator.scrollIntoViewIfNeeded();
+    const rect = await locator.boundingBox();
+    assert(rect && rect.width > 0 && rect.height > 0, 'historical review action is not visible');
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  };
+  await historyPicker.fill(prior);
+  await physicalClick(page.locator(`#settle [data-day="${today}"]`));
+  const afterTabClick = await page.locator('#settle [data-history-date]').inputValue();
+  assert(afterTabClick === today,
+    `date input blur swallowed the day-tab click: ${JSON.stringify({ today, prior, afterTabClick })}`);
+
+  // A separate explicit action applies a typed date. The first click must
+  // work even though the input is focused and must blur before this click.
+  await historyPicker.fill(prior);
+  await physicalClick(page.locator('#settle [data-act="apply-date"]'));
+  const afterApplyClick = await page.locator('#settle [data-history-date]').inputValue();
+  assert(afterApplyClick === prior, `the first date-apply click was lost: ${afterApplyClick}`);
+
+  // Editing another date without applying it must not silently settle that
+  // unseen day when the user clicks the visible review's Commit button.
+  await historyPicker.fill(today);
+  await physicalClick(page.locator('#settle [data-act="commit"]'));
+  const savedDay = await page.evaluate(({ prior, today }) => ({
+    prior: window.yuzhi.store.data.days.find((day) => day.date === prior)?.status,
+    today: window.yuzhi.store.data.days.find((day) => day.date === today)?.status,
+  }), { prior, today });
+  assert(savedDay.prior === 'settled' && savedDay.today !== 'settled',
+    `Commit after date-input blur targeted the wrong review day: ${JSON.stringify(savedDay)}`);
+
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.getElementById('settle').hidden, undefined, { timeout });
   await context.close();

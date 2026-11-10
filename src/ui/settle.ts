@@ -197,7 +197,10 @@ export class SettleSheet {
         <div class="kick"><span>${esc(t(this.date < today ? 'settle.catchUpKick' : 'settle.eveningKick'))}</span><button class="x" data-act="close" aria-label="${esc(t('common.close'))}">×</button></div>
         <h2 id="settleT">${fmtDay(this.date)} ${weekday(this.date)}${settled ? ` <small style="font-size:12px;color:var(--faint)">${esc(t('settle.reviewed'))}</small>` : ''}</h2>
         ${days.length > 1 ? `<div class="daytabs">${tabs}</div>` : ''}
-        <label class="settle-date-label">${esc(t('settle.chooseDate'))} <input type="date" data-history-date aria-label="${esc(t('settle.chooseDate'))}" min="${esc(s.data.settings.firstDay)}" max="${esc(today)}" value="${esc(this.date)}"></label>
+        <div class="settle-date-controls">
+          <label class="settle-date-label">${esc(t('settle.chooseDate'))} <input type="date" data-history-date aria-label="${esc(t('settle.chooseDate'))}" min="${esc(s.data.settings.firstDay)}" max="${esc(today)}" value="${esc(this.date)}"></label>
+          <button type="button" class="btn small" data-act="apply-date">${esc(t('settle.applyDate'))}</button>
+        </div>
       </div>
       <div class="sbar"><span>${esc(t('settle.progress', { count: items.length, confirmed }))}</span>${items.length ? `<button class="btn small" data-act="all">${esc(t('settle.allDone'))}</button>` : ''}</div>
       <div class="slist">${cards || `<div class="sempty">${esc(t('settle.empty'))}<br>${esc(t(extra.length ? 'settle.emptyExtra' : 'settle.emptyQuiet'))}</div>`}${extraSel}</div>
@@ -338,6 +341,10 @@ export class SettleSheet {
     }
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'close') this.close();
+    else if (act === 'apply-date') {
+      const input = this.box.querySelector<HTMLInputElement>('[data-history-date]');
+      if (input) this.applyHistoryDate(input);
+    }
     else if (act === 'all') this.allDone();
     else if (act === 'commit') this.commit();
   }
@@ -357,17 +364,16 @@ export class SettleSheet {
     if (el?.dataset.project) this.hooks.brick(el.dataset.project, el.querySelector('.scard')!.getBoundingClientRect());
   }
 
-  /** Only commit a fully edited, in-range date; never accept partial years. */
-  private applyHistoryDate(input: HTMLInputElement, onEnter: boolean) {
+  /**
+   * Applying a historical date replaces the whole sheet DOM. Do this only
+   * from a deliberate button click or Enter, NEVER during focusout: blur
+   * happens in the middle of pointerdown on another button, before its click.
+   * That old DOM removal silently swallowed day-tab and Commit clicks.
+   */
+  private applyHistoryDate(input: HTMLInputElement) {
     if (!this.validDate(input.value) || !input.checkValidity()) {
-      if (onEnter) {
-        input.reportValidity();
-        input.focus();
-      } else {
-        // Leaving an invalid field restores the current day without touching
-        // the review or throwing away edits while the field is still active.
-        input.value = this.date;
-      }
+      input.reportValidity();
+      input.focus();
       return;
     }
     if (input.value === this.date) return;
@@ -377,14 +383,18 @@ export class SettleSheet {
 
   private onFocusOut(e: FocusEvent) {
     const input = e.target as HTMLInputElement;
-    if (input.matches('[data-history-date]')) this.applyHistoryDate(input, false);
+    if (!input.matches('[data-history-date]')) return;
+    // Discard an invalid partial year on blur. A valid but unapplied choice
+    // remains in the field until "View date" or Enter. Never mutate the
+    // rendered review day underneath a button the user is about to click.
+    if (!this.validDate(input.value) || !input.checkValidity()) input.value = this.date;
   }
 
   private onKeyDown(e: KeyboardEvent) {
     const input = e.target as HTMLInputElement;
     if (e.key !== 'Enter' || !input.matches('[data-history-date]')) return;
     e.preventDefault();
-    this.applyHistoryDate(input, true);
+    this.applyHistoryDate(input);
   }
 
   /** 「全部做了」：一次确认全部（已单独标过的例外保留） */
