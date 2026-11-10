@@ -709,7 +709,10 @@ async function boot() {
       if (session.revision !== revision || store.isReadOnly) return;
       tracker.open({ kind: 'overview' }, false);
       applyTheme();
-      daily();
+      // Restoring a snapshot is not a time-passage event. Running daily() here
+      // would append stage and archive chronicle entries to the imported history.
+      // Ordinary writer activation and subsequent day changes still reconcile
+      // elapsed time, independently of the restore transaction.
       toast(t('main.importDone'));
     } catch (err) {
       if (session.revision !== revision || store.isReadOnly) return;
