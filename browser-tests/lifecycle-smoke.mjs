@@ -41,6 +41,9 @@ try {
     const context = await browser.newContext({ locale: 'zh-CN', acceptDownloads: true });
     try {
       const page = await context.newPage();
+      // This recovery scenario explicitly exercises the download fallback,
+      // not the native picker (which cannot be operated in headless Chrome).
+      await page.addInitScript(() => { window.showSaveFilePicker = undefined; });
       await page.addInitScript(() => {
         if (sessionStorage.getItem('fail-next-project-read') !== 'yes') return;
         sessionStorage.removeItem('fail-next-project-read');

@@ -59,10 +59,11 @@ async function exportSettlementSnapshot(existing?: SettlementSnapshot) {
   });
   if (!ok) return;
   try {
-    if (await deliverBackup(`yuzhi-settlement-${snapshot.date}.json`, snapshot.json) === 'cancelled') return;
+    const delivery = await deliverBackup(`yuzhi-settlement-${snapshot.date}.json`, snapshot.json);
+    if (delivery === 'cancelled') return;
     // This historical snapshot may not include newer data, so it must not
     // reset the reminder for exporting the current island.
-    toast(t('safety.snapshotExportDone'));
+    toast(t(delivery === 'saved' ? 'safety.snapshotExportDone' : 'safety.exportHandoff'));
   } catch {
     toast(t('main.exportFailed'), true);
   }
@@ -664,11 +665,27 @@ async function boot() {
         continue;
       }
       const today = store.today();
+      let delivery;
       try {
-        if (await deliverBackup(`yuzhi-backup-${today}.json`, backup) === 'cancelled') return;
+        delivery = await deliverBackup(`yuzhi-backup-${today}.json`, backup);
+        if (delivery === 'cancelled') return;
       } catch {
         toast(t('main.exportFailed'), true);
         return;
+      }
+      if (delivery !== 'saved') {
+        // Download/share APIs only confirm handoff, never that a file landed.
+        // Ask the user to check the destination before clearing reminders.
+        const confirmed = await confirmModal({
+          title: t('safety.verifyTitle'),
+          text: t('safety.verifyBody'),
+          ok: t('safety.verifyOk'),
+          readOnlySafe: true,
+        });
+        if (!confirmed) {
+          toast(t('safety.exportHandoff'));
+          return;
+        }
       }
       markBackupExported(today);
       safetyBar.sync();
