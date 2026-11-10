@@ -126,7 +126,9 @@ type SavePicker = (options: {
 
 function savePicker(): SavePicker | undefined {
   if (typeof window === 'undefined') return undefined;
-  return (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+  // WebIDL window methods can reject an unbound receiver (Illegal invocation).
+  const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+  return typeof picker === 'function' ? picker.bind(window) : undefined;
 }
 
 function wasCancelled(error: unknown): boolean {

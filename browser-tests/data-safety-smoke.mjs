@@ -69,6 +69,32 @@ try {
   {
     const context = await browser.newContext({ locale: 'zh-CN', acceptDownloads: true });
     await context.addInitScript(countPersistRequests);
+    // Headless Chrome cannot interact with the native picker, so emulate the
+    // file handle while keeping the app's real export and reminder behavior.
+    await context.addInitScript(() => {
+      window.__backupPicker = { mode: 'success', attempts: [], finishClose: null };
+      window.showSaveFilePicker = async function ({ suggestedName }) {
+        if (this !== window) throw new Error('file picker called without Window receiver');
+        const mode = window.__backupPicker.mode;
+        if (mode === 'cancel') throw new DOMException('Picker cancelled', 'AbortError');
+        const entry = { name: suggestedName, text: '', closeStarted: false, closed: false, aborted: false };
+        window.__backupPicker.attempts.push(entry);
+        return {
+          createWritable: async () => ({
+            write: async (text) => { entry.text = String(text); },
+            close: async () => {
+              entry.closeStarted = true;
+              if (mode === 'close-error') throw new Error('Injected close failure');
+              if (mode === 'pending') {
+                await new Promise((resolve) => { window.__backupPicker.finishClose = resolve; });
+              }
+              entry.closed = true;
+            },
+            abort: async () => { entry.aborted = true; },
+          }),
+        };
+      };
+    });
     const page = await context.newPage();
     // An installed Home Screen / Dock app starts empty; restoring a backup is
     // offered right on the welcome screen.
@@ -94,17 +120,49 @@ try {
     assert(due.visible && due.text.includes('还没有导出过备份') && due.go === '现在导出' && due.later === '稍后',
       `backup reminder missing after 20 days: ${JSON.stringify(due)}`);
 
-    // Export from the notice goes through the normal privacy confirmation.
-    await page.locator('#safetyGo').click();
-    await page.waitForFunction(() => !document.getElementById('mdl').hidden, undefined, { timeout });
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout }),
-      page.locator('#mdl [data-ok]').click(),
-    ]);
-    assert(/^yuzhi-backup-\d{4}-\d{2}-\d{2}\.json$/.test(download.suggestedFilename()), `unexpected backup name ${download.suggestedFilename()}`);
+    // The real privacy prompt precedes the picker; only a closed writable
+    // stream may update lastBackup. Cancelling or failing must keep reminders.
+    const exportFromNotice = async () => {
+      await page.locator('#safetyGo').click();
+      await page.waitForFunction(() => !document.getElementById('mdl').hidden, undefined, { timeout });
+      await page.locator('#mdl [data-ok]').click();
+    };
+
+    await page.evaluate(() => { window.__backupPicker.mode = 'cancel'; });
+    await exportFromNotice();
+    const cancelledPicker = await notice(page);
+    assert(cancelledPicker.visible && !cancelledPicker.state.lastBackup,
+      'cancelling the picker counted as a backup: ' + JSON.stringify(cancelledPicker));
+
+    await page.evaluate(() => { window.__backupPicker.mode = 'close-error'; });
+    await exportFromNotice();
+    await page.waitForFunction(() => window.__backupPicker.attempts.some((entry) => entry.aborted), undefined, { timeout });
+    const failedPicker = await notice(page);
+    assert(failedPicker.visible && !failedPicker.state.lastBackup,
+      'a failed file close counted as a backup: ' + JSON.stringify(failedPicker));
+
+    await page.evaluate(() => { window.__backupPicker.mode = 'pending'; });
+    await exportFromNotice();
+    await page.waitForFunction(() => window.__backupPicker.attempts.at(-1)?.closeStarted, undefined, { timeout });
+    const beforeClose = await notice(page);
+    assert(beforeClose.visible && !beforeClose.state.lastBackup,
+      'a still-open file stream cleared the backup reminder: ' + JSON.stringify(beforeClose));
+    await page.evaluate(() => {
+      if (!window.__backupPicker.finishClose) throw new Error('picker close was never awaited');
+      window.__backupPicker.finishClose();
+    });
+    await page.waitForFunction(() =>
+      JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}').lastBackup === window.yuzhi.store.today(),
+    undefined, { timeout });
+    const saved = await page.evaluate(() => window.__backupPicker.attempts.at(-1));
+    const savedBackup = JSON.parse(saved.text);
+    assert(/^yuzhi-backup-\d{4}-\d{2}-\d{2}\.json$/.test(saved.name)
+      && saved.closed && !saved.aborted && savedBackup.format === 'yuzhi-backup' && savedBackup.projects.length === 1,
+    'the picker did not close a valid backup: ' + JSON.stringify(saved));
     const exported = await notice(page);
     const today = await page.evaluate(() => window.yuzhi.store.today());
-    assert(!exported.visible && exported.state.lastBackup === today, `export did not clear the reminder: ${JSON.stringify(exported)}`);
+    assert(!exported.visible && exported.state.lastBackup === today,
+      'the completed save did not clear the reminder: ' + JSON.stringify(exported));
 
     // Settings explain this browser's state and offer an export.
     await page.locator('#moreBtn').click();
@@ -127,6 +185,24 @@ try {
     await page.evaluate(() => localStorage.removeItem('yuzhi:data-safety'));
     await openApp(page);
     assert((await notice(page)).visible, 'reminder did not return after the export record was cleared');
+    // Without a native picker, a browser download is an unverified handoff.
+    await page.evaluate(() => { window.showSaveFilePicker = undefined; });
+    await page.locator('#safetyGo').click();
+    await page.waitForFunction(() => !document.getElementById('mdl').hidden, undefined, { timeout });
+    const [fallbackDownload] = await Promise.all([
+      page.waitForEvent('download', { timeout }),
+      page.locator('#mdl [data-ok]').click(),
+    ]);
+    assert(/^yuzhi-backup-\d{4}-\d{2}-\d{2}\.json$/.test(fallbackDownload.suggestedFilename()),
+      'unexpected fallback download name: ' + fallbackDownload.suggestedFilename());
+    await page.waitForFunction(() =>
+      document.getElementById('mdlT')?.textContent === '确认备份文件已保存', undefined, { timeout });
+    assert(!(await notice(page)).state.lastBackup, 'unverified download cleared the reminder');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
+    const unconfirmed = await notice(page);
+    assert(unconfirmed.visible && !unconfirmed.state.lastBackup,
+      'dismissing handoff confirmation counted as a backup: ' + JSON.stringify(unconfirmed));
     await page.locator('#safetyLater').click();
     const snoozed = await notice(page);
     assert(!snoozed.visible && snoozed.state.snoozedUntil > today, `later did not snooze: ${JSON.stringify(snoozed)}`);
@@ -170,31 +246,53 @@ try {
     assert(!quiet.visible && quiet.state.snoozedUntil && !quiet.state.lastBackup,
       `later did not snooze the first-backup reminder: ${JSON.stringify(quiet)}`);
 
-    // On a phone, export hands the file to the share sheet ("Save to Files").
+    // A share-sheet result only confirms handoff. Cancelling, dismissing the
+    // verification prompt, and explicitly confirming are distinct outcomes.
     const exportFromMenu = async () => {
       await page.locator('#moreBtn').click();
       await page.locator('#menu [data-m="export"]').click();
       await page.waitForFunction(() => !document.getElementById('mdl').hidden, undefined, { timeout });
       await page.locator('#mdl [data-ok]').click();
-      await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
     };
+    const waitForVerification = () => page.waitForFunction(() =>
+      document.getElementById('mdlT')?.textContent === '确认备份文件已保存', undefined, { timeout });
     const today = await page.evaluate(() => window.yuzhi.store.today());
+
     await page.evaluate(() => { window.__shareMode = 'cancel'; });
     await exportFromMenu();
-    // The share sheet resolves asynchronously; wait for it before judging.
     await page.waitForFunction(() => window.__shared.length === 1 && window.__shared[0].done, undefined, { timeout });
-    const cancelled = await page.evaluate(() => ({ shared: window.__shared.length, state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}') }));
-    assert(cancelled.shared === 1 && !cancelled.state.lastBackup, `a cancelled share counted as a backup: ${JSON.stringify(cancelled)}`);
+    const cancelled = await page.evaluate(() => ({
+      shared: window.__shared.length,
+      state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}'),
+    }));
+    assert(cancelled.shared === 1 && !cancelled.state.lastBackup,
+      'a cancelled share counted as a backup: ' + JSON.stringify(cancelled));
 
     await page.evaluate(() => { window.__shareMode = 'save'; });
     await exportFromMenu();
-    await page.waitForFunction((today) => window.__shared.length === 2 && window.__shared[1].done
-      && JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}').lastBackup === today, today, { timeout }).catch(() => {});
-    const shared = await page.evaluate(() => ({ last: window.__shared.at(-1), state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}') }));
+    await page.waitForFunction(() => window.__shared.length === 2 && window.__shared[1].done, undefined, { timeout });
+    await waitForVerification();
+    assert(!(await notice(page)).state.lastBackup, 'share handoff cleared the backup reminder before confirmation');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.getElementById('mdl').hidden, undefined, { timeout });
+    assert(!(await notice(page)).state.lastBackup, 'dismissing share verification counted as a backup');
+
+    await exportFromMenu();
+    await page.waitForFunction(() => window.__shared.length === 3 && window.__shared[2].done, undefined, { timeout });
+    await waitForVerification();
+    assert(!(await notice(page)).state.lastBackup, 'unconfirmed share cleared the backup reminder');
+    await page.locator('#mdl [data-ok]').click();
+    await page.waitForFunction((today) =>
+      JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}').lastBackup === today,
+    today, { timeout });
+    const shared = await page.evaluate(() => ({
+      last: window.__shared.at(-1),
+      state: JSON.parse(localStorage.getItem('yuzhi:data-safety') ?? '{}'),
+    }));
     const sharedBackup = JSON.parse(shared.last.text);
-    assert(shared.last.name === `yuzhi-backup-${today}.json` && shared.last.type === 'application/json'
+    assert(shared.last.name === 'yuzhi-backup-' + today + '.json' && shared.last.type === 'application/json'
       && sharedBackup.format === 'yuzhi-backup' && sharedBackup.projects.length === 1 && shared.state.lastBackup === today,
-      `share-sheet export failed: ${JSON.stringify({ name: shared.last.name, state: shared.state })}`);
+      'confirmed share-sheet export failed: ' + JSON.stringify({ name: shared.last.name, state: shared.state }));
 
     // Export clears the backup snooze. The Home Screen hint must still be
     // shown independently, with an export shortcut for moving the island.
