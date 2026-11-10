@@ -714,6 +714,8 @@ async function boot() {
       // would append stage and archive chronicle entries to the imported history.
       // Ordinary writer activation and subsequent day changes still reconcile
       // elapsed time, independently of the restore transaction.
+      // Back up the restored snapshot without mutating its historical facts.
+      void autoBackup.run('daily');
       toast(t('main.importDone'));
     } catch (err) {
       if (session.revision !== revision || store.isReadOnly) return;
