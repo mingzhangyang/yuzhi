@@ -1,5 +1,6 @@
 import './styles.css';
-import { exportBackup, parseBackup } from './db';
+import { exportBackup } from './db';
+import { importBackupFlow } from './restore-backup';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
 import { MARKER } from './island/render/style';
@@ -696,25 +697,26 @@ async function boot() {
 
   /* ---------------- 导入备份 ---------------- */
   async function importFlow() {
-    const context = store.captureWriteContext();
-    const revision = session.revision;
-    const f = await pickFile($('fileBackup') as HTMLInputElement);
-    if (!f || !context.isCurrent()) return;
-    try {
-      const d = parseBackup(await f.text());
-      if (!context.isCurrent()) return;
-      const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
-      if (!ok || !context.isCurrent()) return;
-      await store.replaceAll(d);
-      if (session.revision !== revision || store.isReadOnly) return;
-      tracker.open({ kind: 'overview' }, false);
-      applyTheme();
-      daily();
-      toast(t('main.importDone'));
-    } catch (err) {
-      if (session.revision !== revision || store.isReadOnly) return;
-      toast(err instanceof Error ? err.message : String(err), true);
-    }
+    // All steps after the file picker, including successful post-import work,
+    // live in the exercised backup import path. Never call daily() on restore.
+    await importBackupFlow({
+      store,
+      session,
+      pickFile: () => pickFile($('fileBackup') as HTMLInputElement),
+      confirm: (d) => confirmModal({
+        title: t('main.importTitle'),
+        text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }),
+        ok: t('main.importOk'),
+        danger: true,
+      }),
+      onRestored: () => {
+        tracker.open({ kind: 'overview' }, false);
+        applyTheme();
+      },
+      scheduleBackup: () => { void autoBackup.run('daily'); },
+      onSuccess: () => toast(t('main.importDone')),
+      onError: (err) => toast(err instanceof Error ? err.message : String(err), true),
+    });
   }
 
   /* ---------------- 顶部按钮 ---------------- */
