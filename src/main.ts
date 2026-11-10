@@ -1,5 +1,6 @@
 import './styles.css';
 import { exportBackup, parseBackup } from './db';
+import { restoreBackupSnapshot } from './restore-backup';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
 import { MARKER } from './island/render/style';
@@ -705,7 +706,7 @@ async function boot() {
       if (!context.isCurrent()) return;
       const ok = await confirmModal({ title: t('main.importTitle'), text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }), ok: t('main.importOk'), danger: true });
       if (!ok || !context.isCurrent()) return;
-      await store.replaceAll(d);
+      await restoreBackupSnapshot(store, d);
       if (session.revision !== revision || store.isReadOnly) return;
       tracker.open({ kind: 'overview' }, false);
       applyTheme();
