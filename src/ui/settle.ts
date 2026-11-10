@@ -9,7 +9,8 @@ import { $, esc, toast } from './dom';
 import { roofOf } from './scene';
 import * as A from '../actions';
 import { itemsForDay, pendingDays, type SettleItem } from '../logic/days';
-import { fmtDay, relDay, weekday } from '../lib/date';
+import { taskStates } from '../logic/read-model';
+import { fmtDay, isPlausibleDate, relDay, weekday } from '../lib/date';
 import { t, type MessageKey } from '../i18n';
 import { isTopLayer, popLayer, pushLayer } from './layer';
 import { ICON } from './icons';
@@ -51,6 +52,8 @@ export class SettleSheet {
   constructor(private store: Store, private hooks: SettleHooks) {
     this.box.addEventListener('click', (e) => this.onClick(e));
     this.box.addEventListener('change', (e) => this.onChange(e));
+    this.box.addEventListener('focusout', (e) => this.onFocusOut(e));
+    this.box.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.box.addEventListener('pointerdown', (e) => this.onDown(e));
     this.box.addEventListener('pointermove', (e) => this.onMove(e));
     this.box.addEventListener('pointerup', (e) => this.onUp(e));
@@ -73,12 +76,22 @@ export class SettleSheet {
 
   /** 可以结算的日子：还没结算的过去的日子（最早的在前）+ 今天 */
   days(): ISODate[] {
-    return [...pendingDays(this.store.data, this.store.today()), this.store.today()];
+    const dates = new Set([...pendingDays(this.store.data, this.store.today()), this.store.today()]);
+    // Keep the explicitly selected historical date visible even if it was
+    // archived or already settled; automatic catch-up tabs remain unchanged.
+    if (this.validDate(this.date)) dates.add(this.date);
+    return [...dates].sort();
+  }
+
+  private validDate(date: ISODate): boolean {
+    return isPlausibleDate(date) && date >= this.store.data.settings.firstDay && date <= this.store.today();
   }
 
   open(date?: ISODate) {
-    const days = this.days();
-    this.date = date && days.includes(date) ? date : days[0];
+    // The normal review action should never inherit a previously selected
+    // archived/settled date; only an explicit open(date) uses history.
+    const firstPending = pendingDays(this.store.data, this.store.today())[0];
+    this.date = date && this.validDate(date) ? date : (firstPending ?? this.store.today());
     const opening = !this.isOpen();
     $('settle').hidden = false;
     pushLayer($('settle'));
@@ -115,14 +128,16 @@ export class SettleSheet {
     return d;
   }
 
-  private items(): SettleItem[] {
+  private items(historicalTasks = taskStates(this.store.data, this.date)): SettleItem[] {
     const base = itemsForDay(this.store.data, this.date);
     const have = new Set(base.map((it) => it.key));
+    const byId = new Map(historicalTasks.map((task) => [task.id, task] as const));
     for (const id of this.pulled.get(this.date) ?? []) {
-      const t = this.store.task(id);
+      const task = byId.get(id);
       const key = `task|${id}`;
-      if (!t || t.status !== 'open' || !t.projectId || have.has(key)) continue;
-      base.push({ key, type: 'task', id, title: t.title, projectId: t.projectId });
+      if (!task || task.status !== 'open' || !task.projectId || have.has(key)) continue;
+      // Snapshot the village as it was on the reviewed day, not today.
+      base.push({ key, type: 'task', id, title: task.title, projectId: task.projectId });
     }
     return base;
   }
@@ -133,7 +148,8 @@ export class SettleSheet {
     const today = s.today();
     const days = this.days();
     if (!days.includes(this.date)) this.date = days[0];
-    const items = this.items();
+    const historicalTasks = taskStates(s.data, this.date);
+    const items = this.items(historicalTasks);
     const d = this.draft();
     const settled = s.data.days.find((x) => x.date === this.date)?.status === 'settled';
     const confirmed = items.filter((it) => d.has(it.key)).length;
@@ -141,7 +157,17 @@ export class SettleSheet {
 
     const tabs = days.map((x) => `<button type="button" data-day="${x}" class="${x === this.date ? 'on' : ''}" aria-pressed="${x === this.date}">${esc(relDay(x, today))}${x < today ? `<small class="fog-tag">${esc(t('settle.fogTag'))}</small>` : ''}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
-    const extra = s.tasks().filter((t) => t.status === 'open' && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
+    const visibleKeys = new Set(items.map((item) => item.key));
+    const extra = historicalTasks.filter((task) =>
+      task.status === 'open' &&
+      task.projectId &&
+      // A village closed *after* this date was still valid historical work.
+      !!s.project(task.projectId) &&
+      s.project(task.projectId)!.createdAt <= this.date &&
+      task.scheduledFor !== this.date &&
+      !visibleKeys.has(`task|${task.id}`) &&
+      !this.pulled.get(this.date)?.has(task.id)
+    ).slice(0, 80);
     // Tasks planned for a later day stay available (doing one early is a real
     // thing to record) but are grouped apart and labelled with their planned
     // day, so tomorrow's work is not counted for this day by accident (YZ-F5).
@@ -171,6 +197,10 @@ export class SettleSheet {
         <div class="kick"><span>${esc(t(this.date < today ? 'settle.catchUpKick' : 'settle.eveningKick'))}</span><button class="x" data-act="close" aria-label="${esc(t('common.close'))}">×</button></div>
         <h2 id="settleT">${fmtDay(this.date)} ${weekday(this.date)}${settled ? ` <small style="font-size:12px;color:var(--faint)">${esc(t('settle.reviewed'))}</small>` : ''}</h2>
         ${days.length > 1 ? `<div class="daytabs">${tabs}</div>` : ''}
+        <div class="settle-date-controls">
+          <label class="settle-date-label">${esc(t('settle.chooseDate'))} <input type="date" data-history-date aria-label="${esc(t('settle.chooseDate'))}" min="${esc(s.data.settings.firstDay)}" max="${esc(today)}" value="${esc(this.date)}"></label>
+          <button type="button" class="btn small" data-act="apply-date">${esc(t('settle.applyDate'))}</button>
+        </div>
       </div>
       <div class="sbar"><span>${esc(t('settle.progress', { count: items.length, confirmed }))}</span>${items.length ? `<button class="btn small" data-act="all">${esc(t('settle.allDone'))}</button>` : ''}</div>
       <div class="slist">${cards || `<div class="sempty">${esc(t('settle.empty'))}<br>${esc(t(extra.length ? 'settle.emptyExtra' : 'settle.emptyQuiet'))}</div>`}${extraSel}</div>
@@ -185,7 +215,7 @@ export class SettleSheet {
     if (typeof HTMLElement === 'undefined') return null;
     const active = document.activeElement;
     if (!(active instanceof HTMLElement) || !this.box.contains(active)) return null;
-    const attr = ['data-set', 'data-reason', 'data-day', 'data-act', 'data-pull'].find((name) => active.hasAttribute(name));
+    const attr = ['data-set', 'data-reason', 'data-day', 'data-act', 'data-pull', 'data-history-date'].find((name) => active.hasAttribute(name));
     if (!attr) return null;
     const own = `[${attr}="${CSS.escape(active.getAttribute(attr) ?? '')}"]`;
     const item = active.closest<HTMLElement>('.sitem');
@@ -311,12 +341,19 @@ export class SettleSheet {
     }
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'close') this.close();
+    else if (act === 'apply-date') {
+      const input = this.box.querySelector<HTMLInputElement>('[data-history-date]');
+      if (input) this.applyHistoryDate(input);
+    }
     else if (act === 'all') this.allDone();
     else if (act === 'commit') this.commit();
   }
 
   private onChange(e: Event) {
     const sel = e.target as HTMLSelectElement;
+    // A native date input fires change while a year is being typed in parts.
+    // Do not tear it down until the user leaves the field or presses Enter.
+    if (sel.matches('[data-history-date]')) return;
     if (!sel.matches('[data-pull]') || !sel.value) return;
     const id = sel.value;
     if (!this.pulled.has(this.date)) this.pulled.set(this.date, new Set());
@@ -325,6 +362,39 @@ export class SettleSheet {
     this.render();
     const el = this.box.querySelector<HTMLElement>(`.sitem[data-key="task|${CSS.escape(id)}"]`);
     if (el?.dataset.project) this.hooks.brick(el.dataset.project, el.querySelector('.scard')!.getBoundingClientRect());
+  }
+
+  /**
+   * Applying a historical date replaces the whole sheet DOM. Do this only
+   * from a deliberate button click or Enter, NEVER during focusout: blur
+   * happens in the middle of pointerdown on another button, before its click.
+   * That old DOM removal silently swallowed day-tab and Commit clicks.
+   */
+  private applyHistoryDate(input: HTMLInputElement) {
+    if (!this.validDate(input.value) || !input.checkValidity()) {
+      input.reportValidity();
+      input.focus();
+      return;
+    }
+    if (input.value === this.date) return;
+    this.date = input.value;
+    this.render();
+  }
+
+  private onFocusOut(e: FocusEvent) {
+    const input = e.target as HTMLInputElement;
+    if (!input.matches('[data-history-date]')) return;
+    // Discard an invalid partial year on blur. A valid but unapplied choice
+    // remains in the field until "View date" or Enter. Never mutate the
+    // rendered review day underneath a button the user is about to click.
+    if (!this.validDate(input.value) || !input.checkValidity()) input.value = this.date;
+  }
+
+  private onKeyDown(e: KeyboardEvent) {
+    const input = e.target as HTMLInputElement;
+    if (e.key !== 'Enter' || !input.matches('[data-history-date]')) return;
+    e.preventDefault();
+    this.applyHistoryDate(input);
   }
 
   /** 「全部做了」：一次确认全部（已单独标过的例外保留） */
@@ -348,14 +418,11 @@ export class SettleSheet {
   private commit() {
     const date = this.date;
     const d = this.draft();
-    // Preserve the rendered pulled items before pullIntoDay writes a
-    // today-dated reschedule. Historical itemsForDay(date) intentionally
-    // cannot see that future-semantic operation.
+    // Explicitly pulled work belongs to the selected settlement date.
+    // Never reschedule the task merely because the user recorded it here:
+    // scheduledFor (plan) and the settlement entry date (actual) are distinct.
     const pulledItems = this.items().filter((item) => this.pulled.get(date)?.has(item.id) && d.has(item.key));
-    const text = this.store.batch(() => {
-      for (const id of this.pulled.get(date) ?? []) if (d.has(`task|${id}`)) A.pullIntoDay(this.store, id, date);
-      return A.settleDay(this.store, date, d, pulledItems);
-    });
+    const text = A.settleDay(this.store, date, d, pulledItems);
     this.drafts.delete(date);
     this.pulled.delete(date);
     toast(text);

@@ -265,6 +265,10 @@ h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(21px, 
 .daytabs button { flex: none; border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 3px 11px; font-size: 12px; cursor: pointer; color: var(--muted); }
 .daytabs button.on { border-color: var(--dusk); color: var(--dusk); background: var(--dusk-soft); font-weight: 600; }
 .daytabs .fog-tag { margin-left: 4px; font-size: 10.5px; color: var(--faint); }
+.settle-date-controls { display: flex; gap: 8px; align-items: end; margin-top: 8px; }
+.settle-date-label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.settle-date-label input { display: block; width: 100%; min-height: 40px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+.settle-date-controls .btn { min-height: 40px; flex: none; }
 .sbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 18px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .slist { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 14px 6px; -webkit-overflow-scrolling: touch; }
 .sitem { margin-bottom: 8px; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
