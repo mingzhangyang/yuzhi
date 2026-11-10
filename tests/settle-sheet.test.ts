@@ -90,3 +90,110 @@ describe('YZ-F5 结算时「还做了别的事」', () => {
     expect(html.slice(ahead)).toContain('回复帖子 · 屿志推广 · 原定明天');
   });
 });
+
+/** Exercise delegated sheet events without depending on a browser layout. */
+function sheetEvent(type: string, target: object, key?: string) {
+  const event = new Event(type, { cancelable: true });
+  Object.defineProperty(event, 'target', { value: target });
+  if (key) Object.defineProperty(event, 'key', { value: key });
+  box.dispatchEvent(event);
+  return event;
+}
+
+describe('YZ-F9 sheet regression coverage', () => {
+  it('uses historical task eligibility and ownership when recording pulled work', () => {
+    const h = makeStore('2026-11-01', '2026-11-01');
+    const villageA = A.createProject(h.store, 'Village A');
+    const villageB = A.createProject(h.store, 'Village B');
+    const closedVillage = A.createProject(h.store, 'Later closed');
+    const moved = A.createTask(h.store, { title: 'Moved early', projectId: villageA.id, scheduledFor: '2026-11-12' });
+    const completed = A.createTask(h.store, { title: 'Completed later', projectId: villageA.id, scheduledFor: '2026-11-13' });
+    const dropped = A.createTask(h.store, { title: 'Dropped later', projectId: villageA.id, scheduledFor: '2026-11-14' });
+    const closed = A.createTask(h.store, { title: 'Village closed later', projectId: closedVillage.id, scheduledFor: '2026-11-15' });
+    h.setToday('2026-11-08');
+    A.moveTask(h.store, moved.id, villageB.id);
+    A.markTaskDone(h.store, completed.id);
+    A.dropTask(h.store, dropped.id);
+    A.closeProject(h.store, closedVillage.id, 'Archived village');
+    const tooNew = A.createTask(h.store, { title: 'Created after history', projectId: villageB.id, scheduledFor: '2026-11-16' });
+    h.setToday('2026-11-10');
+
+    const sheet = new SettleSheet(h.store, { brick() {}, onOpenChange() {} });
+    sheet.open('2026-11-05');
+    const html = box.innerHTML;
+    for (const task of [moved, completed, dropped, closed]) {
+      expect(html).toContain('value="' + task.id + '"');
+    }
+    expect(html).not.toContain('value="' + tooNew.id + '"');
+    expect(html).toContain('Moved early · Village A');
+    expect(html).not.toContain('Moved early · Village B');
+
+    // The UI path that previously called pullIntoDay: select + commit.
+    sheetEvent('change', { value: moved.id, matches: (s: string) => s === '[data-pull]' });
+    click('[data-act]', { dataset: { act: 'commit' } });
+    const entry = h.store.data.entries.find((item) => item.itemId === moved.id && item.date === '2026-11-05');
+    expect(entry?.projectId).toBe(villageA.id);
+    expect(entry?.outcome).toBe('done');
+    expect(h.store.task(moved.id)?.scheduledFor).toBe('2026-11-12');
+    expect(h.store.data.operations.some((operation) => operation.kind === 'task-rescheduled')).toBe(false);
+  });
+
+  it('opens today after committing an archived historical day with no pending work', () => {
+    const h = makeStore('2026-11-01', '2026-11-01');
+    const village = A.createProject(h.store, 'Village');
+    A.createTask(h.store, { title: 'Old work', projectId: village.id, scheduledFor: '2026-11-05' });
+    h.setToday('2026-11-10');
+    h.store.put('days', { date: '2026-11-05', status: 'unrecorded' });
+    const sheet = new SettleSheet(h.store, { brick() {}, onOpenChange() {} });
+    sheet.open('2026-11-05');
+    click('[data-act]', { dataset: { act: 'commit' } });
+    expect(h.store.data.days.find((day) => day.date === '2026-11-05')?.status).toBe('settled');
+    sheet.open();
+    expect(box.innerHTML).toContain('data-history-date aria-label="补结算日期" min="2026-11-01" max="2026-11-10" value="2026-11-10"');
+  });
+
+  it('defaults to the earliest pending day, not a previously viewed historical tab', () => {
+    const h = makeStore('2026-11-01', '2026-11-01');
+    const village = A.createProject(h.store, 'Village');
+    A.createTask(h.store, { title: 'Pending work', projectId: village.id, scheduledFor: '2026-11-07' });
+    h.setToday('2026-11-10');
+    const sheet = new SettleSheet(h.store, { brick() {}, onOpenChange() {} });
+    sheet.open('2026-11-05');
+    sheet.close();
+    sheet.open();
+    expect(box.innerHTML).toContain('value="2026-11-07"');
+  });
+
+  it('preserves intermediate native date edits, validates on Enter, and applies on blur', () => {
+    const { store, today } = makeStore('2026-11-10', '2026-11-01');
+    const sheet = new SettleSheet(store, { brick() {}, onOpenChange() {} });
+    sheet.open(today);
+    const html = box.innerHTML;
+    const reportValidity = vi.fn();
+    const input = {
+      value: '0002-11-05',
+      matches: (selector: string) => selector === '[data-history-date]',
+      checkValidity: () => input.value === '2026-11-05',
+      reportValidity,
+      focus: vi.fn(),
+    };
+
+    sheetEvent('change', input);
+    expect(input.value).toBe('0002-11-05');
+    expect(box.innerHTML).toBe(html);
+    const key = sheetEvent('keydown', input, 'Enter');
+    expect(key.defaultPrevented).toBe(true);
+    expect(reportValidity).toHaveBeenCalledOnce();
+    expect(input.value).toBe('0002-11-05');
+
+    sheetEvent('focusout', input);
+    expect(input.value).toBe(today);
+    expect(box.innerHTML).toBe(html);
+
+    input.value = '2026-11-05';
+    sheetEvent('change', input);
+    expect(box.innerHTML).toBe(html);
+    sheetEvent('focusout', input);
+    expect(box.innerHTML).toContain('value="2026-11-05"');
+  });
+});

@@ -9,6 +9,7 @@ import { $, esc, toast } from './dom';
 import { roofOf } from './scene';
 import * as A from '../actions';
 import { itemsForDay, pendingDays, type SettleItem } from '../logic/days';
+import { taskStates } from '../logic/read-model';
 import { fmtDay, isPlausibleDate, relDay, weekday } from '../lib/date';
 import { t, type MessageKey } from '../i18n';
 import { isTopLayer, popLayer, pushLayer } from './layer';
@@ -51,6 +52,8 @@ export class SettleSheet {
   constructor(private store: Store, private hooks: SettleHooks) {
     this.box.addEventListener('click', (e) => this.onClick(e));
     this.box.addEventListener('change', (e) => this.onChange(e));
+    this.box.addEventListener('focusout', (e) => this.onFocusOut(e));
+    this.box.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.box.addEventListener('pointerdown', (e) => this.onDown(e));
     this.box.addEventListener('pointermove', (e) => this.onMove(e));
     this.box.addEventListener('pointerup', (e) => this.onUp(e));
@@ -85,8 +88,10 @@ export class SettleSheet {
   }
 
   open(date?: ISODate) {
-    const days = this.days();
-    this.date = date && this.validDate(date) ? date : days[0];
+    // The normal review action should never inherit a previously selected
+    // archived/settled date; only an explicit open(date) uses history.
+    const firstPending = pendingDays(this.store.data, this.store.today())[0];
+    this.date = date && this.validDate(date) ? date : (firstPending ?? this.store.today());
     const opening = !this.isOpen();
     $('settle').hidden = false;
     pushLayer($('settle'));
@@ -123,14 +128,16 @@ export class SettleSheet {
     return d;
   }
 
-  private items(): SettleItem[] {
+  private items(historicalTasks = taskStates(this.store.data, this.date)): SettleItem[] {
     const base = itemsForDay(this.store.data, this.date);
     const have = new Set(base.map((it) => it.key));
+    const byId = new Map(historicalTasks.map((task) => [task.id, task] as const));
     for (const id of this.pulled.get(this.date) ?? []) {
-      const t = this.store.task(id);
+      const task = byId.get(id);
       const key = `task|${id}`;
-      if (!t || t.status !== 'open' || !t.projectId || have.has(key)) continue;
-      base.push({ key, type: 'task', id, title: t.title, projectId: t.projectId });
+      if (!task || task.status !== 'open' || !task.projectId || have.has(key)) continue;
+      // Snapshot the village as it was on the reviewed day, not today.
+      base.push({ key, type: 'task', id, title: task.title, projectId: task.projectId });
     }
     return base;
   }
@@ -141,7 +148,8 @@ export class SettleSheet {
     const today = s.today();
     const days = this.days();
     if (!days.includes(this.date)) this.date = days[0];
-    const items = this.items();
+    const historicalTasks = taskStates(s.data, this.date);
+    const items = this.items(historicalTasks);
     const d = this.draft();
     const settled = s.data.days.find((x) => x.date === this.date)?.status === 'settled';
     const confirmed = items.filter((it) => d.has(it.key)).length;
@@ -149,7 +157,17 @@ export class SettleSheet {
 
     const tabs = days.map((x) => `<button type="button" data-day="${x}" class="${x === this.date ? 'on' : ''}" aria-pressed="${x === this.date}">${esc(relDay(x, today))}${x < today ? `<small class="fog-tag">${esc(t('settle.fogTag'))}</small>` : ''}</button>`).join('');
     const cards = items.map((it) => this.card(it, d.get(it.key))).join('');
-    const extra = s.tasks().filter((t) => t.status === 'open' && t.createdAt <= this.date && t.projectId && s.project(t.projectId)?.status === 'active' && t.scheduledFor !== this.date && !this.pulled.get(this.date)?.has(t.id)).slice(0, 80);
+    const visibleKeys = new Set(items.map((item) => item.key));
+    const extra = historicalTasks.filter((task) =>
+      task.status === 'open' &&
+      task.projectId &&
+      // A village closed *after* this date was still valid historical work.
+      !!s.project(task.projectId) &&
+      s.project(task.projectId)!.createdAt <= this.date &&
+      task.scheduledFor !== this.date &&
+      !visibleKeys.has(`task|${task.id}`) &&
+      !this.pulled.get(this.date)?.has(task.id)
+    ).slice(0, 80);
     // Tasks planned for a later day stay available (doing one early is a real
     // thing to record) but are grouped apart and labelled with their planned
     // day, so tomorrow's work is not counted for this day by accident (YZ-F5).
@@ -326,13 +344,9 @@ export class SettleSheet {
 
   private onChange(e: Event) {
     const sel = e.target as HTMLSelectElement;
-    if (sel.matches('[data-history-date]')) {
-      if (this.validDate(sel.value)) {
-        this.date = sel.value;
-        this.render();
-      } else this.render();
-      return;
-    }
+    // A native date input fires change while a year is being typed in parts.
+    // Do not tear it down until the user leaves the field or presses Enter.
+    if (sel.matches('[data-history-date]')) return;
     if (!sel.matches('[data-pull]') || !sel.value) return;
     const id = sel.value;
     if (!this.pulled.has(this.date)) this.pulled.set(this.date, new Set());
@@ -341,6 +355,36 @@ export class SettleSheet {
     this.render();
     const el = this.box.querySelector<HTMLElement>(`.sitem[data-key="task|${CSS.escape(id)}"]`);
     if (el?.dataset.project) this.hooks.brick(el.dataset.project, el.querySelector('.scard')!.getBoundingClientRect());
+  }
+
+  /** Only commit a fully edited, in-range date; never accept partial years. */
+  private applyHistoryDate(input: HTMLInputElement, onEnter: boolean) {
+    if (!this.validDate(input.value) || !input.checkValidity()) {
+      if (onEnter) {
+        input.reportValidity();
+        input.focus();
+      } else {
+        // Leaving an invalid field restores the current day without touching
+        // the review or throwing away edits while the field is still active.
+        input.value = this.date;
+      }
+      return;
+    }
+    if (input.value === this.date) return;
+    this.date = input.value;
+    this.render();
+  }
+
+  private onFocusOut(e: FocusEvent) {
+    const input = e.target as HTMLInputElement;
+    if (input.matches('[data-history-date]')) this.applyHistoryDate(input, false);
+  }
+
+  private onKeyDown(e: KeyboardEvent) {
+    const input = e.target as HTMLInputElement;
+    if (e.key !== 'Enter' || !input.matches('[data-history-date]')) return;
+    e.preventDefault();
+    this.applyHistoryDate(input, true);
   }
 
   /** 「全部做了」：一次确认全部（已单独标过的例外保留） */
