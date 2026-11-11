@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { dateSelect, dateSelectRestorePlan, readDate } from '../src/ui/date-select';
+import { describe, expect, it, vi } from 'vitest';
+import { bindDateSelects, dateSelect, dateSelectRestorePlan, readDate } from '../src/ui/date-select';
 import { setLocale } from '../src/i18n';
 
 describe('shared date select', () => {
@@ -56,6 +56,20 @@ describe('shared date select', () => {
     expect(readDate({ value: '' } as HTMLSelectElement)).toBeUndefined();
     expect(readDate({ value: '2026-10-08' } as HTMLSelectElement)).toBe('2026-10-08');
     expect(readDate({ value: '0002-11-03' } as HTMLSelectElement)).toBeUndefined();
+  });
+
+  it('binds each unchanged select only once across tracker render passes', () => {
+    const sel = {
+      value: today,
+      dataset: { dateMode: 'diary' },
+      addEventListener: vi.fn(),
+    } as unknown as HTMLSelectElement;
+    const root = { querySelectorAll: () => [sel] } as unknown as ParentNode;
+    bindDateSelects(root, today);
+    bindDateSelects(root, today);
+    bindDateSelects(root, today);
+    expect(sel.addEventListener).toHaveBeenCalledTimes(1);
+    expect(sel.dataset.committedDate).toBe(today);
   });
 
   it('labels a custom date in another year with its year', () => {

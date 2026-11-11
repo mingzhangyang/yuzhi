@@ -127,7 +127,7 @@ export function openNew(
       const diaryTextArea = diaryForm.querySelector<HTMLTextAreaElement>('textarea[name=text]')!;
       const diaryDateSelect = diaryForm.querySelector<HTMLSelectElement>('select[name=date]')!;
       const persistDiaryDraft = () => {
-        const draft = { date: readDate(diaryDateSelect) ?? today, text: diaryTextArea.value };
+        const draft = { date: readDate(diaryDateSelect) ?? diaryDateSelect.dataset.committedDate ?? today, text: diaryTextArea.value };
         try {
           if (draft.text.trim()) sessionStorage.setItem(diaryDraftKey, JSON.stringify(draft));
           else sessionStorage.removeItem(diaryDraftKey);
@@ -153,7 +153,8 @@ export function openNew(
               });
               toast(task.projectId ? t('forms.taskVillageToast', { task: task.title, project: store.project(task.projectId)?.name ?? '' }) : t('forms.taskDockToast', { task: task.title }));
             } else if (form.dataset.f === 'schedule') {
-              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
+              if (!date) throw new A.ActionError('error.dateInvalid');
               const event = A.createSchedule(store, {
                 title: String(fd.get('title') ?? ''),
                 date,
@@ -163,7 +164,8 @@ export function openNew(
               });
               toast(t('forms.scheduleToast', { title: event.title }));
             } else if (form.dataset.f === 'diary') {
-              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
+              if (!date) throw new A.ActionError('error.dateInvalid');
               const entry = A.createDiary(store, {
                 date,
                 text: String(fd.get('text') ?? ''),

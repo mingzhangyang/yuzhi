@@ -877,8 +877,9 @@ export class Tracker {
           event.preventDefault();
           const form = event.currentTarget as HTMLFormElement;
           const fd = new FormData(form);
-          const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? entry.date;
+          const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
           try {
+            if (!date) throw new A.ActionError('error.dateInvalid');
             A.editDiary(s, id, { date, text: String(fd.get('text') ?? '') });
             closeModal(false);
             toast(tr('tracker.diaryNewVersionToast'));
@@ -914,8 +915,9 @@ export class Tracker {
           submitEvent.preventDefault();
           const form = submitEvent.currentTarget as HTMLFormElement;
           const fd = new FormData(form);
-          const nextDate = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? date;
+          const nextDate = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
           try {
+            if (!nextDate) throw new A.ActionError('error.dateInvalid');
             A.editSchedule(s, id, {
               title: String(fd.get('title') ?? ''),
               date: nextDate,
