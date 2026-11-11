@@ -426,8 +426,8 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
       box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) =>
         b.addEventListener('click', () => {
           closeModal(false);
-          const w = b.dataset.w as 'project' | 'demo' | 'calendar' | 'restore';
-          handlers[w]();
+          const w = b.dataset.w;
+          if (w === 'project' || w === 'demo' || w === 'calendar') handlers[w]();
         }),
       );
     },
