@@ -4,7 +4,7 @@ import { importBackupFlow } from './restore-backup';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
 import { MARKER } from './island/render/style';
-import { $, esc, pickFile, setHTML, setText, toast } from './ui/dom';
+import { $, esc, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
@@ -100,8 +100,10 @@ async function boot() {
       const button = document.getElementById(id) as HTMLButtonElement | null;
       if (button) button.disabled = readOnly;
     }
-    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="import"], #menu [data-m="demo"], #menu [data-m="calendar"]')
+    document.querySelectorAll<HTMLButtonElement>('#menu [data-m="settings"], #menu [data-m="demo"], #menu [data-m="calendar"]')
       .forEach((button) => { button.disabled = readOnly; });
+    const menuImport = document.getElementById('fileBackupMenu') as HTMLInputElement | null;
+    if (menuImport) menuImport.disabled = readOnly;
     document.body.dataset.readOnly = readOnly ? 'true' : 'false';
   };
 
@@ -696,13 +698,13 @@ async function boot() {
   }
 
   /* ---------------- 导入备份 ---------------- */
-  async function importFlow() {
+  async function importFlow(selectedFile: File) {
     // All steps after the file picker, including successful post-import work,
     // live in the exercised backup import path. Never call daily() on restore.
     await importBackupFlow({
       store,
       session,
-      pickFile: () => pickFile($('fileBackup') as HTMLInputElement),
+      pickFile: async () => selectedFile,
       confirm: (d) => confirmModal({
         title: t('main.importTitle'),
         text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }),
@@ -740,8 +742,8 @@ async function boot() {
     moreBtn.setAttribute('aria-expanded', String(open));
   };
   /** 菜单里此刻能用的项：窄屏才显示的项、只读时禁用的项都跳过 */
-  const menuItems = () => [...menu.querySelectorAll<HTMLButtonElement>('button[data-m]')]
-    .filter((b) => !b.disabled && b.offsetParent !== null);
+  const menuItems = () => [...menu.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button[data-m], #fileBackupMenu')]
+    .filter((item) => !item.disabled && item.offsetParent !== null);
   const focusMenuItem = (index: number) => {
     const items = menuItems();
     if (!items.length) return;
@@ -790,6 +792,21 @@ async function boot() {
   document.addEventListener('click', (e) => {
     if (!menu.hidden && !menu.contains(e.target as Node)) setMenuOpen(false);
   });
+  // The file control itself receives the trusted gesture. Closing this menu
+  // before the browser handles the click can suppress iOS's file chooser.
+  const menuImportInput = $<HTMLInputElement>('fileBackupMenu');
+  menuImportInput.addEventListener('click', () => { menuImportInput.value = ''; });
+  menuImportInput.addEventListener('change', () => {
+    const file = menuImportInput.files?.[0];
+    menuImportInput.value = '';
+    setMenuOpen(false);
+    moreBtn.focus({ preventScroll: true });
+    if (file && !store.isReadOnly) void importFlow(file);
+  });
+  menuImportInput.addEventListener('cancel', () => {
+    setMenuOpen(false);
+    moreBtn.focus({ preventScroll: true });
+  });
   menu.addEventListener('click', async (e) => {
     const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
     if (!m) return;
@@ -799,7 +816,6 @@ async function boot() {
     moreBtn.focus({ preventScroll: true });
     if (m === 'settings') openSettings(store, applyTheme, { exportBackup: () => void exportFlow(), exportSnapshot: () => void exportSettlementSnapshot(), autoBackup });
     else if (m === 'export') await exportFlow();
-    else if (m === 'import') await importFlow();
     else if (m === 'archive') tracker.open({ kind: 'archive' });
     else if (m === 'demo') seedDemo(store);
     else if (m === 'calendar') openCalendar(store, afterImport);
@@ -819,7 +835,7 @@ async function boot() {
       },
       // Moving into the installed Home Screen / Dock app starts from an empty
       // island; restoring is how the browser's island comes along.
-      restore: () => { void importFlow(); },
+      restore: (file) => { void importFlow(file); },
     });
   } else setTimeout(maybePrompt, 1200);
 

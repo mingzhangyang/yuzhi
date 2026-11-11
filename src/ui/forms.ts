@@ -127,7 +127,7 @@ export function openNew(
       const diaryTextArea = diaryForm.querySelector<HTMLTextAreaElement>('textarea[name=text]')!;
       const diaryDateSelect = diaryForm.querySelector<HTMLSelectElement>('select[name=date]')!;
       const persistDiaryDraft = () => {
-        const draft = { date: readDate(diaryDateSelect) ?? today, text: diaryTextArea.value };
+        const draft = { date: readDate(diaryDateSelect) ?? diaryDateSelect.dataset.committedDate ?? today, text: diaryTextArea.value };
         try {
           if (draft.text.trim()) sessionStorage.setItem(diaryDraftKey, JSON.stringify(draft));
           else sessionStorage.removeItem(diaryDraftKey);
@@ -153,7 +153,8 @@ export function openNew(
               });
               toast(task.projectId ? t('forms.taskVillageToast', { task: task.title, project: store.project(task.projectId)?.name ?? '' }) : t('forms.taskDockToast', { task: task.title }));
             } else if (form.dataset.f === 'schedule') {
-              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
+              if (!date) throw new A.ActionError('error.dateInvalid');
               const event = A.createSchedule(store, {
                 title: String(fd.get('title') ?? ''),
                 date,
@@ -163,7 +164,8 @@ export function openNew(
               });
               toast(t('forms.scheduleToast', { title: event.title }));
             } else if (form.dataset.f === 'diary') {
-              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!) ?? today;
+              const date = readDate(form.querySelector<HTMLSelectElement>('select[name=date]')!);
+              if (!date) throw new A.ActionError('error.dateInvalid');
               const entry = A.createDiary(store, {
                 date,
                 text: String(fd.get('text') ?? ''),
@@ -394,7 +396,7 @@ export function openSettings(store: Store, applyTheme: () => void, safety: { exp
 }
 
 /** 第一次打开 */
-export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void; restore(): void }) {
+export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void; restore(file: File): void }) {
   openModal({
     kick: t('forms.welcomeKick'),
     title: t('forms.welcomeTitle'),
@@ -403,13 +405,29 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
       <button class="opt" data-w="project"><b>${esc(t('forms.welcomeProject'))}</b><span>${esc(t('forms.welcomeProjectDesc'))}</span></button>
       <button class="opt" data-w="calendar"><b>${esc(t('forms.welcomeCalendar'))}</b><span>${esc(t('forms.welcomeCalendarDesc'))}</span></button>
       <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>
-      <button class="opt" data-w="restore"><b>${esc(t('forms.welcomeRestore'))}</b><span>${esc(t('forms.welcomeRestoreDesc'))}</span></button>`,
+      <label class="opt welcome-restore">
+        <b id="welcomeRestoreTitle">${esc(t('forms.welcomeRestore'))}</b>
+        <span id="welcomeRestoreDesc">${esc(t('forms.welcomeRestoreDesc'))}</span>
+        <input type="file" data-welcome-restore accept=".json,application/json"
+          aria-labelledby="welcomeRestoreTitle" aria-describedby="welcomeRestoreDesc">
+      </label>`,
     mount(box) {
+      // The real file input receives the trusted pointer/keyboard gesture.
+      // Keep the welcome modal mounted until a file was actually selected.
+      const restoreInput = box.querySelector<HTMLInputElement>('input[data-welcome-restore]')!;
+      restoreInput.addEventListener('click', () => { restoreInput.value = ''; });
+      restoreInput.addEventListener('change', () => {
+        const file = restoreInput.files?.[0];
+        restoreInput.value = '';
+        if (!file) return;
+        closeModal(false);
+        handlers.restore(file);
+      });
       box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) =>
         b.addEventListener('click', () => {
           closeModal(false);
-          const w = b.dataset.w as 'project' | 'demo' | 'calendar' | 'restore';
-          handlers[w]();
+          const w = b.dataset.w;
+          if (w === 'project' || w === 'demo' || w === 'calendar') handlers[w]();
         }),
       );
     },

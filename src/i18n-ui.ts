@@ -21,6 +21,7 @@ export const uiZh = {
   'dateSelect.nextMonday': '下周一（{date}）',
   'dateSelect.other': '其他日期…',
   'dateSelect.aria': '选择日期',
+  'dateSelect.apply': '使用此日期',
   'dateSelect.weekLater': '一周后',
   'dateSelect.orPick': '或者选一天',
 
@@ -328,6 +329,7 @@ export const uiEn: Record<UiMessageKey, string> = {
   'dateSelect.nextMonday': 'Next Monday ({date})',
   'dateSelect.other': 'Other date…',
   'dateSelect.aria': 'Choose date',
+  'dateSelect.apply': 'Use date',
   'dateSelect.weekLater': 'In one week',
   'dateSelect.orPick': 'Or choose a date',
 
