@@ -100,7 +100,7 @@ try {
     // offered right on the welcome screen.
     let welcomeRestore = false;
     await openApp(page, async () => {
-      welcomeRestore = await page.locator('#mdl [data-w="restore"]').isVisible();
+      welcomeRestore = await page.locator('#mdl input[data-welcome-restore]').isVisible();
     });
     assert(welcomeRestore, 'welcome screen does not offer restoring from a backup');
 
