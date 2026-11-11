@@ -64,15 +64,27 @@ try {
     if (!(input instanceof HTMLInputElement)) throw new Error('native task date input missing');
     input.value = '';
     input.dispatchEvent(new Event('blur'));
+    const persistedOnBlur = {
+      value: select.value,
+      hidden: select.hidden,
+      nativeInputPresent: input.isConnected,
+    };
+    const cancel = form?.querySelector('.date-picker-editor button:not(.date-picker-apply)');
+    if (!(cancel instanceof HTMLButtonElement)) throw new Error('task date Cancel button missing');
+    cancel.click();
 
     return {
+      persistedOnBlur,
       value: select.value,
       visible: !select.hidden,
       nativeInputRemoved: !input.isConnected,
     };
   });
   assert(
-    taskDateAfterCancel.value === ''
+    taskDateAfterCancel.persistedOnBlur.value === 'other'
+      && taskDateAfterCancel.persistedOnBlur.hidden
+      && taskDateAfterCancel.persistedOnBlur.nativeInputPresent
+      && taskDateAfterCancel.value === ''
       && taskDateAfterCancel.visible
       && taskDateAfterCancel.nativeInputRemoved,
     `canceling custom task date changed the committed value: ${JSON.stringify(taskDateAfterCancel)}`,
@@ -178,9 +190,14 @@ try {
     if (!(firstPicker instanceof HTMLInputElement)) throw new Error('custom date picker missing');
     firstPicker.value = customDate;
     firstPicker.dispatchEvent(new Event('change', { bubbles: true }));
-    // change alone is not a commit (typing a year fires it once per digit);
-    // leaving the field is. A real click on the language button blurs first.
+    // Neither change nor blur commits a custom date. Confirm it explicitly
+    // before the locale redraw so the committed selection can be restored.
     firstPicker.dispatchEvent(new Event('blur'));
+    if (!firstPicker.isConnected || !select.hidden) throw new Error('date picker closed on blur');
+    const firstApply = form?.querySelector('.date-picker-editor .date-picker-apply');
+    if (!(firstApply instanceof HTMLButtonElement)) throw new Error('project date Use date button missing');
+    firstApply.click();
+    if (select.value !== customDate) throw new Error('project custom date was not committed');
 
     const languageButton = document.getElementById('langBtn');
     if (!(languageButton instanceof HTMLButtonElement)) throw new Error('language button missing');
@@ -204,8 +221,17 @@ try {
     }
     secondPicker.value = '';
     secondPicker.dispatchEvent(new Event('blur'));
+    const persistedOnBlur = {
+      value: rebuilt.value,
+      hidden: rebuilt.hidden,
+      nativeInputPresent: secondPicker.isConnected,
+    };
+    const secondCancel = document.querySelector('form[data-form="ptask"] .date-picker-editor button:not(.date-picker-apply)');
+    if (!(secondCancel instanceof HTMLButtonElement)) throw new Error('project date Cancel button missing');
+    secondCancel.click();
 
     const afterCancel = {
+      persistedOnBlur,
       value: rebuilt.value,
       committed: rebuilt.dataset.committedDate,
       visible: !rebuilt.hidden,
@@ -230,7 +256,10 @@ try {
     `locale redraw lost the custom project-task date: ${JSON.stringify(customDateAcrossLocale)}`,
   );
   assert(
-    customDateAcrossLocale.afterCancel.value === customDateAcrossLocale.restored.customDate
+    customDateAcrossLocale.afterCancel.persistedOnBlur.value === 'other'
+      && customDateAcrossLocale.afterCancel.persistedOnBlur.hidden
+      && customDateAcrossLocale.afterCancel.persistedOnBlur.nativeInputPresent
+      && customDateAcrossLocale.afterCancel.value === customDateAcrossLocale.restored.customDate
       && customDateAcrossLocale.afterCancel.committed === customDateAcrossLocale.restored.customDate
       && customDateAcrossLocale.afterCancel.visible
       && customDateAcrossLocale.afterCancel.nativeInputRemoved,
@@ -274,10 +303,13 @@ try {
     const next = new Date(Date.UTC(year, month - 1, day + 1));
     const future = next.toISOString().slice(0, 10);
 
-    // Leaving the field is the commit point; an invalid value must not escape.
+    // Even an explicit Use date cannot commit a date past the diary's max.
     input.value = future;
     input.dispatchEvent(new Event('change', { bubbles: true }));
     input.dispatchEvent(new Event('blur'));
+    const apply = form?.querySelector('.date-picker-editor .date-picker-apply');
+    if (!(apply instanceof HTMLButtonElement)) throw new Error('diary date Use date button missing');
+    apply.click();
 
     const rejected = {
       future,
@@ -291,6 +323,7 @@ try {
     input.value = today;
     input.dispatchEvent(new Event('change', { bubbles: true }));
     input.dispatchEvent(new Event('blur'));
+    apply.click();
 
     return {
       ...rejected,
