@@ -52,15 +52,15 @@ describe('shared date select', () => {
   });
 
   it('preserves the last confirmed Tracker date across language redraws with a pending picker', () => {
-    const pendingDate = { value: 'other', dataset: { committedDate: '2026-10-08' } } as unknown as HTMLSelectElement;
+    const pendingDate = { value: 'other', dataset: { committedDate: '2026-10-08' } };
     const restoredValue = draftDateSelectValue(pendingDate);
     expect(restoredValue).toBe('2026-10-08');
     expect(dateSelectRestorePlan(['', today, 'other'], restoredValue)).toEqual({
       addOption: true,
       committedValue: '2026-10-08',
     });
-    expect(draftDateSelectValue({ value: 'other', dataset: { committedDate: '' } } as HTMLSelectElement)).toBe('');
-    expect(draftDateSelectValue({ value: today, dataset: {} } as HTMLSelectElement)).toBe(today);
+    expect(draftDateSelectValue({ value: 'other', dataset: { committedDate: '' } })).toBe('');
+    expect(draftDateSelectValue({ value: today, dataset: {} })).toBe(today);
   });
 
   it('treats the native picker sentinel as no committed date', () => {
