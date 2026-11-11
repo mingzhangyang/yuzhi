@@ -21,7 +21,7 @@ import { stageLifeEntries } from '../logic/decay';
 import { interruptions, lastProgressAt, type TaskView } from '../logic/read-model';
 import { summaryHTML } from './ceremony';
 import { cultivationAreas, cultivationState } from '../logic/cultivation';
-import { bindDateSelects, dateSelect, readDate, restoreDateSelectValue } from './date-select';
+import { bindDateSelects, dateSelect, draftDateSelectValue, readDate, restoreDateSelectValue } from './date-select';
 import { BottomSheet } from './sheet';
 import { ICON } from './icons';
 import { MARKER } from '../island/render/style';
@@ -128,6 +128,11 @@ export class Tracker {
         }
         if (control instanceof HTMLSelectElement && control.multiple) {
           return { key, value: control.value, selected: [...control.options].filter((option) => option.selected).map((option) => option.value) };
+        }
+        if (control instanceof HTMLSelectElement && control.hasAttribute('data-date-select')) {
+          // "other" means a native editor is still pending; preserve only its
+          // last confirmed date when a locale change rebuilds this form.
+          return { key, value: draftDateSelectValue(control) };
         }
         return { key, value: control.value };
       });

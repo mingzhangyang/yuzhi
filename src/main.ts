@@ -4,7 +4,7 @@ import { importBackupFlow } from './restore-backup';
 import { AppSession } from './app-session';
 import { IslandRenderer, type SceneryInspection, type Selection } from './island/render';
 import { MARKER } from './island/render/style';
-import { $, esc, pickFile, setHTML, setText, toast } from './ui/dom';
+import { $, esc, setHTML, setText, toast } from './ui/dom';
 import { closeModal, confirmModal, initModal, isModalOpen } from './ui/modal';
 import { buildStats, updateStats } from './ui/stats';
 import { Tracker, abandonPrompt, type View } from './ui/tracker';
@@ -698,13 +698,13 @@ async function boot() {
   }
 
   /* ---------------- 导入备份 ---------------- */
-  async function importFlow(selectedFile?: File) {
+  async function importFlow(selectedFile: File) {
     // All steps after the file picker, including successful post-import work,
     // live in the exercised backup import path. Never call daily() on restore.
     await importBackupFlow({
       store,
       session,
-      pickFile: selectedFile ? async () => selectedFile : () => pickFile($('fileBackup') as HTMLInputElement),
+      pickFile: async () => selectedFile,
       confirm: (d) => confirmModal({
         title: t('main.importTitle'),
         text: t('main.importBody', { projects: d.projects.length, tasks: d.tasks.length, entries: d.entries.length }),
@@ -835,7 +835,7 @@ async function boot() {
       },
       // Moving into the installed Home Screen / Dock app starts from an empty
       // island; restoring is how the browser's island comes along.
-      restore: () => { void importFlow(); },
+      restore: (file) => { void importFlow(file); },
     });
   } else setTimeout(maybePrompt, 1200);
 

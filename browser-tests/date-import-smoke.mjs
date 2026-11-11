@@ -17,7 +17,16 @@ try {
   await page.addInitScript(() => { HTMLInputElement.prototype.showPicker = () => {}; });
   await page.goto(baseURL);
   await page.waitForFunction(() => window.yuzhi?.store && !window.yuzhi.store.isReadOnly);
-  if (await page.locator('#mdl').isVisible()) await page.locator('#mdl [data-close]').first().click();
+  // First-run restore must open the chooser without removing the welcome modal.
+  const welcomeRestore = page.locator('#mdl input[data-welcome-restore]');
+  assert.equal(await welcomeRestore.count(), 1, 'welcome restore does not offer a direct file control');
+  const welcomeChooserPromise = page.waitForEvent('filechooser');
+  await welcomeRestore.click();
+  const welcomeChooser = await welcomeChooserPromise;
+  assert.equal(await page.locator('#mdl').isVisible(), true, 'welcome closed before file selection');
+  await welcomeChooser.setFiles({ name: 'invalid-welcome.json', mimeType: 'application/json', buffer: Buffer.from('{"format":"invalid"}') });
+  await page.waitForFunction(() => document.getElementById('toast')?.textContent?.includes('不是屿志的备份文件'));
+  assert.equal(await page.locator('#mdl').isVisible(), false, 'welcome did not close after file selection');
 
   await page.locator('#newBtn').click();
   await page.locator('#mdl [data-k="diary"]').click();
@@ -48,6 +57,24 @@ try {
   await task.locator('.date-picker-editor button:not(.date-picker-apply)').click();
   assert.equal(await task.locator('select[data-date-select]').inputValue(), '', 'cancel did not restore undated task');
   await page.locator('#mdl [data-close]').first().click();
+
+  // Switching locale while "Other date" is pending must not erase a task's
+  // previously committed scheduled date when the Tracker form is saved.
+  const taskId = await page.evaluate((scheduledFor) => {
+    const { store, actions, tracker } = window.yuzhi;
+    const created = actions.createTask(store, { title: 'YZ-F13 locale redraw', scheduledFor });
+    tracker.open({ kind: 'task', id: created.id });
+    return created.id;
+  }, pastDate);
+  const planForm = page.locator('#trackerBody form[data-form="tedit"]');
+  await planForm.locator('select[name="tdate"]').selectOption('other');
+  await page.locator('#trackerBody .date-picker-editor input[type="date"]').fill(today);
+  await page.locator('#langBtn').click();
+  assert.equal(await planForm.locator('select[name="tdate"]').inputValue(), pastDate,
+    'locale switch discarded the previously committed task date');
+  await planForm.locator('button').click();
+  await page.waitForFunction(({ id, date }) => window.yuzhi.store.task(id)?.scheduledFor === date,
+    { id: taskId, date: pastDate });
 
   await page.locator('#moreBtn').click();
   const chooserPromise = page.waitForEvent('filechooser');

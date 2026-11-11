@@ -46,6 +46,11 @@ export function readDate(sel: HTMLSelectElement): ISODate | undefined {
   return isPlausibleDate(sel.value) ? sel.value : undefined;
 }
 
+/** A pending "Other date" picker is not a committed value for redraw drafts. */
+export function draftDateSelectValue(sel: Pick<HTMLSelectElement, 'value' | 'dataset'>): string {
+  return sel.value === 'other' ? (sel.dataset.committedDate ?? '') : sel.value;
+}
+
 export interface DateSelectRestorePlan {
   addOption: boolean;
   committedValue: string;
@@ -73,7 +78,7 @@ export function restoreDateSelectValue(sel: HTMLSelectElement, value: string): v
     const other = [...sel.options].find((candidate) => candidate.value === 'other') ?? null;
     sel.insertBefore(option, other);
   }
-  sel.value = value;
+  sel.value = plan.committedValue;
   sel.dataset.committedDate = plan.committedValue;
 }
 

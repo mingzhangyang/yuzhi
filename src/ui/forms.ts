@@ -396,7 +396,7 @@ export function openSettings(store: Store, applyTheme: () => void, safety: { exp
 }
 
 /** 第一次打开 */
-export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void; restore(): void }) {
+export function openWelcome(handlers: { project(): void; demo(): void; calendar(): void; restore(file: File): void }) {
   openModal({
     kick: t('forms.welcomeKick'),
     title: t('forms.welcomeTitle'),
@@ -405,8 +405,24 @@ export function openWelcome(handlers: { project(): void; demo(): void; calendar(
       <button class="opt" data-w="project"><b>${esc(t('forms.welcomeProject'))}</b><span>${esc(t('forms.welcomeProjectDesc'))}</span></button>
       <button class="opt" data-w="calendar"><b>${esc(t('forms.welcomeCalendar'))}</b><span>${esc(t('forms.welcomeCalendarDesc'))}</span></button>
       <button class="opt" data-w="demo"><b>${esc(t('forms.welcomeDemo'))}</b><span>${esc(t('forms.welcomeDemoDesc'))}</span></button>
-      <button class="opt" data-w="restore"><b>${esc(t('forms.welcomeRestore'))}</b><span>${esc(t('forms.welcomeRestoreDesc'))}</span></button>`,
+      <label class="opt welcome-restore">
+        <b id="welcomeRestoreTitle">${esc(t('forms.welcomeRestore'))}</b>
+        <span id="welcomeRestoreDesc">${esc(t('forms.welcomeRestoreDesc'))}</span>
+        <input type="file" data-welcome-restore accept=".json,application/json"
+          aria-labelledby="welcomeRestoreTitle" aria-describedby="welcomeRestoreDesc">
+      </label>`,
     mount(box) {
+      // The real file input receives the trusted pointer/keyboard gesture.
+      // Keep the welcome modal mounted until a file was actually selected.
+      const restoreInput = box.querySelector<HTMLInputElement>('input[data-welcome-restore]')!;
+      restoreInput.addEventListener('click', () => { restoreInput.value = ''; });
+      restoreInput.addEventListener('change', () => {
+        const file = restoreInput.files?.[0];
+        restoreInput.value = '';
+        if (!file) return;
+        closeModal(false);
+        handlers.restore(file);
+      });
       box.querySelectorAll<HTMLElement>('[data-w]').forEach((b) =>
         b.addEventListener('click', () => {
           closeModal(false);
